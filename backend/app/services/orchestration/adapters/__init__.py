@@ -12,6 +12,7 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalVoiceEvent,
     CanonicalVoiceRequest,
     CanonicalVoiceResponse,
+    VariableSurface,
 )
 from app.services.orchestration.adapters.protocol import (
     EventSourceAdapter,
@@ -67,6 +68,7 @@ __all__ = [
     "CanonicalVoiceResponse",
     "EventSourceAdapter",
     "MessagingAdapter",
+    "VariableSurface",
     "VoiceAdapter",
     "capability_for_vendor",
     "register_adapter",

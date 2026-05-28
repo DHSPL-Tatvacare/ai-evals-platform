@@ -82,6 +82,9 @@ export interface AgentVariablesResponse {
   prompt: string;
   /** Agent welcome message; empty string when unavailable. */
   welcomeMessage: string;
+  /** Rendered template body, empty when unavailable. */
+  body: string;
+  bodyOriginal: string | null;
   /** Soft, user-facing message when the upstream provider couldn't be
    *  queried (e.g. agent id unknown, transient transport error). The
    *  endpoint stays at HTTP 200 in that case so the picker keeps working;

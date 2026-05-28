@@ -1,6 +1,6 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment } from 'react';
 
-import { useWatiTemplates } from '@/features/orchestration/queries/referenceData';
+import { useTemplateIntrospection } from '@/features/orchestration/queries/referenceData';
 import type { VariableMapping } from '@/features/orchestration/components/VariableMappingField';
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
   variableMappings: VariableMapping[];
 }
 
-const PLACEHOLDER_RE = /\{\{(\d+)\}\}/g;
+const PLACEHOLDER_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
 /** Human-readable chip text for the mapping bound to a template parameter. */
 function chipLabel(mapping: VariableMapping | undefined): string | null {
@@ -47,28 +47,27 @@ function EmptyState({ message }: { message: string }) {
 }
 
 export function TemplateMessagePreview({ connectionId, templateName, variableMappings }: Props) {
-  const { data } = useWatiTemplates(connectionId);
+  const { data } = useTemplateIntrospection(connectionId, templateName);
 
-  const template = useMemo(() => {
-    if (!templateName) return null;
-    return (data?.items ?? []).find((t) => t.name === templateName) ?? null;
-  }, [data, templateName]);
+  const parameters = data?.variables ?? [];
 
-  // Chip for a 1-based placeholder index → its parameter name → bound mapping.
-  const chipFor = (oneBasedIndex: number) => {
-    const paramName = template?.parameters[oneBasedIndex - 1];
-    const mapping = paramName
-      ? variableMappings.find((m) => m.agent_variable === paramName)
+  const chipForName = (name: string | undefined) => {
+    const mapping = name
+      ? variableMappings.find((m) => m.agent_variable === name)
       : undefined;
     const label = chipLabel(mapping);
     return label ? <BindingChip label={label} /> : <NotSetChip />;
   };
+  // Resolve a placeholder token — positional ("1") via the ordered parameter
+  // list, or named ("patient name") used directly — to its bound chip.
+  const chipForToken = (token: string) =>
+    chipForName(/^\d+$/.test(token) ? parameters[Number(token) - 1] : token);
 
-  if (!connectionId || !templateName || !template) {
+  if (!connectionId || !templateName || !data) {
     return <EmptyState message="Select a template to preview the message." />;
   }
 
-  const body = template.body ?? '';
+  const body = data.body ?? '';
   const hasBody = body.trim().length > 0;
 
   return (
@@ -79,17 +78,17 @@ export function TemplateMessagePreview({ connectionId, templateName, variableMap
       <div className="min-h-0 flex-1 overflow-y-auto">
         {hasBody ? (
           <div className="rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-4 py-3 text-[13px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
-            {renderBody(body, chipFor)}
+            {renderBody(body, chipForToken)}
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {template.parameters.map((param, i) => (
+            {parameters.map((param, i) => (
               <div
                 key={`${param}-${i}`}
                 className="flex items-center gap-2 rounded-[var(--radius-default)] border border-[var(--border-subtle)] px-2.5 py-2 text-sm"
               >
                 <span className="font-mono text-[var(--text-primary)]">{param}</span>
-                <span className="ml-auto">{chipFor(i + 1)}</span>
+                <span className="ml-auto">{chipForName(param)}</span>
               </div>
             ))}
           </div>
@@ -99,8 +98,8 @@ export function TemplateMessagePreview({ connectionId, templateName, variableMap
   );
 }
 
-/** Split the body on positional {{n}} placeholders, interleaving text + chips. */
-function renderBody(body: string, chipFor: (oneBasedIndex: number) => React.ReactNode) {
+/** Split the body on {{token}} placeholders (positional or named), interleaving text + chips. */
+function renderBody(body: string, chipForToken: (token: string) => React.ReactNode) {
   const out: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -110,7 +109,7 @@ function renderBody(body: string, chipFor: (oneBasedIndex: number) => React.Reac
     if (match.index > lastIndex) {
       out.push(<Fragment key={`t-${key}`}>{body.slice(lastIndex, match.index)}</Fragment>);
     }
-    out.push(<Fragment key={`c-${key}`}>{chipFor(Number(match[1]))}</Fragment>);
+    out.push(<Fragment key={`c-${key}`}>{chipForToken(match[1])}</Fragment>);
     lastIndex = match.index + match[0].length;
     key += 1;
   }

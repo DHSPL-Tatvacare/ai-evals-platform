@@ -68,20 +68,22 @@ describe('VariableMappingField', () => {
     );
   });
 
-  it('uses selected template parameters directly without refetching', async () => {
+  it('fetches template variables on demand when a templateName is supplied', async () => {
     render(
       <VariableMappingField
         value={[{ agent_variable: '', source_kind: 'payload', payload_field: '' }]}
         onChange={vi.fn()}
         connectionId="conn-1"
         templateName="concierge_qualify_v1"
-        templateParameters={['first_name', 'city']}
       />,
     );
 
-    await waitFor(() => {
-      expect(getAgentVariables).not.toHaveBeenCalled();
-    });
+    await waitFor(() =>
+      expect(getAgentVariables).toHaveBeenCalledWith('conn-1', {
+        agentId: undefined,
+        templateName: 'concierge_qualify_v1',
+      }),
+    );
   });
 
   it('clears stale source-specific fields when switching source kind', async () => {

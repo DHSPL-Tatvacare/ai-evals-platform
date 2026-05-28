@@ -1,5 +1,3 @@
-import { useEffect } from 'react';
-
 import { Button } from '@/components/ui/Button';
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
@@ -9,7 +7,6 @@ import type {
   AttemptPolicy,
   StructuredRequestBody,
 } from '@/features/orchestration/types';
-import { useWatiTemplates } from '@/features/orchestration/queries/referenceData';
 
 import {
   InspectorCard,
@@ -28,10 +25,6 @@ import {
   VariableMappingField,
   type VariableMapping,
 } from './VariableMappingField';
-import {
-  reconcileVariableMappingsToParameters,
-  variableMappingsEqual,
-} from './mappingStateUtils';
 
 interface JsonSchemaProperty {
   type?: string;
@@ -109,39 +102,7 @@ export function DynamicConfigForm({
   payloadFieldOptions,
 }: Props) {
   const properties = schema?.properties ?? {};
-  const variableMappingFieldKey = Object.entries(properties).find(
-    ([, prop]) => prop['x-type'] === 'variable_mapping_list',
-  )?.[0];
   const required = new Set(schema.required ?? []);
-  // Derive template parameters from the TQ cache so the variable-mapping
-  // editor rebuilds its slot list when a new template is selected.
-  const { data: watiTemplates } = useWatiTemplates(connectionIdForVariables);
-  const matchedWatiTemplate = templateNameForVariables
-    ? (watiTemplates?.items.find((t) => t.name === templateNameForVariables) ?? null)
-    : null;
-  const templateParametersForVariables = matchedWatiTemplate?.parameters;
-
-  useEffect(() => {
-    if (!variableMappingFieldKey || !templateParametersForVariables) {
-      return;
-    }
-    const currentMappings = Array.isArray(value[variableMappingFieldKey])
-      ? (value[variableMappingFieldKey] as VariableMapping[])
-      : [];
-    const nextMappings = reconcileVariableMappingsToParameters(
-      currentMappings,
-      templateParametersForVariables,
-    );
-    if (variableMappingsEqual(currentMappings, nextMappings)) {
-      return;
-    }
-    onChange({ ...value, [variableMappingFieldKey]: nextMappings });
-  }, [
-    onChange,
-    templateParametersForVariables,
-    value,
-    variableMappingFieldKey,
-  ]);
 
   if (!schema?.properties) return null;
 
@@ -179,7 +140,6 @@ export function DynamicConfigForm({
               connectionIdForVariables={connectionIdForVariables}
               agentIdForVariables={agentIdForVariables}
               templateNameForVariables={templateNameForVariables}
-              templateParametersForVariables={templateParametersForVariables}
               payloadFieldOptions={payloadFieldOptions}
             />
           </InspectorField>
@@ -212,7 +172,6 @@ interface FieldRendererProps {
   connectionIdForVariables?: string;
   agentIdForVariables?: string;
   templateNameForVariables?: string;
-  templateParametersForVariables?: string[];
   payloadFieldOptions?: string[];
 }
 
@@ -229,7 +188,6 @@ function FieldRenderer({
   connectionIdForVariables,
   agentIdForVariables,
   templateNameForVariables,
-  templateParametersForVariables,
   payloadFieldOptions,
 }: FieldRendererProps) {
   // Specialised x-type renderers run before the generic type/enum
@@ -341,7 +299,6 @@ function FieldRenderer({
         connectionId={connectionIdForVariables}
         agentId={agentIdForVariables}
         templateName={templateNameForVariables}
-        templateParameters={templateParametersForVariables}
         payloadFieldOptions={payloadFieldOptions}
       />
     );

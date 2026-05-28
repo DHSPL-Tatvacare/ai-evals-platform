@@ -26,6 +26,7 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalMessagingEvent,
     CanonicalSendRequest,
     CanonicalSendResponse,
+    VariableSurface,
 )
 from app.services.orchestration.dispatch.bag import bag_write
 
@@ -201,47 +202,24 @@ def _parameter_quality(parameters: list[str]) -> tuple[int, int]:
     return (2 if has_named else 1, len(parameters))
 
 
-def _extract_template_parameters(candidate: dict[str, Any]) -> list[str]:
-    """Extract ordered placeholder names from a WATI template candidate."""
-    import re as _re
-    for key in ("parameters", "placeholders", "variables", "customParams"):
-        value = candidate.get(key)
-        if isinstance(value, list) and value:
-            names: list[str] = []
-            for item in value:
-                if isinstance(item, str):
-                    names.append(item)
-                elif isinstance(item, dict):
-                    name = (
-                        item.get("name") or item.get("paramName")
-                        or item.get("key") or item.get("id")
-                    )
-                    if isinstance(name, str) and name:
-                        names.append(name)
-            if names:
-                return names
-    # Scan component bodies for {{N}} positional placeholders.
-    body_strings: list[str] = []
-    components = candidate.get("components")
-    if isinstance(components, list):
-        for component in components:
-            if isinstance(component, dict):
-                text = component.get("text") or component.get("body")
-                if isinstance(text, str):
-                    body_strings.append(text)
-    for legacy in ("body", "text", "message"):
-        v = candidate.get(legacy)
-        if isinstance(v, str):
-            body_strings.append(v)
-    numbers: list[str] = []
-    seen: set[str] = set()
-    for body in body_strings:
-        for m in _re.finditer(r"\{\{(\d+)\}\}", body):
-            n = m.group(1)
-            if n not in seen:
-                seen.add(n)
-                numbers.append(n)
-    return sorted(numbers, key=int)
+def extract_variables(candidate: dict[str, Any]) -> VariableSurface:
+    """WATI's variable surface. Variable names come from ``customParams`` — WATI's
+    source of truth (empty means the template has no variables; we send it as-is).
+    The body is surfaced for preview."""
+    custom = candidate.get("customParams")
+    names = (
+        [
+            item["paramName"]
+            for item in custom
+            if isinstance(item, dict)
+            and isinstance(item.get("paramName"), str)
+            and item["paramName"]
+        ]
+        if isinstance(custom, list)
+        else []
+    )
+    body, body_original = _extract_template_body(candidate)
+    return VariableSurface(variables=names, body=body, body_original=body_original)
 
 
 def _extract_template_body(candidate: dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -283,14 +261,14 @@ def _normalize_template_candidate(candidate: dict[str, Any]) -> Optional[dict[st
         language = (
             language.get("value") or language.get("key") or language.get("text") or ""
         )
-    body, body_original = _extract_template_body(candidate)
+    surface = extract_variables(candidate)
     return {
         "name": str(name),
         "language": str(language or ""),
         "status": str(candidate.get("status") or candidate.get("templateStatus") or ""),
-        "parameters": _extract_template_parameters(candidate),
-        "body": body,
-        "body_original": body_original,
+        "parameters": surface.variables,
+        "body": surface.body,
+        "body_original": surface.body_original,
     }
 
 
@@ -716,5 +694,5 @@ __all__ = [
     "resolve_wati_api_endpoint",
     "_extract_template_candidates",
     "_normalize_template_candidate",
-    "_extract_template_parameters",
+    "extract_variables",
 ]

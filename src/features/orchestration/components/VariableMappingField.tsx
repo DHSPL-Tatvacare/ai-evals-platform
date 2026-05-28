@@ -9,10 +9,7 @@ import { cn } from '@/utils';
 import {
   InspectorEmptyState,
 } from './inspector/InspectorPrimitives';
-import {
-  normalizeSourceKindMappingRow,
-  reconcileVariableMappingsToParameters,
-} from './mappingStateUtils';
+import { normalizeSourceKindMappingRow } from './mappingStateUtils';
 
 export type VariableMappingSource = 'payload' | 'static';
 
@@ -34,7 +31,6 @@ interface Props {
   connectionId?: string;
   agentId?: string;
   templateName?: string;
-  templateParameters?: string[];
   /** Recipient payload keys available upstream. When non-empty, the
    *  "Recipient field" picker is a dropdown over these instead of free text;
    *  per recipient it resolves to that recipient's payload value. */
@@ -90,16 +86,9 @@ export function VariableMappingField({
   connectionId,
   agentId,
   templateName,
-  templateParameters,
   payloadFieldOptions,
 }: Props) {
-  const rows = useMemo(() => {
-    const parsed = asVariableMappings(value);
-    if (templateParameters === undefined) {
-      return parsed;
-    }
-    return reconcileVariableMappingsToParameters(parsed, templateParameters);
-  }, [value, templateParameters]);
+  const rows = useMemo(() => asVariableMappings(value), [value]);
   const fetchKey = connectionId ? `${connectionId}:${agentId ?? ''}:${templateName ?? ''}` : null;
 
   const [fetchedVars, setFetchedVars] = useState<{
@@ -108,17 +97,12 @@ export function VariableMappingField({
     error: string | null;
   } | null>(null);
   const agentVars =
-    templateParameters ??
-    (fetchKey && fetchedVars?.key === fetchKey ? fetchedVars.variables : null);
+    fetchKey && fetchedVars?.key === fetchKey ? fetchedVars.variables : null;
   const agentVarsError =
-    templateParameters !== undefined
-      ? null
-      : fetchKey && fetchedVars?.key === fetchKey
-        ? fetchedVars.error
-        : null;
+    fetchKey && fetchedVars?.key === fetchKey ? fetchedVars.error : null;
 
   useEffect(() => {
-    if (templateParameters !== undefined || !connectionId || !fetchKey) return;
+    if (!connectionId || !fetchKey) return;
     let alive = true;
     getAgentVariables(connectionId, { agentId, templateName })
       .then((res) => {
@@ -143,7 +127,7 @@ export function VariableMappingField({
     return () => {
       alive = false;
     };
-  }, [connectionId, agentId, fetchKey, templateName, templateParameters]);
+  }, [connectionId, agentId, fetchKey, templateName]);
 
   const updateRow = (idx: number, patch: Partial<VariableMapping>) => {
     onChange(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));

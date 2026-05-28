@@ -18,12 +18,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.provider_connection import ProviderConnection
+from app.services.orchestration.adapters import VariableSurface
 from app.services.orchestration.connections import crypto
 
 
 # Approved provider templates/agents are near-static — refresh is operator-driven,
 # not time-driven. Long passive TTL; the Refresh button forces a live fetch.
-_CACHE_TTL_SECONDS = 900.0  # 15 minutes
+_CACHE_TTL_SECONDS = 604800.0  # 7 days
 
 
 @dataclass(frozen=True)
@@ -273,6 +274,21 @@ async def list_connection_phone_numbers(
     return {"provider": provider, "items": items, "error": None}
 
 
+def _surface_response(
+    provider: str, surface: VariableSurface, *, error: Optional[str] = None,
+) -> dict[str, Any]:
+    """One cross-provider response shape, built from a VariableSurface."""
+    return {
+        "provider": provider,
+        "variables": surface.variables,
+        "prompt": surface.prompt,
+        "welcome_message": surface.welcome_message,
+        "body": surface.body,
+        "body_original": surface.body_original,
+        "error": error,
+    }
+
+
 async def get_agent_variables(
     db: AsyncSession,
     *,
@@ -281,7 +297,7 @@ async def get_agent_variables(
     agent_id: Optional[str] = None,
     template_name: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Return variables for a Bolna agent or WATI template. Soft-error envelope."""
+    """Return the variable surface for a Bolna agent or WATI template. Soft-error envelope."""
     row = await db.scalar(
         select(ProviderConnection).where(
             ProviderConnection.id == connection_id,
@@ -289,26 +305,23 @@ async def get_agent_variables(
         )
     )
     if row is None:
-        return {"provider": "unknown", "variables": [], "error": "Connection not found."}
+        return _surface_response("unknown", VariableSurface(), error="Connection not found.")
 
     provider = row.provider
     config = crypto.decrypt(row.config_encrypted)
 
     if provider == "bolna" and agent_id:
-        from app.services.orchestration.adapters.bolna import BolnaAdapter, BolnaServiceError, introspect_agent
+        from app.services.orchestration.adapters.bolna import (
+            BolnaAdapter,
+            BolnaServiceError,
+            extract_variables,
+        )
         adapter = BolnaAdapter()
         try:
             agent = await adapter.get_agent(config, agent_id=agent_id)
         except (BolnaServiceError, Exception) as exc:  # noqa: BLE001
-            return {"provider": "bolna", "variables": [], "prompt": "", "welcome_message": "", "error": str(exc)}
-        info = introspect_agent(agent)
-        return {
-            "provider": "bolna",
-            "variables": info["variables"],
-            "prompt": info["prompt"],
-            "welcome_message": info["welcome_message"],
-            "error": None,
-        }
+            return _surface_response("bolna", VariableSurface(), error=str(exc))
+        return _surface_response("bolna", extract_variables(agent))
 
     if provider == "wati" and template_name:
         # Shares the picker's cache + single-flight — one upstream fetch per
@@ -318,10 +331,16 @@ async def get_agent_variables(
             db, tenant_id=tenant_id, app_id=row.app_id, connection_id=connection_id,
         )
         if error and not templates:
-            return {"provider": "wati", "variables": [], "prompt": "", "welcome_message": "", "error": error}
+            return _surface_response("wati", VariableSurface(), error=error)
         match = next((t for t in templates if t["name"] == template_name), None)
         if match is None:
-            return {"provider": "wati", "variables": [], "prompt": "", "welcome_message": "", "error": f"Template {template_name!r} not found."}
-        return {"provider": "wati", "variables": match.get("parameters") or [], "prompt": "", "welcome_message": "", "error": None}
+            return _surface_response(
+                "wati", VariableSurface(), error=f"Template {template_name!r} not found.",
+            )
+        return _surface_response("wati", VariableSurface(
+            variables=match.get("parameters") or [],
+            body=match.get("body") or "",
+            body_original=match.get("body_original"),
+        ))
 
-    return {"provider": provider, "variables": [], "prompt": "", "welcome_message": "", "error": None}
+    return _surface_response(provider, VariableSurface())

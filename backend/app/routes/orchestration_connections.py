@@ -255,7 +255,7 @@ async def list_connection_agents(
     connection_id: uuid.UUID,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
-    refresh: bool = Query(False, description="Bypass the 30 s cache."),
+    refresh: bool = Query(False, description="Bypass the 7-day cache and re-fetch from the provider."),
 ):
     """Live agent listing for the Bolna picker. Soft-error contract: HTTP 200 on upstream failure."""
     row = await _load_and_gate_connection(db, auth, connection_id)
@@ -278,7 +278,7 @@ async def list_connection_templates(
     connection_id: uuid.UUID,
     auth: AuthContext = require_permission('orchestration:manage'),
     db: AsyncSession = Depends(get_db),
-    refresh: bool = Query(False, description="Bypass the 30 s cache."),
+    refresh: bool = Query(False, description="Bypass the 7-day cache and re-fetch from the provider."),
 ):
     """Live template listing for the WATI picker. Same soft-error envelope as the agents endpoint."""
     row = await _load_and_gate_connection(db, auth, connection_id)

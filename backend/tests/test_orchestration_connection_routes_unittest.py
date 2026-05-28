@@ -356,13 +356,17 @@ async def test_rotate_token_changes_webhook_url(client):
 
 @pytest.mark.asyncio
 async def test_agent_variables_route_uses_live_provider_lookup(client, monkeypatch):
-    # Bolna agent response shape: agent_config.variables is the canonical list.
+    # Real Bolna shape: variables are {token} placeholders in the prompt + the
+    # top-level welcome message; there is no declared-variables field.
     async def _fake_get_agent(self, connection, *, agent_id):
         assert agent_id == "agent-7"
         return {
             "id": agent_id,
             "agent_name": "TestAgent",
-            "agent_config": {"variables": ["user_name", "preferred_time"]},
+            "agent_welcome_message": "Hello, am I speaking with {user_name}?",
+            "agent_prompts": {
+                "task_1": {"system_prompt": "Offer a slot at {preferred_time}."},
+            },
         }
 
     monkeypatch.setattr(
@@ -377,7 +381,7 @@ async def test_agent_variables_route_uses_live_provider_lookup(client, monkeypat
     )
     assert r.status_code == 200, r.text
     assert r.json()["provider"] == "bolna"
-    assert r.json()["variables"] == ["user_name", "preferred_time"]
+    assert r.json()["variables"] == ["preferred_time", "user_name"]
 
 
 @pytest.mark.asyncio

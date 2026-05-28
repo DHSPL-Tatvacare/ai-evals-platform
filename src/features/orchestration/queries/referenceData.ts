@@ -26,7 +26,7 @@ import {
  * `{refresh: true}` arg flows through.
  */
 
-const STALE_TIME_MS = 10 * 60_000;
+const STALE_TIME_MS = 7 * 24 * 60 * 60_000;
 const GC_TIME_MS = 30 * 60_000;
 
 function watiTemplatesKey(connectionId: string) {
@@ -195,6 +195,28 @@ export function useAgentIntrospection(
       : ['orchestration', 'connection', '__disabled__', 'agent-introspection', ''],
     queryFn: () =>
       getAgentVariables(connectionId as string, { agentId: agentId as string }),
+    enabled,
+    staleTime: STALE_TIME_MS,
+    gcTime: GC_TIME_MS,
+  });
+}
+
+function templateIntrospectionKey(connectionId: string, templateName: string) {
+  return ['orchestration', 'connection', connectionId, 'template-introspection', templateName] as const;
+}
+
+/** Fetches the selected template's body and placeholder names via agent-variables endpoint. */
+export function useTemplateIntrospection(
+  connectionId: string | null | undefined,
+  templateName: string | null | undefined,
+) {
+  const enabled = Boolean(connectionId) && Boolean(templateName);
+  return useQuery<AgentVariablesResponse>({
+    queryKey: enabled
+      ? templateIntrospectionKey(connectionId as string, templateName as string)
+      : ['orchestration', 'connection', '__disabled__', 'template-introspection', ''],
+    queryFn: () =>
+      getAgentVariables(connectionId as string, { templateName: templateName as string }),
     enabled,
     staleTime: STALE_TIME_MS,
     gcTime: GC_TIME_MS,

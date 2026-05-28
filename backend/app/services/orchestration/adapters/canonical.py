@@ -11,6 +11,20 @@ from typing import Any, Optional
 
 
 @dataclass(frozen=True)
+class VariableSurface:
+    """A provider entity's variable surface — the variables it exposes plus any
+    previewable text. Each adapter exposes ``extract_variables(raw) -> VariableSurface``
+    (deriving variables its own way); the agent-variables endpoint splats this into
+    one cross-provider response shape. Fields a provider doesn't have stay empty.
+    """
+    variables: list[str] = field(default_factory=list)
+    prompt: str = ""
+    welcome_message: str = ""
+    body: str = ""
+    body_original: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class CanonicalSendRequest:
     contact: str
     template_name: str

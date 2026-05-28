@@ -1,33 +1,30 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the templates hook — no live network calls per CLAUDE.md test rules.
+// Mock the introspection hook — no live network calls per CLAUDE.md test rules.
 vi.mock('@/features/orchestration/queries/referenceData', () => ({
-  useWatiTemplates: vi.fn(() => ({ data: null })),
+  useTemplateIntrospection: vi.fn(() => ({ data: null })),
 }));
 
-import { useWatiTemplates } from '@/features/orchestration/queries/referenceData';
+import { useTemplateIntrospection } from '@/features/orchestration/queries/referenceData';
 import { TemplateMessagePreview } from '@/features/orchestration/components/preview/TemplateMessagePreview';
 import type { VariableMapping } from '@/features/orchestration/components/VariableMappingField';
 
-const mockedTemplates = useWatiTemplates as ReturnType<typeof vi.fn>;
+const mockedIntrospection = useTemplateIntrospection as ReturnType<typeof vi.fn>;
 
-function templateResponse(
-  items: Array<{ name: string; body: string; parameters: string[] }>,
-) {
+function introspectionResponse(template: { body: string; parameters: string[] } | null) {
   return {
-    data: {
-      provider: 'wati',
-      items: items.map((t) => ({
-        name: t.name,
-        language: 'en',
-        status: 'APPROVED',
-        parameters: t.parameters,
-        body: t.body,
-        bodyOriginal: null,
-      })),
-      error: null,
-    },
+    data: template
+      ? {
+          provider: 'wati',
+          variables: template.parameters,
+          prompt: '',
+          welcomeMessage: '',
+          body: template.body,
+          bodyOriginal: null,
+          error: null,
+        }
+      : null,
   };
 }
 
@@ -37,14 +34,11 @@ describe('TemplateMessagePreview', () => {
   });
 
   it('renders the body with binding chips for static and payload slots', () => {
-    mockedTemplates.mockReturnValue(
-      templateResponse([
-        {
-          name: 'welcome',
-          body: 'Hi {{1}}, your {{2}} is ready',
-          parameters: ['name', 'doc'],
-        },
-      ]),
+    mockedIntrospection.mockReturnValue(
+      introspectionResponse({
+        body: 'Hi {{1}}, your {{2}} is ready',
+        parameters: ['name', 'doc'],
+      }),
     );
     const mappings: VariableMapping[] = [
       { agent_variable: 'name', source_kind: 'static', static_value: 'Priya' },
@@ -65,15 +59,38 @@ describe('TemplateMessagePreview', () => {
     expect(screen.getByText(/first_name/)).toBeInTheDocument();
   });
 
+  it('renders named placeholders as chips, not literal {{name}} text', () => {
+    mockedIntrospection.mockReturnValue(
+      introspectionResponse({
+        body: 'Hi {{patient name}}, your {{Included plan}} is active',
+        parameters: ['patient name', 'Included plan'],
+      }),
+    );
+    const mappings: VariableMapping[] = [
+      { agent_variable: 'patient name', source_kind: 'payload', payload_field: 'first_name' },
+      { agent_variable: 'Included plan', source_kind: 'static', static_value: 'GoldCare' },
+    ];
+
+    render(
+      <TemplateMessagePreview
+        connectionId="conn-wati"
+        templateName="rnr_call"
+        variableMappings={mappings}
+      />,
+    );
+
+    expect(screen.getByText(/first_name/)).toBeInTheDocument();
+    expect(screen.getByText(/GoldCare/)).toBeInTheDocument();
+    // The named placeholder must be replaced by a chip, never rendered raw.
+    expect(screen.queryByText(/\{\{patient name\}\}/)).not.toBeInTheDocument();
+  });
+
   it('marks an unbound parameter as not set', () => {
-    mockedTemplates.mockReturnValue(
-      templateResponse([
-        {
-          name: 'welcome',
-          body: 'Hi {{1}}, your {{2}} is ready',
-          parameters: ['name', 'doc'],
-        },
-      ]),
+    mockedIntrospection.mockReturnValue(
+      introspectionResponse({
+        body: 'Hi {{1}}, your {{2}} is ready',
+        parameters: ['name', 'doc'],
+      }),
     );
     const mappings: VariableMapping[] = [
       { agent_variable: 'name', source_kind: 'static', static_value: 'Priya' },
@@ -91,10 +108,8 @@ describe('TemplateMessagePreview', () => {
   });
 
   it('falls back to a slot list when the body is empty', () => {
-    mockedTemplates.mockReturnValue(
-      templateResponse([
-        { name: 'welcome', body: '', parameters: ['name', 'doc'] },
-      ]),
+    mockedIntrospection.mockReturnValue(
+      introspectionResponse({ body: '', parameters: ['name', 'doc'] }),
     );
     const mappings: VariableMapping[] = [
       { agent_variable: 'name', source_kind: 'static', static_value: 'Priya' },
@@ -115,12 +130,8 @@ describe('TemplateMessagePreview', () => {
     expect(screen.getByText(/first_name/)).toBeInTheDocument();
   });
 
-  it('shows the empty state when no template matches', () => {
-    mockedTemplates.mockReturnValue(
-      templateResponse([
-        { name: 'other', body: 'Hi {{1}}', parameters: ['name'] },
-      ]),
-    );
+  it('shows the empty state when the template has not loaded', () => {
+    mockedIntrospection.mockReturnValue(introspectionResponse(null));
 
     render(
       <TemplateMessagePreview

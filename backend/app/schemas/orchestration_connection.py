@@ -113,6 +113,8 @@ class AgentVariablesResponse(CamelModel):
     variables: list[str]
     prompt: str = ""
     welcome_message: str = ""
+    body: str = ""
+    body_original: Optional[str] = None
     error: Optional[str] = None
 
 

@@ -51,22 +51,26 @@ _BOLNA_CONN = {
     "base_url": "https://api.bolna.ai",
 }
 
-# Verbatim-style fixture matching WATI getMessageTemplates response shape
+# Verbatim-style fixture matching WATI getMessageTemplates response shape:
+# variables live in customParams; a template with none has customParams == [].
 _WATI_TEMPLATES_PAGE: dict[str, Any] = {
     "messageTemplates": [
         {
-            "template_name": "welcome_v2",
-            "language": "en",
-            "status": "APPROVED",
-            "parameters": ["first_name", "programme_name"],
-        },
-        {
-            "template_name": "followup_30d",
+            "elementName": "welcome_v2",
             "language": {"value": "en"},
             "status": "APPROVED",
-            "components": [
-                {"text": "Hello {{1}}, your follow-up date is {{2}}.", "type": "BODY"},
+            "customParams": [
+                {"paramName": "first_name", "paramValue": "Priya"},
+                {"paramName": "programme_name", "paramValue": "GoldCare"},
             ],
+            "body": "Hi {{1}}, welcome to {{2}}.",
+        },
+        {
+            "elementName": "followup_30d",
+            "language": {"value": "en"},
+            "status": "APPROVED",
+            "customParams": [],
+            "body": "Hello, your follow-up is due.",
         },
     ]
 }
@@ -77,13 +81,17 @@ _BOLNA_AGENTS_LIST: list[dict[str, Any]] = [
     {"id": "agt_002", "agent_name": "ReminderBot", "agent_status": "active", "agent_type": "outbound"},
 ]
 
-# Verbatim fixture for Bolna GET /v2/agent/{id}
+# Verbatim fixture for Bolna GET /v2/agent/{id} — real shape: welcome at the top
+# level, prompts under agent_prompts.task_N.system_prompt, no declared-vars field.
 _BOLNA_AGENT_DETAIL: dict[str, Any] = {
     "id": "agt_001",
     "agent_name": "ConciergeV2",
-    "agent_status": "active",
+    "agent_status": "processed",
     "agent_type": "outbound",
-    "agent_config": {"variables": ["patient_name", "appointment_date"]},
+    "agent_welcome_message": "Hello, am I speaking with {patient_name}?",
+    "agent_prompts": {
+        "task_1": {"system_prompt": "Confirm {patient_name}'s {appointment_date}."},
+    },
 }
 
 
@@ -146,15 +154,15 @@ async def test_wati_list_message_templates_normalises_items():
 
     assert isinstance(items, list)
     assert len(items) == 2
-    # Named-param template
+    # customParams template → variable names from customParams
     named = next((t for t in items if t["name"] == "welcome_v2"), None)
     assert named is not None
     assert named["parameters"] == ["first_name", "programme_name"]
     assert named["status"] == "APPROVED"
-    # Component-body template: parameters extracted from {{N}} placeholders
+    # No customParams → no variables (we send the template as-is)
     body_tpl = next((t for t in items if t["name"] == "followup_30d"), None)
     assert body_tpl is not None
-    assert body_tpl["parameters"] == ["1", "2"]
+    assert body_tpl["parameters"] == []
 
 
 @pytest.mark.asyncio
@@ -196,18 +204,21 @@ def test_template_body_surfaced_from_components():
     }
     norm = _normalize_template_candidate(candidate)
     assert norm["body"] == "Hello {{1}}, your follow-up date is {{2}}."
-    # Existing positional parameter extraction is unchanged.
-    assert norm["parameters"] == ["1", "2"]
+    # No customParams on the candidate → no variables, even with {{N}} in the body.
+    assert norm["parameters"] == []
 
 
 def test_template_body_and_body_original_surfaced_from_top_level():
     from app.services.orchestration.adapters.wati import _normalize_template_candidate
 
     candidate = {
-        "template_name": "welcome_v2",
+        "elementName": "welcome_v2",
         "language": "en",
         "status": "APPROVED",
-        "parameters": ["first_name", "programme_name"],
+        "customParams": [
+            {"paramName": "first_name", "paramValue": "Priya"},
+            {"paramName": "programme_name", "paramValue": "GoldCare"},
+        ],
         "body": "Hi {{1}}, welcome to {{2}}.",
         "bodyOriginal": "Hi {{first_name}}, welcome to {{programme_name}}.",
     }
@@ -479,109 +490,100 @@ def test_voice_config_from_phone_x_type_hint():
     assert props["from_phone"].get("x-type") == "phone_number_picker"
 
 
-# ─── Bolna introspect_agent helper ────────────────────────────────────────────
+# ─── Bolna extract_variables helper ───────────────────────────────────────────
 
 
-def test_introspect_agent_extracts_tokens_from_prompt_and_welcome():
-    """Variables are {token} placeholders from system_prompt + welcome_message, sorted+deduped."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_from_prompt_and_top_level_welcome():
+    """Variables are {token} placeholders from system_prompt + the TOP-LEVEL welcome."""
+    from app.services.orchestration.adapters.bolna import extract_variables
 
     agent = {
         "agent_prompts": {
             "task_1": {"system_prompt": "Hi {name}, your {plan} is ready"},
         },
-        "agent_config": {"agent_welcome_message": "Hello {name}"},
+        "agent_welcome_message": "Hello {name}, क्या आप {city} से हैं?",
     }
-    result = introspect_agent(agent)
-    assert result["variables"] == ["name", "plan"]
-    assert "Hi {name}, your {plan} is ready" in result["prompt"]
-    assert result["welcome_message"] == "Hello {name}"
+    surface = extract_variables(agent)
+    assert surface.variables == ["city", "name", "plan"]
+    assert "Hi {name}, your {plan} is ready" in surface.prompt
+    assert surface.welcome_message == "Hello {name}, क्या आप {city} से हैं?"
 
 
-def test_introspect_agent_no_prompts_no_welcome_returns_empty():
-    """Agent with no prompts/welcome yields variables==[], prompt=='', welcome_message==''."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_no_prompts_no_welcome_returns_empty():
+    from app.services.orchestration.adapters.bolna import extract_variables
 
-    result = introspect_agent({})
-    assert result["variables"] == []
-    assert result["prompt"] == ""
-    assert result["welcome_message"] == ""
+    surface = extract_variables({})
+    assert surface.variables == []
+    assert surface.prompt == ""
+    assert surface.welcome_message == ""
 
 
-def test_introspect_agent_union_with_explicit_variables_list():
-    """Variables list from agent_config.variables is unioned with token matches, sorted+deduped."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_welcome_only_token_is_not_lost():
+    """A variable that appears ONLY in the welcome (not the prompt) is still captured —
+    the bug the old agent_config path masked."""
+    from app.services.orchestration.adapters.bolna import extract_variables
 
     agent = {
-        "agent_prompts": {
-            "task_1": {"system_prompt": "Hello {name}, welcome."},
-        },
-        "agent_config": {
-            "agent_welcome_message": "",
-            "variables": ["explicit_one"],
-        },
+        "agent_prompts": {"task_1": {"system_prompt": "No tokens here."}},
+        "agent_welcome_message": "Hello {user_name}",
     }
-    result = introspect_agent(agent)
-    assert result["variables"] == ["explicit_one", "name"]
+    assert extract_variables(agent).variables == ["user_name"]
 
 
-def test_introspect_agent_multi_task_collects_all_prompts():
-    """All task_N system_prompts are collected; prompt joins them with double newline."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_ignores_agent_config_variables():
+    """Bolna has no declared-vars field; a stray agent_config.variables is NOT a source."""
+    from app.services.orchestration.adapters.bolna import extract_variables
+
+    agent = {
+        "agent_prompts": {"task_1": {"system_prompt": "Hello {name}."}},
+        "agent_config": {"variables": ["should_be_ignored"]},
+    }
+    assert extract_variables(agent).variables == ["name"]
+
+
+def test_extract_variables_multi_task_collects_all_prompts():
+    from app.services.orchestration.adapters.bolna import extract_variables
 
     agent = {
         "agent_prompts": {
             "task_1": {"system_prompt": "Task one: {alpha}"},
             "task_2": {"system_prompt": "Task two: {beta}"},
         },
-        "agent_config": {"agent_welcome_message": ""},
     }
-    result = introspect_agent(agent)
-    assert "alpha" in result["variables"]
-    assert "beta" in result["variables"]
-    assert "Task one: {alpha}" in result["prompt"]
-    assert "Task two: {beta}" in result["prompt"]
+    surface = extract_variables(agent)
+    assert "alpha" in surface.variables
+    assert "beta" in surface.variables
+    assert "Task one: {alpha}" in surface.prompt
+    assert "Task two: {beta}" in surface.prompt
 
 
-def test_introspect_agent_deduplicates_tokens():
-    """Same token appearing in multiple prompts is counted once."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_deduplicates_tokens():
+    from app.services.orchestration.adapters.bolna import extract_variables
 
     agent = {
-        "agent_prompts": {
-            "task_1": {"system_prompt": "{name} again {name}"},
-        },
-        "agent_config": {"agent_welcome_message": "Hi {name}"},
+        "agent_prompts": {"task_1": {"system_prompt": "{name} again {name}"}},
+        "agent_welcome_message": "Hi {name}",
     }
-    result = introspect_agent(agent)
-    assert result["variables"].count("name") == 1
+    assert extract_variables(agent).variables.count("name") == 1
 
 
-def test_introspect_agent_existing_detail_fixture_stays_green():
-    """_BOLNA_AGENT_DETAIL (agent_config.variables list only) variables are still returned."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_real_detail_fixture():
+    from app.services.orchestration.adapters.bolna import extract_variables
 
-    result = introspect_agent(_BOLNA_AGENT_DETAIL)
-    # existing fixture has agent_config.variables=["patient_name","appointment_date"], no prompts
-    assert "patient_name" in result["variables"]
-    assert "appointment_date" in result["variables"]
-    assert result["prompt"] == ""
-    assert result["welcome_message"] == ""
+    surface = extract_variables(_BOLNA_AGENT_DETAIL)
+    assert surface.variables == ["appointment_date", "patient_name"]
+    assert "Confirm {patient_name}'s {appointment_date}." in surface.prompt
+    assert surface.welcome_message == "Hello, am I speaking with {patient_name}?"
 
 
-def test_introspect_agent_defensive_against_wrong_types():
-    """introspect_agent never raises on malformed/missing keys."""
-    from app.services.orchestration.adapters.bolna import introspect_agent
+def test_extract_variables_defensive_against_wrong_types():
+    """extract_variables never raises on malformed/missing keys."""
+    from app.services.orchestration.adapters.bolna import extract_variables
 
-    # agent_prompts is not a dict, agent_config.variables is not a list
-    agent = {
-        "agent_prompts": "not-a-dict",
-        "agent_config": {"variables": "also-not-a-list"},
-    }
-    result = introspect_agent(agent)
-    assert isinstance(result["variables"], list)
-    assert isinstance(result["prompt"], str)
-    assert isinstance(result["welcome_message"], str)
+    surface = extract_variables({"agent_prompts": "not-a-dict", "agent_welcome_message": 42})
+    assert isinstance(surface.variables, list)
+    assert isinstance(surface.prompt, str)
+    assert surface.welcome_message == ""
 
 
 # ─── AgentVariablesResponse schema: prompt + welcome_message fields ───────────

@@ -25,6 +25,7 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalVoiceEvent,
     CanonicalVoiceRequest,
     CanonicalVoiceResponse,
+    VariableSurface,
 )
 from app.services.orchestration.dispatch._reconciler import apply_terminal_event
 
@@ -34,18 +35,11 @@ _log = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"\{(\w+)\}")
 
 
-def introspect_agent(agent: dict) -> dict:
-    """Derive variables, prompt, and welcome_message from a raw Bolna agent dict.
-
-    Variables = sorted, de-duped union of {token} placeholders found in all
-    system_prompt strings (agent_prompts.*) and the welcome message, plus any
-    explicit strings in agent_config.variables (if it is a list).
-    Never raises — fully defensive against missing or wrong-typed keys.
-    """
+def extract_variables(agent: dict) -> VariableSurface:
+    """Bolna's variable surface. Bolna has no declared-variable field — an agent's
+    variables ARE the ``{token}`` placeholders in its system prompts and welcome
+    message, substituted at call time. Never raises on malformed input."""
     agent_prompts = agent.get("agent_prompts")
-    agent_cfg = agent.get("agent_config") or {}
-
-    # Collect system_prompt strings from all tasks
     collected_prompts: list[str] = []
     if isinstance(agent_prompts, dict):
         for task_val in agent_prompts.values():
@@ -53,29 +47,18 @@ def introspect_agent(agent: dict) -> dict:
                 sp = task_val.get("system_prompt")
                 if isinstance(sp, str) and sp:
                     collected_prompts.append(sp)
-    # Also accept a top-level system_prompt key
     top_sp = agent.get("system_prompt")
     if isinstance(top_sp, str) and top_sp:
         collected_prompts.append(top_sp)
 
     prompt = "\n\n".join(collected_prompts)
-    welcome = agent_cfg.get("agent_welcome_message") if isinstance(agent_cfg, dict) else None
+    welcome = agent.get("agent_welcome_message")
     welcome_message = welcome if isinstance(welcome, str) else ""
 
-    token_sources = prompt + "\n" + welcome_message
-    tokens: set[str] = set(_TOKEN_RE.findall(token_sources))
-
-    explicit = agent_cfg.get("variables") if isinstance(agent_cfg, dict) else None
-    if isinstance(explicit, list):
-        for v in explicit:
-            if isinstance(v, str) and v:
-                tokens.add(v)
-
-    return {
-        "variables": sorted(tokens),
-        "prompt": prompt,
-        "welcome_message": welcome_message,
-    }
+    tokens = sorted(set(_TOKEN_RE.findall(prompt + "\n" + welcome_message)))
+    return VariableSurface(
+        variables=tokens, prompt=prompt, welcome_message=welcome_message,
+    )
 
 
 class BolnaServiceError(RuntimeError):

@@ -151,3 +151,73 @@ async def test_get_agent_variables_shares_template_cache(monkeypatch):
     )
     assert out["variables"] == ["name", "documentType"]
     assert calls["n"] == 1  # reused the cache; no second upstream call
+
+
+@pytest.mark.asyncio
+async def test_get_agent_variables_wati_returns_template_body(monkeypatch):
+    """The WATI branch surfaces body/body_original so the FE preview shares this endpoint."""
+    templates = [
+        {
+            "name": "plan_summary",
+            "parameters": ["patient name", "Included plan"],
+            "body": "Hi {{1}}, plan {{2}}",
+            "body_original": "Hi {{patient name}}, plan {{Included plan}}",
+        }
+    ]
+
+    async def _impl(self, connection):  # noqa: ARG001
+        return list(templates)
+
+    _patch(monkeypatch, fetch_impl=_impl)
+    cid = uuid.uuid4()
+    tid = uuid.uuid4()
+
+    class _Row:
+        provider = "wati"
+        app_id = "inside-sales"
+        config_encrypted = b""
+
+    async def _scalar(_stmt):
+        return _Row()
+
+    monkeypatch.setattr(pl.crypto, "decrypt", lambda _b: {"base_url": "x"})
+
+    class _DB:
+        scalar = staticmethod(_scalar)
+
+    out = await pl.get_agent_variables(
+        _DB(), tenant_id=tid, connection_id=cid, template_name="plan_summary",
+    )
+    assert out["variables"] == ["patient name", "Included plan"]
+    assert out["body"] == "Hi {{1}}, plan {{2}}"
+    assert out["body_original"] == "Hi {{patient name}}, plan {{Included plan}}"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_variables_wati_not_found_uniform_shape(monkeypatch):
+    """Not-found path keeps body/body_original keys so the response shape is uniform."""
+    async def _impl(self, connection):  # noqa: ARG001
+        return [{"name": "other", "parameters": [], "body": "x", "body_original": None}]
+
+    _patch(monkeypatch, fetch_impl=_impl)
+    cid = uuid.uuid4()
+    tid = uuid.uuid4()
+
+    class _Row:
+        provider = "wati"
+        app_id = "inside-sales"
+        config_encrypted = b""
+
+    async def _scalar(_stmt):
+        return _Row()
+
+    monkeypatch.setattr(pl.crypto, "decrypt", lambda _b: {"base_url": "x"})
+
+    class _DB:
+        scalar = staticmethod(_scalar)
+
+    out = await pl.get_agent_variables(
+        _DB(), tenant_id=tid, connection_id=cid, template_name="missing",
+    )
+    assert out["body"] == "" and out["body_original"] is None
+    assert out["error"] is not None
