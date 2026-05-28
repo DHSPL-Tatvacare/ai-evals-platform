@@ -8,6 +8,7 @@ the Phase 0 ``outcome_bucket`` values; spend sums ``response->>'total_cost'``.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -164,7 +165,7 @@ class BreakdownRow:
     cost: float
 
 
-_DISPATCH_NODE_TYPES = ("voice.place_call", "messaging.send_whatsapp_template")
+_DISPATCH_NODE_TYPES = ("voice.place_call", "messaging.send_whatsapp_template", "core.webhook_out")
 
 
 def _bucket_columns():
@@ -295,7 +296,7 @@ async def _connection_breakdown(
     conn_ids = {v for v in node_to_conn.values()}
     conn_meta: dict[str, tuple[str, str]] = {}
     if conn_ids:
-        conn_uuids = [uuid_or_none(c) for c in conn_ids if uuid_or_none(c)]
+        conn_uuids = [_uuid_or_none(c) for c in conn_ids if _uuid_or_none(c)]
         if conn_uuids:
             for cid, provider, name in (
                 await db.execute(
@@ -335,10 +336,9 @@ async def _connection_breakdown(
     return out
 
 
-def uuid_or_none(value):
-    import uuid as _uuid
+def _uuid_or_none(value):
     try:
-        return _uuid.UUID(str(value))
+        return uuid.UUID(str(value))
     except (ValueError, TypeError, AttributeError):
         return None
 
