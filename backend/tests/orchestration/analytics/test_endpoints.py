@@ -18,6 +18,17 @@ from app.auth import AuthContext, get_auth_context
 from app.database import get_db
 from app.main import app as fastapi_app
 from app.models.application import Application
+from app.models.tenant import Tenant
+
+
+async def _seed_tenant(db_session) -> uuid.UUID:
+    """A real tenant row so workflow FK inserts succeed."""
+    tid = uuid.uuid4()
+    db_session.add(
+        Tenant(id=tid, name="T", slug=f"t-{uuid.uuid4().hex[:8]}", is_active=True)
+    )
+    await db_session.flush()
+    return tid
 
 
 def _app_config(has_orchestration: bool) -> dict:
@@ -55,6 +66,26 @@ def _plain_auth(tenant_id: uuid.UUID) -> AuthContext:
         user_id=uuid.uuid4(), tenant_id=tenant_id,
         email="user@orchestration.local", role_id=uuid.uuid4(),
         is_owner=False, permissions=frozenset({"orchestration:manage"}),
+        app_access=frozenset(),
+    )
+
+
+def _insights_auth(tenant_id: uuid.UUID, user_id: uuid.UUID | None = None) -> AuthContext:
+    """Read-only insights token: insights:view but NOT orchestration:manage."""
+    return AuthContext(
+        user_id=user_id or uuid.uuid4(), tenant_id=tenant_id,
+        email="viewer@orchestration.local", role_id=uuid.uuid4(),
+        is_owner=False, permissions=frozenset({"insights:view"}),
+        app_access=frozenset(),
+    )
+
+
+def _no_perm_auth(tenant_id: uuid.UUID) -> AuthContext:
+    """Token with NEITHER analytics permission."""
+    return AuthContext(
+        user_id=uuid.uuid4(), tenant_id=tenant_id,
+        email="nobody@orchestration.local", role_id=uuid.uuid4(),
+        is_owner=False, permissions=frozenset(),
         app_access=frozenset(),
     )
 
@@ -120,6 +151,80 @@ async def test_trend_orchestration_disabled_403(db_session, client):
     _override(db_session, _admin_auth(uuid.uuid4()))
     r = await client.get(f"/api/orchestration/analytics/trend?appId={slug}&scope=tenant")
     assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_overview_insights_view_only_200(db_session, client):
+    slug = await _seed_app(db_session, enabled=True)
+    _override(db_session, _insights_auth(uuid.uuid4()))
+    r = await client.get(f"/api/orchestration/analytics/overview?appId={slug}")
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_overview_no_permission_403(db_session, client):
+    slug = await _seed_app(db_session, enabled=True)
+    _override(db_session, _no_perm_auth(uuid.uuid4()))
+    r = await client.get(f"/api/orchestration/analytics/overview?appId={slug}")
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_run_report_admin_200(db_session, client, seed_orchestration_run):
+    slug = await _seed_app(db_session, enabled=True)
+    tenant = await _seed_tenant(db_session)
+    seeded = await seed_orchestration_run(
+        tenant_id=tenant, app_id=slug,
+        recipients=[
+            {"recipient_id": "r0", "channel": "voice",
+             "action_type": "bolna_answered", "bucket": "positive",
+             "voice_duration_sec": 90},
+        ],
+    )
+    _override(db_session, _admin_auth(tenant))
+    r = await client.get(
+        f"/api/orchestration/analytics/runs/{seeded['run_id']}/report?appId={slug}&scope=tenant"
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["runId"] == str(seeded["run_id"])
+    assert body["recipientsTotalCount"] == 1
+    assert any(c["capability"] == "voice" for c in body["channels"])
+
+
+@pytest.mark.asyncio
+async def test_run_report_unknown_run_404(db_session, client):
+    slug = await _seed_app(db_session, enabled=True)
+    _override(db_session, _admin_auth(uuid.uuid4()))
+    r = await client.get(
+        f"/api/orchestration/analytics/runs/{uuid.uuid4()}/report?appId={slug}&scope=tenant"
+    )
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio
+async def test_run_report_scope_leak_non_owner_mine_404_zero_recipients(
+    db_session, client, seed_orchestration_run
+):
+    # Run owned by SYSTEM_USER_ID (default created_by), private visibility, in the
+    # caller's tenant. A non-owner caller with scope=mine must NOT see it.
+    slug = await _seed_app(db_session, enabled=True)
+    caller_tenant = await _seed_tenant(db_session)
+    seeded = await seed_orchestration_run(
+        tenant_id=caller_tenant, app_id=slug,
+        recipients=[
+            {"recipient_id": "secret", "channel": "voice",
+             "action_type": "bolna_answered", "bucket": "positive",
+             "attributes": {"name": "Private Patient"}},
+        ],
+    )
+    _override(db_session, _insights_auth(caller_tenant))
+    r = await client.get(
+        f"/api/orchestration/analytics/runs/{seeded['run_id']}/report?appId={slug}&scope=mine"
+    )
+    assert r.status_code == 404, r.text
+    assert "Private Patient" not in r.text
+    assert "recipients" not in r.json()
 
 
 @pytest.mark.asyncio

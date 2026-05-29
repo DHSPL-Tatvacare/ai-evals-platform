@@ -132,3 +132,51 @@ class SignalResponse(CamelModel):
 class SignalsResponse(CamelModel):
     signals: list[SignalResponse]
     generated_at: Optional[datetime] = None
+
+
+class RunReportFunnelStage(CamelModel):
+    key: str
+    label: str
+    count: int
+
+
+class RunReportChannel(CamelModel):
+    capability: str
+    vendor: Optional[str] = None
+    connection_label: Optional[str] = None
+    stages: list[RunReportFunnelStage]
+    metrics: dict[str, Any]
+
+
+class RunReportRecipientChannel(CamelModel):
+    capability: str
+    outcome_bucket: Optional[str] = None
+    stage_reached: Optional[str] = None
+    summary: Optional[str] = None
+    metrics: dict[str, Any]
+
+
+class RunReportRecipient(CamelModel):
+    recipient_id: str
+    display_name: Optional[str] = None
+    contact_last4: Optional[str] = None
+    attributes: dict[str, Any]
+    channels: list[RunReportRecipientChannel]
+
+
+class RunReportResponse(CamelModel):
+    run_id: uuid.UUID
+    workflow_id: uuid.UUID
+    workflow_name: str
+    app_id: str
+    status: str
+    triggered_by: str
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    recipients_total: int
+    spend: float
+    buckets: RunBucketsResponse
+    channels: list[RunReportChannel]
+    recipients: list[RunReportRecipient]
+    recipients_total_count: int

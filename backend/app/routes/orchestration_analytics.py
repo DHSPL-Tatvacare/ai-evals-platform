@@ -1,6 +1,6 @@
 """Orchestration analytics API — read-only KPI / breakdown / run views.
 
-Every endpoint is gated by ``orchestration:manage``, requires the app to declare
+Every endpoint requires ``insights:view`` or ``orchestration:manage``, requires the app to declare
 orchestration in its config, and resolves the caller's scope at the data layer
 (``mine`` owned+shared, ``tenant`` admin-only). Aggregation lives in
 ``analytics.read_service``; these handlers only parse the range and map shapes.
@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.auth.context import AuthContext
-from app.auth.permissions import require_permission
+from app.auth.permissions import require_any_permission
 from app.database import get_db
 from app.models.orchestration_signal import OrchestrationSignalSnapshot
 from app.schemas.orchestration_analytics import (
@@ -25,6 +25,11 @@ from app.schemas.orchestration_analytics import (
     RunBucketsResponse,
     RunDetailResponse,
     RunNodeStepResponse,
+    RunReportChannel,
+    RunReportFunnelStage,
+    RunReportRecipient,
+    RunReportRecipientChannel,
+    RunReportResponse,
     RunRowResponse,
     RunsResponse,
     SignalResponse,
@@ -94,7 +99,7 @@ async def get_overview(
     date_from: Optional[str] = Query(None, alias="from"),
     date_to: Optional[str] = Query(None, alias="to"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:manage"),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
 ) -> OverviewResponse:
     await ensure_orchestration_enabled(db, app_id)
     scope_clause = _resolve_scope(auth, scope)
@@ -120,7 +125,7 @@ async def get_breakdown(
     date_from: Optional[str] = Query(None, alias="from"),
     date_to: Optional[str] = Query(None, alias="to"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:manage"),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
 ) -> BreakdownResponse:
     if dimension not in ("campaign", "channel", "connection"):
         raise HTTPException(status_code=400, detail=f"Unsupported dimension: {dimension}")
@@ -153,7 +158,7 @@ async def get_trend(
     date_from: Optional[str] = Query(None, alias="from"),
     date_to: Optional[str] = Query(None, alias="to"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:manage"),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
 ) -> TrendResponse:
     await ensure_orchestration_enabled(db, app_id)
     scope_clause = _resolve_scope(auth, scope)
@@ -182,7 +187,7 @@ async def get_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200, alias="pageSize"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:manage"),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
 ) -> RunsResponse:
     await ensure_orchestration_enabled(db, app_id)
     scope_clause = _resolve_scope(auth, scope)
@@ -214,7 +219,7 @@ async def get_run_detail(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500, alias="pageSize"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:manage"),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
 ) -> RunDetailResponse:
     await ensure_orchestration_enabled(db, app_id)
     scope_clause = _resolve_scope(auth, scope)
@@ -256,12 +261,72 @@ async def get_run_detail(
     )
 
 
+@router.get("/runs/{run_id}/report", response_model=RunReportResponse)
+async def get_run_report(
+    run_id: str,
+    app_id: str = Query(..., alias="appId"),
+    scope: str = Query("mine"),
+    recipient_limit: int = Query(50, ge=1, le=500, alias="recipientLimit"),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
+) -> RunReportResponse:
+    await ensure_orchestration_enabled(db, app_id)
+    scope_clause = _resolve_scope(auth, scope)
+    report = await read_service.run_report(
+        db, run_id=run_id, tenant_id=auth.tenant_id, scope_clause=scope_clause,
+        recipient_limit=recipient_limit,
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return RunReportResponse(
+        run_id=report.run_id, workflow_id=report.workflow_id,
+        workflow_name=report.workflow_name, app_id=report.app_id,
+        status=report.status, triggered_by=report.triggered_by,
+        started_at=report.started_at, completed_at=report.completed_at,
+        duration_seconds=report.duration_seconds,
+        recipients_total=report.recipients_total, spend=report.spend,
+        buckets=RunBucketsResponse(
+            positive=report.buckets.positive, reached=report.buckets.reached,
+            no_response=report.buckets.no_response, failed=report.buckets.failed,
+            in_flight=report.buckets.in_flight,
+        ),
+        channels=[
+            RunReportChannel(
+                capability=c.capability, vendor=c.vendor,
+                connection_label=c.connection_label,
+                stages=[
+                    RunReportFunnelStage(key=s.key, label=s.label, count=s.count)
+                    for s in c.stages
+                ],
+                metrics=c.metrics,
+            )
+            for c in report.channels
+        ],
+        recipients=[
+            RunReportRecipient(
+                recipient_id=r.recipient_id, display_name=r.display_name,
+                contact_last4=r.contact_last4, attributes=r.attributes,
+                channels=[
+                    RunReportRecipientChannel(
+                        capability=rc.capability, outcome_bucket=rc.outcome_bucket,
+                        stage_reached=rc.stage_reached, summary=rc.summary,
+                        metrics=rc.metrics,
+                    )
+                    for rc in r.channels
+                ],
+            )
+            for r in report.recipients
+        ],
+        recipients_total_count=report.recipients_total_count,
+    )
+
+
 @router.get("/signals", response_model=SignalsResponse)
 async def get_signals(
     app_id: str = Query(..., alias="appId"),
     scope: str = Query("mine"),
     db: AsyncSession = Depends(get_db),
-    auth: AuthContext = require_permission("orchestration:manage"),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
 ) -> SignalsResponse:
     await ensure_orchestration_enabled(db, app_id)
     _resolve_scope(auth, scope)

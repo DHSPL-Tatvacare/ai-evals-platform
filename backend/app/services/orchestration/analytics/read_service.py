@@ -21,6 +21,7 @@ from app.models.orchestration import (
     WorkflowRun,
     WorkflowRunNodeStep,
     WorkflowRunRecipientAction,
+    WorkflowRunRecipientState,
     WorkflowVersion,
 )
 from app.models.provider_connection import ProviderConnection
@@ -897,4 +898,244 @@ async def run_detail(
             for a in action_rows
         ],
         actions_total=int(actions_total),
+    )
+
+
+# ── Run report (per-run funnel + recipients) ─────────────────────────
+
+
+@dataclass
+class RunReportFunnelStage:
+    key: str
+    label: str
+    count: int
+
+
+@dataclass
+class RunReportChannel:
+    capability: str
+    vendor: Optional[str]
+    connection_label: Optional[str]
+    stages: list[RunReportFunnelStage]
+    metrics: dict[str, Any]
+
+
+@dataclass
+class RunReportRecipientChannel:
+    capability: str
+    outcome_bucket: Optional[str]
+    stage_reached: Optional[str]
+    summary: Optional[str]
+    metrics: dict[str, Any]
+
+
+@dataclass
+class RunReportRecipient:
+    recipient_id: str
+    display_name: Optional[str]
+    contact_last4: Optional[str]
+    attributes: dict[str, Any]
+    channels: list[RunReportRecipientChannel]
+
+
+@dataclass
+class RunReportResult:
+    run_id: Any
+    workflow_id: Any
+    workflow_name: str
+    app_id: str
+    status: str
+    triggered_by: str
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    duration_seconds: Optional[int]
+    recipients_total: int
+    spend: float
+    buckets: RunBuckets
+    channels: list[RunReportChannel]
+    recipients: list[RunReportRecipient]
+    recipients_total_count: int
+
+
+# Recipient-state payload keys that are framework book-keeping, not dataset attrs.
+_RESERVED_PAYLOAD_KEYS = frozenset({"contact", "steps", "last_outcome", "last_event_at"})
+
+
+def _capability_index():
+    """Registry-derived maps: action_type→capability, action_type→bucket, capability→adapter."""
+    type_to_cap: dict[str, str] = {}
+    type_to_bucket: dict[str, str] = {}
+    cap_adapter: dict[str, Any] = {}
+    for adapter in registered_adapter_instances():
+        capability = getattr(adapter, "capability", None)
+        outcome_map = getattr(adapter, "ACTION_OUTCOME_MAP", None)
+        if not capability or not outcome_map:
+            continue
+        cap_adapter.setdefault(capability, adapter)
+        for action_type, bucket in outcome_map.items():
+            type_to_cap[action_type] = capability
+            type_to_bucket[action_type] = bucket.value
+    return type_to_cap, type_to_bucket, cap_adapter
+
+
+def _stage_counts(adapter, bucket_counts: dict[str, int]) -> list[RunReportFunnelStage]:
+    """Cumulative funnel: stages ordered weakest→strongest map onto the engagement
+    bucket ranks (strongest stage = positive). Each stage counts recipients whose
+    most-advanced bucket reached at-or-above that stage's rank."""
+    stages = list(adapter.funnel_stages())
+    if not stages:
+        return []
+    # Terminal buckets strongest→weakest; in_flight excluded from funnel reach.
+    ordered_buckets = [
+        EngagementBucket.positive.value, EngagementBucket.reached.value,
+        EngagementBucket.no_response.value, EngagementBucket.failed.value,
+    ]
+    # Align the strongest stage with positive; weaker stages fold in lower ranks.
+    n = len(stages)
+    out: list[RunReportFunnelStage] = []
+    for i, stage in enumerate(stages):
+        # Stage i (0=weakest) includes recipients at-or-above this stage. The
+        # strongest stage maps to positive only; weaker stages add lower buckets.
+        depth = n - 1 - i
+        cutoff = min(depth, len(ordered_buckets) - 1)
+        count = sum(bucket_counts.get(b, 0) for b in ordered_buckets[: cutoff + 1])
+        out.append(RunReportFunnelStage(key=stage.key, label=stage.label, count=count))
+    return out
+
+
+async def run_report(
+    db: AsyncSession,
+    *,
+    run_id,
+    tenant_id,
+    scope_clause,
+    recipient_limit: int = 50,
+) -> Optional[RunReportResult]:
+    """Per-run engagement report: head+buckets+spend reuse ``run_detail``; per-channel
+    funnel + talk-time + recipient rows are layered on. Provider-agnostic throughout."""
+    detail = await run_detail(
+        db, run_id=run_id, tenant_id=tenant_id, scope_clause=scope_clause,
+        page=1, page_size=1,
+    )
+    if detail is None:
+        return None
+
+    duration_seconds: Optional[int] = None
+    if detail.started_at is not None and detail.completed_at is not None:
+        duration_seconds = max(0, int((detail.completed_at - detail.started_at).total_seconds()))
+
+    # App id off the run head (run_detail does not surface it).
+    app_id = (
+        await db.execute(
+            select(WorkflowRun.app_id).where(WorkflowRun.id == run_id)
+        )
+    ).scalar()
+
+    type_to_cap, type_to_bucket, cap_adapter = _capability_index()
+
+    # All action rows for the run — derive per-recipient capability + bucket.
+    actions = (
+        await db.execute(
+            select(WorkflowRunRecipientAction).where(
+                WorkflowRunRecipientAction.run_id == run_id,
+                WorkflowRunRecipientAction.tenant_id == tenant_id,
+            )
+        )
+    ).scalars().all()
+
+    bucket_rank = _BUCKET_RANK
+    # (recipient_id, capability) -> best bucket value; talk-time accumulators per cap.
+    rep_bucket: dict[tuple[str, str], str] = {}
+    talk_total: dict[str, float] = {}
+    talk_count: dict[str, int] = {}
+    caps_present: set[str] = set()
+    for a in actions:
+        capability = type_to_cap.get(a.action_type)
+        if capability is None:
+            continue
+        caps_present.add(capability)
+        bucket = a.outcome_bucket or type_to_bucket.get(a.action_type)
+        if bucket is not None:
+            key = (a.recipient_id, capability)
+            prior = rep_bucket.get(key)
+            if prior is None or bucket_rank.get(bucket, 0) > bucket_rank.get(prior, 0):
+                rep_bucket[key] = bucket
+        # Talk-time: any answered (positive) action carrying a duration on its response.
+        if bucket == EngagementBucket.positive.value:
+            raw = (a.response or {}).get("duration_sec") if a.response else None
+            try:
+                secs = float(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                secs = None
+            if secs is not None:
+                talk_total[capability] = talk_total.get(capability, 0.0) + secs
+                talk_count[capability] = talk_count.get(capability, 0) + 1
+
+    channels: list[RunReportChannel] = []
+    for capability in sorted(caps_present):
+        adapter = cap_adapter.get(capability)
+        if adapter is None:
+            continue
+        bucket_counts: dict[str, int] = {}
+        for (_rid, cap), bucket in rep_bucket.items():
+            if cap == capability:
+                bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+        metrics: dict[str, Any] = {}
+        if capability in talk_total:
+            total = int(round(talk_total[capability]))
+            n = talk_count.get(capability, 0)
+            metrics = {
+                "totalDurationSec": total,
+                "avgDurationSec": int(round(talk_total[capability] / n)) if n else 0,
+            }
+        channels.append(RunReportChannel(
+            capability=capability, vendor=None, connection_label=None,
+            stages=_stage_counts(adapter, bucket_counts), metrics=metrics,
+        ))
+
+    # Recipients: dataset attributes + per-channel outcome, engagement-first.
+    states = (
+        await db.execute(
+            select(WorkflowRunRecipientState).where(
+                WorkflowRunRecipientState.run_id == run_id,
+                WorkflowRunRecipientState.tenant_id == tenant_id,
+            )
+        )
+    ).scalars().all()
+    recipients_total_count = len(states)
+
+    def _best_rank(recipient_id: str) -> int:
+        return max(
+            (bucket_rank.get(b, 0) for (rid, _c), b in rep_bucket.items() if rid == recipient_id),
+            default=0,
+        )
+
+    ordered = sorted(states, key=lambda s: _best_rank(s.recipient_id), reverse=True)
+    recipients: list[RunReportRecipient] = []
+    for s in ordered[:recipient_limit]:
+        payload = s.payload or {}
+        attributes = {k: v for k, v in payload.items() if k not in _RESERVED_PAYLOAD_KEYS}
+        contact = payload.get("contact")
+        last4 = str(contact)[-4:] if contact else None
+        rec_channels = [
+            RunReportRecipientChannel(
+                capability=cap, outcome_bucket=bucket, stage_reached=None,
+                summary=None, metrics={},
+            )
+            for (rid, cap), bucket in rep_bucket.items()
+            if rid == s.recipient_id
+        ]
+        recipients.append(RunReportRecipient(
+            recipient_id=s.recipient_id, display_name=None, contact_last4=last4,
+            attributes=attributes, channels=rec_channels,
+        ))
+
+    return RunReportResult(
+        run_id=detail.run_id, workflow_id=detail.workflow_id,
+        workflow_name=detail.workflow_name, app_id=str(app_id or ""),
+        status=detail.status, triggered_by=detail.triggered_by,
+        started_at=detail.started_at, completed_at=detail.completed_at,
+        duration_seconds=duration_seconds, recipients_total=detail.cohort_size,
+        spend=detail.spend, buckets=detail.buckets, channels=channels,
+        recipients=recipients, recipients_total_count=recipients_total_count,
     )

@@ -28,6 +28,11 @@ async def seed_orchestration_run(db_session):
     ``recipients`` is a list of dicts: {recipient_id, bucket, channel, cost,
     contact}. Each yields one recipient state + one recipient action row.
 
+    Optional additive keys: ``attributes`` (dict merged into the recipient
+    state payload — dataset passthrough), ``voice_duration_sec`` /
+    ``voice_transcript`` (written onto the single action's response, mirroring
+    the reconciler's ``duration_sec`` / ``transcript`` capture keys).
+
     A recipient dict may instead carry ``events``: a list of child-event dicts
     {action_type, bucket} which seed a parent dispatch row (parent_action_id
     NULL, outcome_bucket NULL) plus one child action per event (parent_action_id
@@ -94,11 +99,12 @@ async def seed_orchestration_run(db_session):
             channel = rec.get("channel", "voice")
             contact = rec.get("contact", f"+1000000{idx:04d}")
             cost = rec.get("cost", "0.05")
+            state_payload = {"contact": contact, **(rec.get("attributes") or {})}
             db_session.add(WorkflowRunRecipientState(
                 id=_uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
                 workflow_id=workflow.id, workflow_version_id=version.id,
                 run_id=run.id, recipient_id=recipient_id,
-                status="completed", payload={"contact": contact},
+                status="completed", payload=state_payload,
             ))
             if rec.get("events") is not None:
                 # WhatsApp-style: one parent dispatch row (no outcome_bucket) +
@@ -137,15 +143,23 @@ async def seed_orchestration_run(db_session):
                     db_session.add(child)
                     action_ids.append(child.id)
                 continue
+            response: dict | None = {"total_cost": cost} if cost is not None else None
+            # Mirror the reconciler's capture keys on the terminal action response.
+            if rec.get("voice_duration_sec") is not None or rec.get("voice_transcript") is not None:
+                response = dict(response or {})
+                if rec.get("voice_duration_sec") is not None:
+                    response["duration_sec"] = rec["voice_duration_sec"]
+                if rec.get("voice_transcript") is not None:
+                    response["transcript"] = rec["voice_transcript"]
             action = WorkflowRunRecipientAction(
                 id=_uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
                 workflow_id=workflow.id, workflow_version_id=version.id,
                 run_id=run.id, node_step_id=node_step.id,
                 recipient_id=recipient_id, channel=channel,
-                action_type="voice_queued", status="success",
+                action_type=rec.get("action_type", "voice_queued"), status="success",
                 idempotency_key=f"idem-{run.id}-{recipient_id}-{idx}",
                 payload={"contact": contact},
-                response={"total_cost": cost} if cost is not None else None,
+                response=response,
                 parent_action_id=None,
                 outcome_bucket=rec["bucket"],
             )
