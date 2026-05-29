@@ -95,14 +95,6 @@ const INSIDE_SALES_NAV: SidebarNavItem[] = [
   { to: routes.insideSales.analytics, icon: ChartArea, label: 'Analytics' },
 ];
 
-// Gated behind `app.config.features.hasOrchestration` so apps without
-// campaigns never surface a dead analytics tab.
-const INSIDE_SALES_ORCHESTRATION_NAV: SidebarNavItem = {
-  to: routes.insideSales.analyticsOrchestration,
-  icon: BarChart3,
-  label: 'Campaign analytics',
-};
-
 const ADMIN_USERS_NAV: SidebarNavItem = {
   to: routes.adminUsers,
   icon: Users,
@@ -156,6 +148,13 @@ const ADMIN_COMM_CAP_NAV: SidebarNavItem = {
   end: true,
 };
 
+const ADMIN_CAMPAIGN_ANALYTICS_NAV: SidebarNavItem = {
+  to: routes.adminCampaignAnalytics,
+  icon: BarChart3,
+  label: 'Campaign analytics',
+  end: true,
+};
+
 const ADMIN_AI_SETTINGS_NAV: SidebarNavItem = {
   to: routes.adminLlmProviders,
   icon: Sparkles,
@@ -180,17 +179,9 @@ function getVisibleNavItems(items: SidebarNavItem[]): SidebarNavItem[] {
   return items.filter((item) => !item.hidden);
 }
 
-export interface NavFeatureOptions {
-  hasOrchestration?: boolean;
-}
-
-export function getNavItems(appId: AppId, features: NavFeatureOptions = {}): SidebarNavItem[] {
+export function getNavItems(appId: AppId): SidebarNavItem[] {
   const base = NAV_BY_APP[appId] ?? VOICE_RX_NAV;
-  const items =
-    appId === 'inside-sales' && features.hasOrchestration
-      ? [...base, INSIDE_SALES_ORCHESTRATION_NAV]
-      : base;
-  return getVisibleNavItems(items);
+  return getVisibleNavItems(base);
 }
 
 /**
@@ -249,6 +240,7 @@ export function getAdminNavGroups(options: AdminNavOptions): SidebarNavGroup[] {
       id: 'analytics',
       title: 'Analytics',
       items: gate([
+        [options.canManageOrchestration, ADMIN_CAMPAIGN_ANALYTICS_NAV],
         [options.canViewCost, ADMIN_COST_NAV],
         // Sherlock list/detail pages are gated by `AdminGuard` (any admin
         // access permission), mirrored here against user-mgmt access.

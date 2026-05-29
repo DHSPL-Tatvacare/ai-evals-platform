@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChartArea, LayoutGrid, MoreVertical, Trash2, Share2, Lock, Pencil } from 'lucide-react';
+import { BarChart3, ChartArea, LayoutGrid, MoreVertical, Trash2, Share2, Lock, Pencil } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useCurrentAppConfig } from '@/hooks';
 import { analyticsLibraryApi } from '@/services/api/analyticsLibraryApi';
 import { notificationService } from '@/services/notifications';
 import { Badge, VisibilityBadge, Popover, PopoverTrigger, PopoverContent, PageSurface } from '@/components/ui';
@@ -32,7 +33,7 @@ const CHART_TYPE_LABELS: Record<string, string> = {
 interface AnalyticsRow {
   id: string;
   title: string;
-  itemType: 'chart' | 'dashboard';
+  itemType: 'chart' | 'dashboard' | 'orchestration';
   chartType?: string;
   description: string;
   visibility: 'private' | 'shared';
@@ -42,6 +43,7 @@ interface AnalyticsRow {
 
 export function AnalyticsLibraryPage() {
   const appId = useAppStore((s) => s.currentApp);
+  const hasOrchestration = useCurrentAppConfig().features.hasOrchestration;
   const navigate = useNavigate();
   const [charts, setCharts] = useState<SavedChart[]>([]);
   const [dashboards, setDashboards] = useState<SavedDashboard[]>([]);
@@ -140,14 +142,31 @@ export function AnalyticsLibraryPage() {
     }));
     // Platform entries (e.g. the cross-run report) pin to the top; the rest
     // sort by recency.
-    return [...chartRows, ...dashRows].sort((a, b) => {
+    const sorted = [...chartRows, ...dashRows].sort((a, b) => {
       if (a.isPlatform !== b.isPlatform) return a.isPlatform ? -1 : 1;
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
-  }, [charts, dashboards]);
+    // The campaign analytics dashboard is a dedicated page (not a saved
+    // chart/dashboard), surfaced here as a pinned entry for apps that run
+    // campaigns. Mirrors how the seeded cross-run report appears in this list.
+    if (hasOrchestration) {
+      sorted.unshift({
+        id: '__campaign-analytics__',
+        title: 'Campaign analytics',
+        itemType: 'orchestration',
+        description: 'Outcomes, channels, connections, and spend across your campaigns.',
+        visibility: 'shared',
+        isPlatform: true,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return sorted;
+  }, [charts, dashboards, hasOrchestration]);
 
   const handleRowClick = useCallback((row: AnalyticsRow) => {
-    if (row.itemType === 'chart') {
+    if (row.itemType === 'orchestration') {
+      navigate('orchestration');
+    } else if (row.itemType === 'chart') {
       navigate(`charts/${row.id}`);
     } else if (row.isPlatform) {
       // Platform dashboards are the cross-run report launcher (seeded by _build_platform_dashboard_seeds).
@@ -162,7 +181,12 @@ export function AnalyticsLibraryPage() {
       key: 'title',
       header: 'Title',
       render: (row) => {
-        const Icon = row.itemType === 'dashboard' ? LayoutGrid : ChartArea;
+        const Icon =
+          row.itemType === 'orchestration'
+            ? BarChart3
+            : row.itemType === 'dashboard'
+              ? LayoutGrid
+              : ChartArea;
         return (
           <div className="flex items-center gap-2">
             <Icon className="h-4 w-4 text-[var(--text-brand)]" />
@@ -178,7 +202,9 @@ export function AnalyticsLibraryPage() {
       key: 'type',
       header: 'Type',
       render: (row) =>
-        row.itemType === 'dashboard' ? (
+        row.itemType === 'orchestration' ? (
+          <Badge variant="neutral" size="sm" icon={BarChart3}>Dashboard</Badge>
+        ) : row.itemType === 'dashboard' ? (
           <Badge variant="neutral" size="sm" icon={LayoutGrid}>Dashboard</Badge>
         ) : (
           <Badge variant="info" size="sm" icon={ChartArea}>

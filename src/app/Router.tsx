@@ -1,5 +1,6 @@
-import { Suspense } from "react";
+import { Suspense, type ComponentType } from "react";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
+import type { AnalyticsScope } from "@/features/orchestration/analytics/types";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { MainLayout } from "@/components/layout";
 import { LoadingState } from "@/components/ui";
@@ -51,7 +52,7 @@ const CostPage = lazyWithRetry(() => import('@/features/cost/pages/CostPage').th
 const ScheduledJobsListPage = lazyWithRetry(() => import('@/features/admin/scheduledJobs/pages/ScheduledJobsListPage').then(m => ({ default: m.ScheduledJobsListPage })));
 const AnalyticsMappingsPage = lazyWithRetry(() => import('@/features/admin/analyticsMappings/AnalyticsMappingsPage').then(m => ({ default: m.AnalyticsMappingsPage })));
 const SignalDefinitionsPage = lazyWithRetry(() => import('@/features/admin/signalDefinitions/SignalDefinitionsPage').then(m => ({ default: m.SignalDefinitionsPage })));
-const OrchestrationAnalyticsPage = lazyWithRetry(() => import('@/features/orchestration/analytics/OrchestrationAnalyticsPage').then(m => ({ default: m.OrchestrationAnalyticsPage })));
+const OrchestrationAnalyticsPage = lazyWithRetry(() => import('@/features/orchestration/analytics/OrchestrationAnalyticsPage').then(m => ({ default: m.OrchestrationAnalyticsPage as ComponentType<unknown> }))) as unknown as ComponentType<{ scope?: AnalyticsScope }>;
 const CampaignsPage = lazyWithRetry(() => import('@/features/orchestration/components/campaigns/CampaignsPage').then(m => ({ default: m.CampaignsPage })));
 const WorkflowBuilderPage = lazyWithRetry(() => import('@/features/orchestration/components/WorkflowBuilderPage').then(m => ({ default: m.WorkflowBuilderPage })));
 const CampaignRunsPage = lazyWithRetry(() => import('@/features/orchestration/components/CampaignRunsPage').then(m => ({ default: m.CampaignRunsPage })));
@@ -200,7 +201,7 @@ export function Router() {
             <Route path={`${routes.insideSales.logs}/workflow-actions/:actionId`} element={<LogsWorkflowActionPage />} />
             <Route path={routes.insideSales.settings} element={<CallQualitySettings />} />
             <Route path={routes.insideSales.analytics} element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsLibraryPage /></Suspense>} />
-            <Route path={routes.insideSales.analyticsOrchestration} element={<RequirePermission action="orchestration:manage"><Suspense fallback={ROUTE_FALLBACK}><OrchestrationAnalyticsPage /></Suspense></RequirePermission>} />
+            <Route path={routes.insideSales.analyticsOrchestration} element={<RequirePermission action="orchestration:manage"><Suspense fallback={ROUTE_FALLBACK}><OrchestrationAnalyticsPage scope="mine" /></Suspense></RequirePermission>} />
             <Route path={routes.insideSales.analyticsCrossRunReport} element={<Suspense fallback={ROUTE_FALLBACK}><CrossRunReportPage /></Suspense>} />
             <Route path="/inside-sales/analytics/charts/:chartId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsChartDetail /></Suspense>} />
             <Route path="/inside-sales/analytics/dashboards/:dashboardId" element={<Suspense fallback={ROUTE_FALLBACK}><AnalyticsDashboardDetail /></Suspense>} />
@@ -228,6 +229,16 @@ export function Router() {
               <RequirePermission action="orchestration:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <CommCapPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path={routes.adminCampaignAnalytics}
+            element={
+              <RequirePermission action="orchestration:manage">
+                <Suspense fallback={ROUTE_FALLBACK}>
+                  <OrchestrationAnalyticsPage scope="tenant" />
                 </Suspense>
               </RequirePermission>
             }

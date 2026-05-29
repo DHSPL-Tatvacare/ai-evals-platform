@@ -6,11 +6,9 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
 import { getNavItems } from '@/config/sidebarNav';
-import { useCurrentAppConfig } from '@/hooks';
 
 export function InsideSalesSidebarContent() {
-  const { features } = useCurrentAppConfig();
-  const navItems = getNavItems('inside-sales', { hasOrchestration: features.hasOrchestration });
+  const navItems = getNavItems('inside-sales');
   const { pathname } = useLocation();
 
   return (
