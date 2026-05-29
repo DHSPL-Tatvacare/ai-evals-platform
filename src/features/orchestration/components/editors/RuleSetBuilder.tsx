@@ -43,8 +43,9 @@ interface Props {
    *  field input is plain text so authors can reference any key. */
   fieldOptions?: string[];
   /** Upstream dispatch outcomes — when present the leaf VALUE is a dropdown of
-   *  canonical outcomes (shown as "<canonical> · <providerLabel>"). Stores the
-   *  canonical value; the provider label is display-only context. */
+   *  canonical outcomes (canonical as the label, provider raw label as muted
+   *  right-aligned meta). Stores the canonical value; the provider label is
+   *  display-only context. */
   outcomeOptions?: UpstreamOutcomeEnum[];
   /** When false (default for nested groups), the "add nested group" action
    *  is hidden so nesting is capped at one level. */
@@ -204,16 +205,18 @@ function LeafRow({
   outcomeOptions?: UpstreamOutcomeEnum[];
 }) {
   const spotlight = useFieldSpotlight();
-  // Canonical outcome value options, deduped by canonical and shown as
-  // "<canonical> · <providerLabel>". Stores canonical; the current value stays
-  // selectable so a hand-set value isn't dropped.
+  // Canonical outcome value options: the canonical is the clear label; the
+  // provider's raw label rides in `meta` (muted, right-aligned) so any provider
+  // surfaces the same way without baking the name into the label. Stores
+  // canonical; the current value stays selectable so a hand-set value isn't dropped.
   const valueOptions = useMemo(() => {
-    const byCanonical = new Map<string, { value: string; label: string }>();
+    const byCanonical = new Map<string, { value: string; label: string; meta?: string }>();
     for (const o of outcomeOptions ?? []) {
       if (!byCanonical.has(o.canonical)) {
         byCanonical.set(o.canonical, {
           value: o.canonical,
-          label: `${o.canonical} · ${o.providerLabel}`,
+          label: o.canonical,
+          meta: o.providerLabel,
         });
       }
     }

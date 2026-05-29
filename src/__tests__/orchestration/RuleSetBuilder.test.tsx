@@ -74,16 +74,18 @@ describe('RuleSetBuilder', () => {
         fieldOptions={['steps.v1.voice_outcome']}
         outcomeOptions={[
           { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
-          { canonical: 'no-answer', providerLabel: 'bolna_rnr', sourceNodeId: 'v1', provider: 'bolna' },
+          { canonical: 'no_answer', providerLabel: 'bolna_rnr', sourceNodeId: 'v1', provider: 'bolna' },
         ]}
       />,
     );
     // The free-text value input is gone in favour of the outcome dropdown.
     expect(screen.queryByPlaceholderText('value')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Select an outcome'));
-    // Options show "<canonical> · <providerLabel>".
-    expect(screen.getByText('answered · bolna_answered')).toBeInTheDocument();
-    expect(screen.getByText('no-answer · bolna_rnr')).toBeInTheDocument();
+    // Canonical is the clear label; the provider raw label is muted right-aligned meta.
+    expect(screen.getByText('answered')).toBeInTheDocument();
+    expect(screen.getByText('bolna_answered')).toBeInTheDocument();
+    expect(screen.getByText('no_answer')).toBeInTheDocument();
+    expect(screen.getByText('bolna_rnr')).toBeInTheDocument();
   });
 
   it('keeps a free-text value input for a non-outcome leaf field even when outcomeOptions are present', () => {
@@ -175,7 +177,7 @@ describe('RuleSetBuilder', () => {
       />,
     );
     fireEvent.click(screen.getByText('Select an outcome'));
-    fireEvent.click(screen.getByText('answered · bolna_answered'));
+    fireEvent.click(screen.getByText('answered'));
     const next = onChange.mock.calls.at(-1)?.[0] as LeafPredicate;
     expect(next.value).toBe('answered');
   });
