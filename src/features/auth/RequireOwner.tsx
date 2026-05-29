@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { userHasPermission } from '@/utils/permissions';
+import { userHasAnyPermission, userHasPermission } from '@/utils/permissions';
 
 interface RequirePermissionProps {
   action: string;
@@ -15,6 +15,22 @@ export function RequirePermission({ action, children }: RequirePermissionProps) 
   const user = useAuthStore((s) => s.user);
   if (!userHasPermission(user, action)) {
     return <AccessDenied action={action} />;
+  }
+  return <>{children}</>;
+}
+
+interface RequireAnyPermissionProps {
+  permissions: string[];
+  children: ReactNode;
+}
+
+/** Route-level gate that passes when the user holds ANY of the listed
+ *  permissions. Renders <AccessDenied/> in place (no redirect) when none
+ *  match. Owners bypass via `userHasAnyPermission`. */
+export function RequireAnyPermission({ permissions, children }: RequireAnyPermissionProps) {
+  const user = useAuthStore((s) => s.user);
+  if (!userHasAnyPermission(user, permissions)) {
+    return <AccessDenied action={permissions.join(' or ')} />;
   }
   return <>{children}</>;
 }

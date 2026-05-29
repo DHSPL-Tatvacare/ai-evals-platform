@@ -110,10 +110,10 @@ function seedHooks() {
   });
 }
 
-function renderPage(scope?: 'mine' | 'tenant') {
+function renderPage(scope?: 'mine' | 'tenant', back?: { to: string; label?: string }) {
   return render(
     <MemoryRouter initialEntries={['/inside-sales/analytics/orchestration']}>
-      <OrchestrationAnalyticsPage scope={scope} />
+      <OrchestrationAnalyticsPage scope={scope} back={back} />
     </MemoryRouter>,
   );
 }
@@ -140,9 +140,18 @@ describe('OrchestrationAnalyticsPage', () => {
     expect(screen.queryByRole('tab', { name: /all campaigns/i })).toBeNull();
   });
 
-  it('opens the run drill-over when a run row is clicked', () => {
+  it('opens the run drill-over when a run row is clicked', async () => {
     renderPage();
-    fireEvent.click(screen.getByText('Welcome blast'));
+    // mountStrategy='active-only': the Recent runs table is not mounted until
+    // its tab is active, so switch to it before clicking the row. The tab
+    // content cross-fades via framer-motion, so await the row's appearance.
+    fireEvent.click(screen.getByRole('button', { name: 'Recent runs' }));
+    fireEvent.click(await screen.findByText('Welcome blast'));
     expect(screen.getByText(/open full run/i)).toBeInTheDocument();
+  });
+
+  it('renders a back affordance when a back target is provided', () => {
+    renderPage('mine', { to: '/inside-sales/analytics', label: 'Analytics' });
+    expect(screen.getByRole('button', { name: /back to analytics/i })).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format, parseISO, startOfMonth, subDays } from 'date-fns';
 import {
@@ -46,6 +46,7 @@ import type {
   AnalyticsScope,
   BreakdownDimension,
   OrchestrationBreakdownRow,
+  OrchestrationOverview,
   OrchestrationRunRow,
 } from './types';
 
@@ -82,7 +83,28 @@ const BREAKDOWN_TABS: { id: BreakdownDimension; label: string; nameHeader: strin
   { id: 'connection', label: 'By connection', nameHeader: 'Connection' },
 ];
 
-export function OrchestrationAnalyticsPage({ scope = 'mine' }: { scope?: AnalyticsScope }) {
+type TabId = 'overview' | 'breakdowns' | 'recent-runs';
+
+const TAB_IDS: readonly TabId[] = ['overview', 'breakdowns', 'recent-runs'];
+
+function isTabId(value: string | null): value is TabId {
+  return value !== null && (TAB_IDS as readonly string[]).includes(value);
+}
+
+interface BackTarget {
+  to: string;
+  label?: string;
+}
+
+type AnalyticsParams = { appId: string; scope: AnalyticsScope; from: string; to: string };
+
+export function OrchestrationAnalyticsPage({
+  scope = 'mine',
+  back,
+}: {
+  scope?: AnalyticsScope;
+  back?: BackTarget;
+}) {
   const appId = useCurrentAppId();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -91,20 +113,40 @@ export function OrchestrationAnalyticsPage({ scope = 'mine' }: { scope?: Analyti
 
   const params = useMemo(() => ({ appId, scope, from, to }), [appId, scope, from, to]);
 
+  const tabParam = searchParams.get('tab');
+  const activeTab: TabId = isTabId(tabParam) ? tabParam : 'overview';
+
   const [campaignFilter, setCampaignFilter] = useState<string>('');
   const [openRunId, setOpenRunId] = useState<string | null>(null);
+  const [runsPage, setRunsPage] = useState(1);
 
   const overview = useOrchestrationOverview(params);
   const signals = useOrchestrationSignals(params);
   const campaignBreakdown = useOrchestrationBreakdown({ ...params, dimension: 'campaign' });
-  const runs = useOrchestrationRuns(params);
+  const runs = useOrchestrationRuns({ ...params, page: runsPage });
   const trend = useOrchestrationTrend(params);
+
+  // Reset to the first page when the range/scope/app changes.
+  useEffect(() => {
+    setRunsPage(1);
+  }, [params]);
 
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     next.set(key, value);
     setSearchParams(next, { replace: true });
   };
+
+  const handleTabChange = useCallback(
+    (tabId: string) => {
+      if (!isTabId(tabId)) return;
+      const next = new URLSearchParams(searchParams);
+      if (tabId === 'overview') next.delete('tab');
+      else next.set('tab', tabId);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
   const ov = overview.data;
 
@@ -182,10 +224,54 @@ export function OrchestrationAnalyticsPage({ scope = 'mine' }: { scope?: Analyti
     void trend.refetch?.();
   };
 
+  const tabs = useMemo(
+    () => [
+      {
+        id: 'overview',
+        label: 'Overview',
+        content: (
+          <OverviewPanel
+            ov={ov}
+            signals={signals.data?.signals ?? []}
+            generatedAt={signals.data?.generatedAt ?? null}
+            trendData={trendData}
+            funnelStages={funnelStages}
+            campaignOptions={campaignOptions}
+            campaignFilter={campaignFilter}
+            onCampaignFilterChange={setCampaignFilter}
+          />
+        ),
+      },
+      {
+        id: 'breakdowns',
+        label: 'Breakdowns',
+        content: <BreakdownTabs params={params} />,
+      },
+      {
+        id: 'recent-runs',
+        label: 'Recent runs',
+        content: (
+          <RecentRunsPanel
+            columns={runColumns}
+            rows={runs.data?.rows ?? []}
+            total={runs.data?.total ?? 0}
+            page={runs.data?.page ?? runsPage}
+            pageSize={runs.data?.pageSize ?? 20}
+            onPageChange={setRunsPage}
+            onRowClick={(r) => setOpenRunId(r.runId)}
+          />
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ov, signals.data, trendData, funnelStages, campaignOptions, campaignFilter, params, runs.data, runsPage],
+  );
+
   return (
     <PageSurface
       icon={BarChart3}
       title="Campaign analytics"
+      back={back}
       subtitle={
         scope === 'tenant'
           ? 'Outcomes, channels, connections, and spend across all campaigns.'
@@ -217,84 +303,13 @@ export function OrchestrationAnalyticsPage({ scope = 'mine' }: { scope?: Analyti
         </Button>
       }
     >
-      <div className="h-full min-h-0 space-y-4 overflow-y-auto pb-6">
-        <SignalsBox
-          signals={signals.data?.signals ?? []}
-          generatedAt={signals.data?.generatedAt ?? null}
-        />
-
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-          <StatCard icon={Megaphone} label="Campaigns" value={formatInt(ov?.campaigns ?? 0)} />
-          <StatCard icon={Users} label="Recipients" value={formatInt(ov?.recipients ?? 0)} />
-          <StatCard
-            icon={Wifi}
-            label="Connected %"
-            value={formatPct((ov?.reached ?? 0) + (ov?.positive ?? 0), ov?.recipients ?? 0)}
-          />
-          <StatCard
-            icon={CircleCheck}
-            label="Positive %"
-            value={formatPct(ov?.positive ?? 0, ov?.recipients ?? 0)}
-            tone="positive"
-          />
-          <StatCard
-            icon={CircleX}
-            label="Failed %"
-            value={formatPct(ov?.failed ?? 0, ov?.recipients ?? 0)}
-            tone={ov && ov.failed > 0 ? 'danger' : 'neutral'}
-          />
-          <StatCard icon={Coins} label="Spend" value={formatUsd(ov?.spend ?? 0)} />
-          <StatCard
-            icon={Activity}
-            label="In-flight"
-            value={formatInt(ov?.inFlightRuns ?? 0)}
-            hint={ov ? `${formatInt(ov.inFlight)} recipients` : undefined}
-          />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <TrendCard
-            title="Outcomes over time"
-            data={trendData}
-            xKey="date"
-            seriesKeys={['positive', 'reached', 'failed']}
-          />
-          <FunnelCard
-            title="Conversion funnel"
-            stages={funnelStages}
-            headerControl={
-              <div className="w-48">
-                <Combobox
-                  options={campaignOptions}
-                  value={campaignFilter}
-                  onChange={(v) => setCampaignFilter(v)}
-                  placeholder="All campaigns"
-                  size="sm"
-                />
-              </div>
-            }
-          />
-        </div>
-
-        <BreakdownTabs params={params} />
-
-        <Card className="flex flex-col p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Recent runs</h3>
-            <span className="text-[11.5px] text-[var(--text-muted)]">{runs.data?.total ?? 0} runs</span>
-          </div>
-          <DataTable
-            columns={runColumns}
-            data={runs.data?.rows ?? []}
-            keyExtractor={(r) => r.runId}
-            minWidth="0"
-            onRowClick={(r) => setOpenRunId(r.runId)}
-            emptyIcon={BarChart3}
-            emptyTitle="No runs"
-            emptyDescription="No campaign runs in the selected range."
-          />
-        </Card>
-      </div>
+      <Tabs
+        tabs={tabs}
+        defaultTab={activeTab}
+        onChange={handleTabChange}
+        mountStrategy="active-only"
+        fillHeight
+      />
 
       <RightSlideOverShell
         isOpen={openRunId !== null}
@@ -316,17 +331,131 @@ export function OrchestrationAnalyticsPage({ scope = 'mine' }: { scope?: Analyti
   );
 }
 
-function BreakdownTabs({ params }: { params: { appId: string; scope: AnalyticsScope; from: string; to: string } }) {
+interface OverviewPanelProps {
+  ov: OrchestrationOverview | undefined;
+  signals: { severity: string; title: string; detail: string }[];
+  generatedAt: string | null;
+  trendData: Record<string, unknown>[];
+  funnelStages: { key: string; label: string; value: number }[];
+  campaignOptions: { value: string; label: string }[];
+  campaignFilter: string;
+  onCampaignFilterChange: (value: string) => void;
+}
+
+function OverviewPanel({
+  ov,
+  signals,
+  generatedAt,
+  trendData,
+  funnelStages,
+  campaignOptions,
+  campaignFilter,
+  onCampaignFilterChange,
+}: OverviewPanelProps) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <SignalsBox signals={signals} generatedAt={generatedAt} />
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+        <StatCard icon={Megaphone} label="Campaigns" value={formatInt(ov?.campaigns ?? 0)} />
+        <StatCard icon={Users} label="Recipients" value={formatInt(ov?.recipients ?? 0)} />
+        <StatCard
+          icon={Wifi}
+          label="Connected %"
+          value={formatPct((ov?.reached ?? 0) + (ov?.positive ?? 0), ov?.recipients ?? 0)}
+        />
+        <StatCard
+          icon={CircleCheck}
+          label="Positive %"
+          value={formatPct(ov?.positive ?? 0, ov?.recipients ?? 0)}
+          tone="positive"
+        />
+        <StatCard
+          icon={CircleX}
+          label="Failed %"
+          value={formatPct(ov?.failed ?? 0, ov?.recipients ?? 0)}
+          tone={ov && ov.failed > 0 ? 'danger' : 'neutral'}
+        />
+        <StatCard icon={Coins} label="Spend" value={formatUsd(ov?.spend ?? 0)} />
+        <StatCard
+          icon={Activity}
+          label="In-flight"
+          value={formatInt(ov?.inFlightRuns ?? 0)}
+          hint={ov ? `${formatInt(ov.inFlight)} recipients` : undefined}
+        />
+      </div>
+
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+        <TrendCard
+          title="Outcomes over time"
+          data={trendData}
+          xKey="date"
+          seriesKeys={['positive', 'reached', 'failed']}
+        />
+        <FunnelCard
+          title="Conversion funnel"
+          stages={funnelStages}
+          headerControl={
+            <div className="w-48">
+              <Combobox
+                options={campaignOptions}
+                value={campaignFilter}
+                onChange={onCampaignFilterChange}
+                placeholder="All campaigns"
+                size="sm"
+              />
+            </div>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+interface RecentRunsPanelProps {
+  columns: ColumnDef<OrchestrationRunRow>[];
+  rows: OrchestrationRunRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onRowClick: (row: OrchestrationRunRow) => void;
+}
+
+function RecentRunsPanel({
+  columns, rows, total, page, pageSize, onPageChange, onRowClick,
+}: RecentRunsPanelProps) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <Card className="flex h-full min-h-0 flex-col p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Recent runs</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">{total} runs</span>
+      </div>
+      <DataTable
+        columns={columns}
+        data={rows}
+        keyExtractor={(r) => r.runId}
+        minWidth="0"
+        onRowClick={onRowClick}
+        emptyIcon={BarChart3}
+        emptyTitle="No runs"
+        emptyDescription="No campaign runs in the selected range."
+        pagination={{ page, totalPages, onPageChange, pageSize, totalItems: total, showCount: true }}
+      />
+    </Card>
+  );
+}
+
+function BreakdownTabs({ params }: { params: AnalyticsParams }) {
   const tabs = BREAKDOWN_TABS.map((tab) => ({
     id: tab.id,
     label: tab.label,
     content: <BreakdownPanel dimension={tab.id} nameHeader={tab.nameHeader} params={params} />,
   }));
   return (
-    <Card className="flex flex-col p-2">
-      <div className="h-[360px]">
-        <Tabs tabs={tabs} defaultTab="campaign" mountStrategy="active-only" fillHeight />
-      </div>
+    <Card className="flex h-full min-h-0 flex-col p-2">
+      <Tabs tabs={tabs} defaultTab="campaign" mountStrategy="active-only" fillHeight />
     </Card>
   );
 }
@@ -347,7 +476,7 @@ function BreakdownPanel({
 }: {
   dimension: BreakdownDimension;
   nameHeader: string;
-  params: { appId: string; scope: AnalyticsScope; from: string; to: string };
+  params: AnalyticsParams;
 }) {
   const { data } = useOrchestrationBreakdown({ ...params, dimension });
   const rows = data?.rows ?? [];
