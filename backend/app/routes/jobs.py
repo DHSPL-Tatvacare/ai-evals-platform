@@ -13,9 +13,31 @@ from app.auth.permissions import ensure_any_permission
 from app.database import get_db
 from app.models.job import BackgroundJob
 from app.models.eval_run import EvaluationRun
+from app.openapi_examples import err, ok
 from app.schemas.job import JobCreate, JobResponse
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+_JOB_EXAMPLE = {
+    "id": "b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f",
+    "appId": "support-assistant",
+    "jobType": "evaluate-batch",
+    "status": "queued",
+    "priority": 100,
+    "queueClass": "standard",
+    "attemptCount": 0,
+    "maxAttempts": 1,
+    "params": {"listingIds": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]},
+    "submissionContext": None,
+    "result": None,
+    "progress": {"current": 0, "total": 12, "message": "queued"},
+    "errorMessage": None,
+    "createdAt": "2026-05-20T09:20:00Z",
+    "startedAt": None,
+    "completedAt": None,
+    "queuePosition": 3,
+    "idempotencyKey": "batch-2026-05-20-001",
+}
 
 # Idempotency keys are opaque client tokens. Cap the length at the column
 # width and reject obvious garbage so the unique-index path is the only
@@ -37,13 +59,38 @@ def _normalize_idempotency_key(raw: str | None) -> str | None:
     return key
 
 
-@router.post("", response_model=JobResponse, status_code=201)
+@router.post(
+    "",
+    response_model=JobResponse,
+    status_code=201,
+    summary="Submit a job",
+    description=(
+        "Queue a long-running operation — an evaluation, report, or backfill — and get "
+        "back a job to poll. Set `jobType` to a registered type and pass its `params`; "
+        "tenant, user, and app context are injected for you. Send an `Idempotency-Key` "
+        "header to make retries safe: a repeat with the same key returns the original job "
+        "(HTTP 200) instead of starting a duplicate.\n\n"
+        "**Authentication:** Bearer token holding the permission(s) the chosen `jobType` "
+        "requires (e.g. `evaluation:run` for evaluation jobs)."
+    ),
+    responses={
+        201: ok("The job was queued.", _JOB_EXAMPLE),
+        200: ok("Idempotent replay — the job with this Idempotency-Key already existed and is returned unchanged.", _JOB_EXAMPLE),
+        400: err("Invalid params for this job type, or the Idempotency-Key is too long.", "Idempotency-Key must be <= 120 chars"),
+        409: err("A concurrent submission with the same Idempotency-Key won the race.", "BackgroundJob submission conflict"),
+        422: err("The job_type has no registered handler.", "Unknown job_type: 'evaluate-foo'"),
+    },
+)
 async def submit_job(
     body: JobCreate,
     response: Response,
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
-    idempotency_key_header: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key_header: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        description="Optional opaque token (≤120 chars). Resubmitting with the same key returns the original job instead of starting a new one.",
+    ),
 ):
     """Submit a new background job.
 
@@ -172,12 +219,22 @@ async def submit_job(
     return job
 
 
-@router.get("", response_model=list[JobResponse])
+@router.get(
+    "",
+    response_model=list[JobResponse],
+    summary="List jobs",
+    description=(
+        "Return your jobs, newest first, optionally filtered by status or job type and "
+        "paginated with `limit`/`offset`. Scoped to your tenant and user.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={200: ok("Your jobs, newest first.", [_JOB_EXAMPLE])},
+)
 async def list_jobs(
-    status: Optional[str] = Query(None),
-    job_type: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    status: Optional[str] = Query(None, description="Filter by status, e.g. `queued`, `running`, `completed`, `failed`, `cancelled`."),
+    job_type: Optional[str] = Query(None, description="Filter by job type, e.g. `evaluate-batch`."),
+    limit: int = Query(20, ge=1, le=100, description="Page size (1–100)."),
+    offset: int = Query(0, ge=0, description="Number of jobs to skip."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -200,7 +257,21 @@ async def list_jobs(
     return result.scalars().all()
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get(
+    "/{job_id}",
+    response_model=JobResponse,
+    summary="Get job status",
+    description=(
+        "Poll a job's status, progress, result, and — while it's waiting — its position "
+        "in the queue. This is the endpoint you call on a timer after submitting, until "
+        "`status` reaches `completed`, `failed`, or `cancelled`.\n\n"
+        "**Authentication:** Bearer token. Only your own jobs are visible."
+    ),
+    responses={
+        200: ok("The job's current state.", _JOB_EXAMPLE),
+        404: err("No such job for your tenant and user.", "BackgroundJob not found"),
+    },
+)
 async def get_job(
     job_id: UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -232,7 +303,22 @@ async def get_job(
     return job
 
 
-@router.post("/{job_id}/cancel")
+@router.post(
+    "/{job_id}/cancel",
+    summary="Cancel a job",
+    description=(
+        "Request cancellation of a queued or running job. Any evaluation run the job "
+        "created is also marked cancelled so downstream views update immediately. Jobs "
+        "already `completed` or `failed` cannot be cancelled; calling on an already-"
+        "cancelled job is a safe no-op.\n\n"
+        "**Authentication:** Bearer token holding the permission(s) the job's type requires."
+    ),
+    responses={
+        200: ok("The job is cancelled.", {"id": "b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f", "status": "cancelled"}),
+        400: err("The job is in a terminal state and cannot be cancelled.", "Cannot cancel job in 'completed' state"),
+        404: err("No such job for your tenant and user.", "BackgroundJob not found"),
+    },
+)
 async def cancel_job(
     job_id: UUID,
     auth: AuthContext = Depends(get_auth_context),

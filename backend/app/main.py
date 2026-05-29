@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from scalar_fastapi import get_scalar_api_reference
+from scalar_fastapi import AgentScalarConfig, get_scalar_api_reference
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -269,11 +269,92 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+# API-reference section descriptions, keyed by tag. Tags listed here render with
+# prose and sort to the top in the documented order; tags not yet listed still
+# appear (described group-by-group as each surface is documented).
+OPENAPI_TAGS = [
+    {
+        "name": "auth",
+        "description": (
+            "Authentication and session management. Log in to obtain a bearer access "
+            "token, refresh or revoke it, change your password, and redeem invite links "
+            "to create accounts. Public endpoints here are rate-limited per IP; every "
+            "other endpoint on the platform requires the bearer token issued here."
+        ),
+    },
+    {
+        "name": "listings",
+        "description": (
+            "Listings are the unit of evaluation input. Each listing holds the source "
+            "data for one conversation, call, or record — uploaded audio and transcripts, "
+            "or an API-captured response — that evaluations then run against. A listing's "
+            "`sourceType` is fixed once set, and deleting a listing cascades to its "
+            "evaluation runs. Scoped to your tenant, app, and user."
+        ),
+    },
+    {
+        "name": "files",
+        "description": (
+            "Raw file storage for the assets that back listings and evaluations — audio, "
+            "transcripts, and structured JSON. Upload a file once, then reference the "
+            "returned file id from a listing. Uploads are size- and MIME-type limited."
+        ),
+    },
+    {
+        "name": "jobs",
+        "description": (
+            "The asynchronous work queue. Long-running operations — evaluations, report "
+            "generation, backfills — are submitted here, then polled for status and "
+            "progress rather than blocking the request. Submission is idempotent when you "
+            "pass an `Idempotency-Key` header, so safe retries never double-run work."
+        ),
+    },
+    {
+        "name": "eval-runs",
+        "description": (
+            "Evaluation runs are the core output of the platform — one row per evaluation, "
+            "with `evalType` discriminating its shape (thread, adversarial, batch, custom, "
+            "full). Query and filter runs, read their summaries and per-thread or per-case "
+            "results, inspect the underlying LLM call logs, share runs across your tenant, "
+            "and delete them. Reads honor sharing; mutations require `evaluation:manage`."
+        ),
+    },
+    {
+        "name": "threads",
+        "description": (
+            "Look up a single conversation thread's evaluation history across every run you "
+            "can read — useful for tracking how one conversation scored over time."
+        ),
+    },
+    {
+        "name": "orchestration",
+        "description": (
+            "Build and run automation workflows, and manage everything they depend on. A "
+            "workflow is a graph of capability nodes — sources, filters, logic, messaging, "
+            "voice, and sinks — that you author, validate, publish, and run against a set "
+            "of contacts. This section also covers the **provider connections** (encrypted "
+            "WhatsApp/voice/SMS/CRM credentials, referenced by id), **datasets** and "
+            "**cohorts** that feed a workflow, the node-type catalog, run-now, and run "
+            "history. Mutations require `orchestration:manage`."
+        ),
+    },
+    {
+        "name": "orchestration-webhooks",
+        "description": (
+            "Inbound event ingestion. External CRM and clinical systems POST events to a "
+            "per-trigger webhook URL whose token resolves to exactly one workflow and "
+            "tenant — there is no shared secret. These routes are public by design and "
+            "authenticated solely by the URL token."
+        ),
+    },
+]
+
 app = FastAPI(
     title="TatvaCare AI Platform API",
     version="1.0.0",
     description="Backend API for AI evaluation pipelines.",
     lifespan=lifespan,
+    openapi_tags=OPENAPI_TAGS,
 )
 
 # Rate limiter (used by auth routes via app.state.limiter)
@@ -348,6 +429,7 @@ async def scalar_reference():
         title="TatvaCare AI Platform API",
         servers=[{"url": f"http://localhost:{settings.API_PORT}", "description": "Local"}],
         telemetry=False,
+        agent=AgentScalarConfig(disabled=True),
     )
 
 

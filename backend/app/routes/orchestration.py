@@ -23,6 +23,7 @@ from app.auth.permissions import require_permission
 from app.database import get_db
 from app.models.orchestration import Workflow, WorkflowRun
 from app.models.user import User
+from app.openapi_examples import err
 from app.services.access_control import can_access
 from app.schemas.orchestration import (
     ActionResponse,
@@ -98,6 +99,14 @@ router = APIRouter(prefix="/api/orchestration", tags=["orchestration"])
 @router.post(
     "/workflows/validate",
     response_model=WorkflowValidateResponse,
+    summary="Validate a workflow definition",
+    description=(
+        "Validate a workflow graph without saving anything — checks node types, edges, "
+        "predicates, and config shapes. Powers JSON-import preview and authored-payload "
+        "checks. Unknown `connection_id` references come back as **warnings**, not errors, "
+        "so a cross-tenant import can land as a draft you rebind in the builder.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
 )
 async def validate_workflow_payload(
     body: WorkflowValidateRequest,
@@ -120,7 +129,18 @@ async def validate_workflow_payload(
     return WorkflowValidateResponse.model_validate(result)
 
 
-@router.post("/workflows", response_model=WorkflowResponse, status_code=201)
+@router.post(
+    "/workflows",
+    response_model=WorkflowResponse,
+    status_code=201,
+    summary="Create a workflow",
+    description=(
+        "Create an empty workflow shell (name, slug, type). The graph itself is added "
+        "afterward by saving a draft, then published to become runnable.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage` and access to the app."
+    ),
+    responses={409: err("A workflow with this slug already exists for the app.", "Workflow slug already in use")},
+)
 async def create_workflow(
     body: WorkflowCreateRequest,
     auth: AuthContext = require_permission('orchestration:manage'),
@@ -233,13 +253,23 @@ async def _attach_last_runs(
     ]
 
 
-@router.get("/workflows", response_model=list[WorkflowResponse])
+@router.get(
+    "/workflows",
+    response_model=list[WorkflowResponse],
+    summary="List workflows",
+    description=(
+        "List the workflows you can see, each annotated with its latest run summary and "
+        "creator. Filter by app, type, and sharing state. With no `appId`, results are "
+        "limited to the apps you can access.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def list_workflows(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
-    app_id: Optional[str] = Query(None, alias="appId"),
-    workflow_type: Optional[str] = Query(None, alias="workflowType"),
-    visibility: Literal["all", "private", "shared"] = Query("all"),
+    app_id: Optional[str] = Query(None, alias="appId", description="Restrict to one app."),
+    workflow_type: Optional[str] = Query(None, alias="workflowType", description="Filter by workflow type."),
+    visibility: Literal["all", "private", "shared"] = Query("all", description="Filter by sharing state."),
 ):
     if app_id is not None:
         await ensure_registered_app_access(db, auth, app_id)
@@ -264,7 +294,17 @@ async def list_workflows(
     return await _attach_last_runs(db, tenant_id=auth.tenant_id, workflows=wfs)
 
 
-@router.get("/system-workflows", response_model=list[WorkflowResponse])
+@router.get(
+    "/system-workflows",
+    response_model=list[WorkflowResponse],
+    summary="List system workflow templates",
+    description=(
+        "List the platform-seeded workflow templates you can clone (e.g. a default "
+        "concierge or adherence flow). Templates are never run directly, so their "
+        "`lastRun` fields are null; clone one into your tenant to run and edit it.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def list_system_workflows(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
@@ -288,7 +328,17 @@ async def list_system_workflows(
     return [_to_workflow_response(w) for w in wfs]
 
 
-@router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
+@router.get(
+    "/workflows/{workflow_id}",
+    response_model=WorkflowResponse,
+    summary="Get a workflow",
+    description=(
+        "Fetch one workflow (active or archived) with its latest run summary and creator. "
+        "Returns 404 for a workflow you can't read.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={404: err("No such workflow readable by you.", "workflow not found")},
+)
 async def get_workflow(
     workflow_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -306,7 +356,20 @@ async def get_workflow(
     )
 
 
-@router.patch("/workflows/{workflow_id}", response_model=WorkflowResponse)
+@router.patch(
+    "/workflows/{workflow_id}",
+    response_model=WorkflowResponse,
+    summary="Update workflow metadata",
+    description=(
+        "Update a workflow's name, description, or visibility. The graph is edited via the "
+        "draft endpoint, not here. Shared workflows you don't own are read-only (403).\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        403: err("The workflow is shared and read-only for you.", "workflow is read-only"),
+        404: err("No such workflow.", "workflow not found"),
+    },
+)
 async def update_workflow(
     workflow_id: uuid.UUID,
     body: WorkflowUpdateRequest,
@@ -324,7 +387,20 @@ async def update_workflow(
     return wf
 
 
-@router.delete("/workflows/{workflow_id}", status_code=204)
+@router.delete(
+    "/workflows/{workflow_id}",
+    status_code=204,
+    summary="Archive a workflow",
+    description=(
+        "Archive (soft-delete) a workflow so it no longer appears in active listings or "
+        "runs. Existing run history is preserved. Returns 204.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        204: {"description": "Archived; no content."},
+        404: err("No such workflow.", "workflow not found"),
+    },
+)
 async def archive_workflow(
     workflow_id: uuid.UUID,
     auth: AuthContext = require_permission('orchestration:manage'),
@@ -340,6 +416,17 @@ async def archive_workflow(
     "/workflows/clone",
     response_model=WorkflowResponse,
     status_code=201,
+    summary="Clone a system workflow",
+    description=(
+        "Copy a platform-seeded system workflow into your tenant under a new slug and "
+        "name, so you can edit and run it without affecting the shared template. This is "
+        "how seeded flows are rolled out per tenant.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage` and access to the target app."
+    ),
+    responses={
+        400: err("The clone request is invalid (e.g. slug taken, bad target).", "slug already in use"),
+        404: err("The source system workflow does not exist.", "source system workflow not found"),
+    },
 )
 async def clone_system_workflow(
     body: CloneSystemWorkflowRequest,
@@ -378,6 +465,18 @@ async def clone_system_workflow(
 @router.put(
     "/workflows/{workflow_id}/draft",
     response_model=WorkflowResponse,
+    summary="Save the workflow draft",
+    description=(
+        "Save the working graph as the workflow's draft. Drafts may omit runtime-required "
+        "fields, but fabricated keys, wrong types, bad edges, malformed predicates, and "
+        "unknown node types are rejected with a structured error list (same shape as "
+        "publish). Publish the draft separately to make it runnable.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        400: err("The draft graph is structurally invalid (see the errors array).", "Unknown node type"),
+        404: err("No such workflow.", "workflow not found"),
+    },
 )
 async def save_draft(
     workflow_id: uuid.UUID,
@@ -408,6 +507,13 @@ async def save_draft(
 @router.get(
     "/workflows/{workflow_id}/versions",
     response_model=list[WorkflowVersionResponse],
+    summary="List workflow versions",
+    description=(
+        "List a workflow's version history — the draft plus every published version, newest "
+        "first.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={404: err("No such workflow.", "workflow not found")},
 )
 async def list_versions(
     workflow_id: uuid.UUID,
@@ -423,6 +529,12 @@ async def list_versions(
 @router.get(
     "/workflows/{workflow_id}/versions/{version_id}",
     response_model=WorkflowVersionResponse,
+    summary="Get a workflow version",
+    description=(
+        "Fetch one specific version of a workflow, including its full graph definition.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={404: err("No such version for this workflow.", "version not found")},
 )
 async def get_version(
     workflow_id: uuid.UUID,
@@ -440,6 +552,19 @@ async def get_version(
 @router.post(
     "/workflows/{workflow_id}/publish",
     response_model=WorkflowVersionResponse,
+    summary="Publish the workflow draft",
+    description=(
+        "Promote the current draft to a new published version, making the workflow "
+        "runnable. Full validation runs here: missing runtime-required fields (e.g. an "
+        "unbound dispatch field) return **422** with a structured error list; structural "
+        "problems return **400**.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        400: err("The draft graph is structurally invalid (see the errors array).", "Invalid workflow definition"),
+        422: err("Runtime-required fields are missing for one or more dispatch nodes.", "Missing required field: template"),
+        404: err("No such workflow.", "workflow not found"),
+    },
 )
 async def publish_draft(
     workflow_id: uuid.UUID,
@@ -471,7 +596,17 @@ async def publish_draft(
 # ─── Event catalog ────────────────────────────────────────────────────────────
 
 
-@router.get("/event-catalog", response_model=EventCatalogResponse)
+@router.get(
+    "/event-catalog",
+    response_model=EventCatalogResponse,
+    summary="List canonical event names",
+    description=(
+        "Return the canonical event names available for an event trigger, scoped to a "
+        "workflow type (`crm` or `clinical`). Powers the event-trigger picker; any other "
+        "type returns an empty list.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def get_event_catalog(
     workflow_type: str = Query(..., alias="workflowType"),
     auth: AuthContext = Depends(get_auth_context),
@@ -502,6 +637,17 @@ def _trigger_view(trig, request: Request) -> TriggerResponse:
     "/workflows/{workflow_id}/triggers",
     response_model=TriggerResponse,
     status_code=201,
+    summary="Create a trigger",
+    description=(
+        "Attach a trigger to a workflow so it fires automatically — a `schedule` trigger "
+        "(cron) or an `event` trigger (inbound CRM/clinical event). Event triggers come "
+        "back with a unique inbound webhook URL the external system posts to.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        400: err("Invalid trigger config (e.g. bad cron, unknown event).", "invalid cron expression"),
+        404: err("No such workflow.", "workflow not found"),
+    },
 )
 async def create_trigger(
     workflow_id: uuid.UUID,
@@ -529,6 +675,13 @@ async def create_trigger(
 @router.get(
     "/workflows/{workflow_id}/triggers",
     response_model=list[TriggerResponse],
+    summary="List a workflow's triggers",
+    description=(
+        "List the schedule and event triggers attached to a workflow, including each event "
+        "trigger's inbound webhook URL.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={404: err("No such workflow.", "workflow not found")},
 )
 async def list_triggers(
     workflow_id: uuid.UUID,
@@ -543,7 +696,20 @@ async def list_triggers(
     return [_trigger_view(t, request) for t in rows]
 
 
-@router.patch("/triggers/{trigger_id}", response_model=TriggerResponse)
+@router.patch(
+    "/triggers/{trigger_id}",
+    response_model=TriggerResponse,
+    summary="Update a trigger",
+    description=(
+        "Update a trigger — toggle it active/inactive, change a schedule's cron, or adjust "
+        "its params. Event-name and vendor are fixed at creation.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        400: err("Invalid update (e.g. bad cron).", "invalid cron expression"),
+        404: err("No such trigger.", "trigger not found"),
+    },
+)
 async def update_trigger(
     trigger_id: uuid.UUID,
     body: TriggerUpdateRequest,
@@ -575,6 +741,17 @@ async def update_trigger(
 @router.post(
     "/triggers/{trigger_id}/rotate-token",
     response_model=TriggerRotateTokenResponse,
+    summary="Rotate an event trigger's webhook token",
+    description=(
+        "Issue a fresh inbound-webhook token for an event trigger and return the new URL. "
+        "The previous URL stops working immediately — update the external system after "
+        "rotating.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        400: err("This trigger is not an event trigger (nothing to rotate).", "trigger has no webhook token"),
+        404: err("No such trigger.", "trigger not found"),
+    },
 )
 async def rotate_trigger_token(
     trigger_id: uuid.UUID,
@@ -600,7 +777,20 @@ async def rotate_trigger_token(
     return TriggerRotateTokenResponse(**result)
 
 
-@router.delete("/triggers/{trigger_id}", status_code=204)
+@router.delete(
+    "/triggers/{trigger_id}",
+    status_code=204,
+    summary="Delete a trigger",
+    description=(
+        "Remove a trigger from its workflow. For an event trigger this also invalidates its "
+        "inbound webhook URL. Returns 204.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        204: {"description": "Deleted; no content."},
+        404: err("No such trigger.", "trigger not found"),
+    },
+)
 async def delete_trigger(
     trigger_id: uuid.UUID,
     auth: AuthContext = require_permission('orchestration:manage'),
@@ -622,7 +812,22 @@ async def delete_trigger(
 # ─── Runs ───────────────────────────────────────────────────────────────────
 
 
-@router.post("/runs", response_model=RunResponse, status_code=201)
+@router.post(
+    "/runs",
+    response_model=RunResponse,
+    status_code=201,
+    summary="Run a workflow now",
+    description=(
+        "Manually fire a published workflow (\"Run now\"), creating a run over the resolved "
+        "recipient set. Poll the returned run for live progress, recipient state, and "
+        "actions. The workflow must be published and runnable.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={
+        400: err("The workflow can't be fired (e.g. no published version or empty audience).", "workflow has no published version"),
+        404: err("No such workflow.", "workflow not found"),
+    },
+)
 async def fire_manual(
     body: RunCreateRequest,
     auth: AuthContext = require_permission('orchestration:manage'),
@@ -654,13 +859,23 @@ async def _load_and_gate_run(db: AsyncSession, auth: AuthContext, run_id: uuid.U
     return run
 
 
-@router.get("/runs", response_model=RunListResponse)
+@router.get(
+    "/runs",
+    response_model=RunListResponse,
+    summary="List workflow runs",
+    description=(
+        "List workflow runs you can read, filtered by workflow, app, and status, with a "
+        "total count for pagination. With no `appId`, results are limited to the apps you "
+        "can access.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def list_runs(
-    workflow_id: Optional[uuid.UUID] = Query(None, alias="workflowId"),
-    app_id: Optional[str] = Query(None, alias="appId"),
-    status: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    workflow_id: Optional[uuid.UUID] = Query(None, alias="workflowId", description="Restrict to one workflow."),
+    app_id: Optional[str] = Query(None, alias="appId", description="Restrict to one app."),
+    status: Optional[str] = Query(None, description="Filter by run status."),
+    limit: int = Query(50, ge=1, le=200, description="Page size (1–200)."),
+    offset: int = Query(0, ge=0, description="Rows to skip."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -698,19 +913,30 @@ async def list_runs(
     )
 
 
-@router.get("/actions", response_model=WorkflowActionListResponse)
+@router.get(
+    "/actions",
+    response_model=WorkflowActionListResponse,
+    summary="List outbound actions (tenant-wide)",
+    description=(
+        "The tenant-wide outbound action log — every message/call a workflow dispatched, "
+        "across runs. Rich filters (workflow, app, channel, action type, status, recipient, "
+        "provider correlation id, time window) feed the platform Logs page. App-gated to "
+        "the apps you can access.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def list_workflow_actions_global(
-    workflow_id: Optional[uuid.UUID] = Query(None, alias="workflowId"),
-    app_id: Optional[str] = Query(None, alias="appId"),
-    channel: Optional[str] = None,
-    action_type: Optional[str] = Query(None, alias="actionType"),
-    status: Optional[str] = None,
-    recipient_id: Optional[str] = Query(None, alias="recipientId"),
-    provider_correlation_id: Optional[str] = Query(None, alias="providerCorrelationId"),
-    since: Optional[datetime] = None,
-    until: Optional[datetime] = None,
-    limit: int = Query(100, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    workflow_id: Optional[uuid.UUID] = Query(None, alias="workflowId", description="Restrict to one workflow."),
+    app_id: Optional[str] = Query(None, alias="appId", description="Restrict to one app."),
+    channel: Optional[str] = Query(None, description="Filter by channel, e.g. `whatsapp`, `voice`."),
+    action_type: Optional[str] = Query(None, alias="actionType", description="Filter by action type."),
+    status: Optional[str] = Query(None, description="Filter by action status."),
+    recipient_id: Optional[str] = Query(None, alias="recipientId", description="Filter to one recipient."),
+    provider_correlation_id: Optional[str] = Query(None, alias="providerCorrelationId", description="Filter by the provider's correlation id."),
+    since: Optional[datetime] = Query(None, description="Only actions at or after this timestamp."),
+    until: Optional[datetime] = Query(None, description="Only actions before this timestamp."),
+    limit: int = Query(100, ge=1, le=200, description="Page size (1–200)."),
+    offset: int = Query(0, ge=0, description="Rows to skip."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -754,7 +980,17 @@ async def list_workflow_actions_global(
     )
 
 
-@router.get("/runs/{run_id}", response_model=RunResponse)
+@router.get(
+    "/runs/{run_id}",
+    response_model=RunResponse,
+    summary="Get a run",
+    description=(
+        "Fetch a single workflow run by id — status, counts, and timing. Poll it to track "
+        "progress after firing.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={404: err("No such run readable by you.", "run not found")},
+)
 async def get_run(
     run_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -763,7 +999,18 @@ async def get_run(
     return await _load_and_gate_run(db, auth, run_id)
 
 
-@router.get("/runs/{run_id}/overlay", response_model=RunOverlaySnapshotResponse)
+@router.get(
+    "/runs/{run_id}/overlay",
+    response_model=RunOverlaySnapshotResponse,
+    summary="Get a run's canvas overlay",
+    description=(
+        "Return the run plus the latest per-node step states, so the builder canvas can "
+        "overlay live progress on the workflow graph (which nodes are done, active, or "
+        "errored).\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={404: err("No such run.", "run not found")},
+)
 async def get_run_overlay(
     run_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -779,11 +1026,21 @@ async def get_run_overlay(
     )
 
 
-@router.get("/runs/{run_id}/recipients", response_model=list[RecipientStateResponse])
+@router.get(
+    "/runs/{run_id}/recipients",
+    response_model=list[RecipientStateResponse],
+    summary="List a run's recipients",
+    description=(
+        "List the recipients in a run and each one's current state — which node they're at, "
+        "whether they're waiting, done, or errored. Paginated.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={404: err("No such run.", "run not found")},
+)
 async def list_run_recipients(
     run_id: uuid.UUID,
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500, description="Page size (1–500)."),
+    offset: int = Query(0, ge=0, description="Rows to skip."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -793,13 +1050,23 @@ async def list_run_recipients(
     )
 
 
-@router.get("/runs/{run_id}/actions", response_model=list[ActionResponse])
+@router.get(
+    "/runs/{run_id}/actions",
+    response_model=list[ActionResponse],
+    summary="List a run's actions",
+    description=(
+        "List the outbound actions (messages, calls) dispatched within a single run, "
+        "filterable by channel and action type.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={404: err("No such run.", "run not found")},
+)
 async def list_run_actions(
     run_id: uuid.UUID,
-    channel: Optional[str] = None,
-    action_type: Optional[str] = Query(None, alias="actionType"),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    channel: Optional[str] = Query(None, description="Filter by channel."),
+    action_type: Optional[str] = Query(None, alias="actionType", description="Filter by action type."),
+    limit: int = Query(200, ge=1, le=1000, description="Page size (1–1000)."),
+    offset: int = Query(0, ge=0, description="Rows to skip."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -810,7 +1077,17 @@ async def list_run_actions(
     )
 
 
-@router.get("/runs/{run_id}/actions/{action_id}", response_model=ActionResponse)
+@router.get(
+    "/runs/{run_id}/actions/{action_id}",
+    response_model=ActionResponse,
+    summary="Get a run action",
+    description=(
+        "Fetch a single dispatched action within a run — its payload, provider correlation "
+        "id, status, and outcome.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={404: err("No such run or action.", "action not found")},
+)
 async def get_run_action(
     run_id: uuid.UUID,
     action_id: uuid.UUID,
@@ -829,7 +1106,18 @@ async def get_run_action(
     return action
 
 
-@router.post("/runs/{run_id}/cancel", response_model=TerminationReceipt)
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=TerminationReceipt,
+    summary="Cancel a run",
+    description=(
+        "Request cancellation of an in-progress run. Returns a termination receipt; "
+        "provider-side cancellation of already-dispatched actions finalizes asynchronously "
+        "(poll `cancel-audits` for those outcomes).\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={404: err("No such run.", "run not found")},
+)
 async def cancel_run(
     run_id: uuid.UUID,
     body: CancelRunRequest = CancelRunRequest(),
@@ -848,7 +1136,17 @@ async def cancel_run(
     return receipt
 
 
-@router.get("/runs/{run_id}/cancel-audits", response_model=list[CancelAuditRead])
+@router.get(
+    "/runs/{run_id}/cancel-audits",
+    response_model=list[CancelAuditRead],
+    summary="List a run's cancellation audits",
+    description=(
+        "List the provider-side cancellation outcomes recorded after a run was cancelled. "
+        "The Stop receipt panel polls this; rows appearing mean the async finalize ran.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={404: err("No such run.", "run not found")},
+)
 async def list_run_cancel_audits(
     run_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -866,6 +1164,14 @@ async def list_run_cancel_audits(
     "/runs/{run_id}/recipients/{recipient_id}/override",
     response_model=OverrideResponse,
     status_code=201,
+    summary="Override a recipient's path",
+    description=(
+        "Manually intervene on one recipient in a run — e.g. skip them, or jump them to a "
+        "specific node — with a reason recorded for audit. Used by operators to unstick or "
+        "redirect individual recipients.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+    responses={404: err("No such run or recipient.", "run not found")},
 )
 async def override_recipient(
     run_id: uuid.UUID,
@@ -889,10 +1195,19 @@ async def override_recipient(
 # ─── Action templates ───────────────────────────────────────────────────────
 
 
-@router.get("/action_templates", response_model=list[ActionTemplateResponse])
+@router.get(
+    "/action_templates",
+    response_model=list[ActionTemplateResponse],
+    summary="List action templates",
+    description=(
+        "List reusable action templates (per channel) that workflow dispatch nodes can "
+        "bind to, optionally scoped to one app and channel.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def list_action_templates(
-    app_id: Optional[str] = Query(None, alias="appId"),
-    channel: Optional[str] = None,
+    app_id: Optional[str] = Query(None, alias="appId", description="Restrict to one app."),
+    channel: Optional[str] = Query(None, description="Filter by channel, e.g. `whatsapp`, `voice`."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -903,7 +1218,16 @@ async def list_action_templates(
     )
 
 
-@router.post("/action_templates", response_model=ActionTemplateResponse)
+@router.post(
+    "/action_templates",
+    response_model=ActionTemplateResponse,
+    summary="Create or update an action template",
+    description=(
+        "Upsert a tenant-owned action template by slug for an app and channel — its name, "
+        "payload schema, and active flag. Re-posting the same slug updates it in place.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage`."
+    ),
+)
 async def upsert_action_template(
     body: ActionTemplateUpsertRequest,
     app_id: str = Query(..., alias="appId"),
@@ -921,7 +1245,16 @@ async def upsert_action_template(
 # ─── Consent ────────────────────────────────────────────────────────────────
 
 
-@router.get("/consent/{recipient_id}", response_model=list[ConsentResponse])
+@router.get(
+    "/consent/{recipient_id}",
+    response_model=list[ConsentResponse],
+    summary="Get a recipient's consent",
+    description=(
+        "Return the consent records for a recipient in an app — per channel, the current "
+        "opt-in/opt-out status and its source. Workflows honor these before dispatching.\n\n"
+        "**Authentication:** Bearer token with access to the app."
+    ),
+)
 async def get_consent(
     recipient_id: str,
     app_id: str = Query(..., alias="appId"),
@@ -934,7 +1267,18 @@ async def get_consent(
     )
 
 
-@router.post("/consent", response_model=ConsentResponse, status_code=201)
+@router.post(
+    "/consent",
+    response_model=ConsentResponse,
+    status_code=201,
+    summary="Set a recipient's consent",
+    description=(
+        "Record a consent decision for a recipient on a channel — opt-in or opt-out, with "
+        "its source and supporting evidence. This is the gate workflows check before "
+        "contacting someone.\n\n"
+        "**Authentication:** Bearer token with `orchestration:manage` and access to the app."
+    ),
+)
 async def set_consent(
     body: ConsentSetRequest,
     app_id: str = Query(..., alias="appId"),
@@ -952,18 +1296,38 @@ async def set_consent(
 # ─── Node-type catalog (palette) ───────────────────────────────────────────
 
 
-@router.get("/node_types", response_model=list[NodeTypeDescriptor])
+@router.get(
+    "/node_types",
+    response_model=list[NodeTypeDescriptor],
+    summary="List node types (palette)",
+    description=(
+        "Return the catalog of node types available to the builder palette — sources, "
+        "filters, logic, messaging, voice, and sinks — with their display metadata and "
+        "config schemas. Optionally scoped to a workflow type.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def get_node_types(
-    workflow_type: Optional[str] = Query(None, alias="workflowType"),
+    workflow_type: Optional[str] = Query(None, alias="workflowType", description="Restrict to node types valid for this workflow type."),
     auth: AuthContext = Depends(get_auth_context),
 ):
     return list_node_types(workflow_type=workflow_type)
 
 
-@router.get("/source_catalog", response_model=list[CohortSourceResponse])
+@router.get(
+    "/source_catalog",
+    response_model=list[CohortSourceResponse],
+    summary="List cohort sources",
+    description=(
+        "List the sources a workflow's source node can draw from — platform static sources "
+        "plus your tenant's published dataset versions. Each entry carries a `kind` "
+        "(`static` vs `dataset`); the underlying table is never exposed.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+)
 async def get_source_catalog(
-    workflow_type: Optional[str] = Query(None, alias="workflowType"),
-    app_id: Optional[str] = Query(None, alias="appId"),
+    workflow_type: Optional[str] = Query(None, alias="workflowType", description="Restrict to sources valid for this workflow type."),
+    app_id: Optional[str] = Query(None, alias="appId", description="Restrict to one app."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -992,6 +1356,14 @@ async def get_source_catalog(
 @router.get(
     "/source_catalog/{source_ref:path}/columns/{column}/values",
     response_model=ColumnValuesResponse,
+    summary="List distinct values for a source column",
+    description=(
+        "Return distinct values for a filterable column on a cohort source, to populate "
+        "filter dropdowns in the builder. Only columns the source whitelists are "
+        "accessible; supports optional substring search and is capped at 50 results "
+        "(`hasMore` signals more exist).\n\n"
+        "**Authentication:** Bearer token with access to the app."
+    ),
 )
 async def get_source_column_values(
     source_ref: str,
@@ -1024,6 +1396,14 @@ async def get_source_column_values(
 @router.post(
     "/nodes/upstream-variables",
     response_model=ResolveUpstreamVariablesResponse,
+    summary="Resolve a node's upstream variables",
+    description=(
+        "Given a workflow graph and a target node, return the payload variables available "
+        "upstream of it — powering the builder's input pane and prompt picker. Read-only. A "
+        "cohort/dataset owned by another tenant resolves to 404, never leaking data.\n\n"
+        "**Authentication:** Bearer token with access to the app."
+    ),
+    responses={404: err("An upstream source reference could not be resolved.", "upstream source not found")},
 )
 async def resolve_node_upstream_variables(
     body: ResolveUpstreamVariablesRequest,
@@ -1054,6 +1434,15 @@ async def resolve_node_upstream_variables(
 @router.post(
     "/nodes/llm-extract/test",
     response_model=LlmExtractDryRunResponse,
+    summary="Dry-run an llm.extract node",
+    description=(
+        "Run a single-sample dry run of an `llm.extract` node from the builder's Test pane — "
+        "returns the resolved prompt and the model's structured result, without saving a "
+        "run. Cost is tracked under a `builder_test` purpose so test spend rolls up "
+        "separately from production.\n\n"
+        "**Authentication:** Bearer token with access to the app."
+    ),
+    responses={400: err("The node config is invalid.", "invalid llm.extract config")},
 )
 async def run_llm_extract_test(
     body: LlmExtractDryRunRequest,

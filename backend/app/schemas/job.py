@@ -2,7 +2,7 @@
 import uuid
 from typing import Optional
 from datetime import datetime
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from app.schemas.base import CamelModel, CamelORMModel
 
 # Keys stripped from job params in API responses to reduce payload size
@@ -10,14 +10,26 @@ _STRIPPED_PARAM_KEYS = {"csv_content"}
 
 
 class JobCreate(CamelModel):
-    job_type: str
-    params: dict = {}
-    status: str = "queued"
-    progress: dict = {"current": 0, "total": 0, "message": ""}
-    # Phase 7: generic submission-surface metadata round-tripped verbatim.
-    # Sherlock sets ``{surface, session_id, turn_id}`` via
-    # ``submit_pack_job``; other surfaces MAY leave it ``None``.
-    submission_context: Optional[dict] = None
+    job_type: str = Field(
+        description="The registered operation to run. Determines which permission is required and which params are expected.",
+        examples=["evaluate-batch"],
+    )
+    params: dict = Field(
+        {},
+        description="Job-type-specific inputs. Tenant, user, and app are injected automatically and need not be sent.",
+        examples=[{"listingIds": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]}],
+    )
+    status: str = Field("queued", description="Initial status; normally left as the default `queued`.")
+    progress: dict = Field(
+        {"current": 0, "total": 0, "message": ""},
+        description="Initial progress counter; the worker updates this as the job runs.",
+    )
+    # Generic submission-surface metadata round-tripped verbatim by callers
+    # that need to correlate the job back to an originating session/turn.
+    submission_context: Optional[dict] = Field(
+        None,
+        description="Optional caller metadata (e.g. originating session/turn) echoed back unchanged on the job.",
+    )
 
 
 class JobUpdate(CamelModel):

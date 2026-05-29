@@ -16,6 +16,7 @@ from app.auth.utils import (
     verify_password,
 )
 from app.config import settings
+from app.openapi_examples import err as _err, ok as _ok
 
 limiter = Limiter(key_func=get_remote_address)
 from app.database import get_db
@@ -32,6 +33,25 @@ from app.services.invite_links import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+_ACCESS_TOKEN_EXAMPLE = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5YjFmIiwiZXhwIjoxNzg1NTAwMDAwfQ.sig"
+)
+
+_USER_PROFILE_EXAMPLE = {
+    "id": "9b1f2c3d-4e5a-6b7c-8d9e-0f1a2b3c4d5e",
+    "email": "jane@acme.com",
+    "displayName": "Jane Cooper",
+    "tenantId": "3a2e1b0c-9d8e-7f6a-5b4c-3d2e1f0a9b8c",
+    "tenantName": "Acme Health",
+    "roleId": "5c7d8e9f-0a1b-2c3d-4e5f-6a7b8c9d0e1f",
+    "roleName": "Owner",
+    "isOwner": True,
+    "permissions": ["evaluation:run", "evaluation:export", "report:run", "cost:view", "orchestration:manage"],
+    "appAccess": ["support-assistant", "outbound-caller"],
+}
+
+_TOKEN_AND_USER_EXAMPLE = {"accessToken": _ACCESS_TOKEN_EXAMPLE, "user": _USER_PROFILE_EXAMPLE}
 
 
 async def _check_allowed_domains(email: str, tenant_id, db: AsyncSession) -> None:
@@ -83,7 +103,27 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     )
 
 
-@router.post("/login")
+@router.post(
+    "/login",
+    summary="Log in with email and password",
+    description=(
+        "Authenticate a user and start a session.\n\n"
+        "This is the entry point to the platform. On success you receive a short-lived "
+        "**access token** — send it as `Authorization: Bearer <token>` on every other "
+        "endpoint — and a long-lived **refresh token**, set as an httpOnly cookie. Access "
+        "tokens expire after 15 minutes; call `POST /api/auth/refresh` to get a new one "
+        "without re-entering credentials.\n\n"
+        "**Authentication:** Public. Rate-limited per IP.\n\n"
+        "**Returns:** The access token and the signed-in user's profile — tenant, role, "
+        "effective permissions, and the apps they can access."
+    ),
+    responses={
+        200: _ok("Authenticated. Returns the access token and user profile.", _TOKEN_AND_USER_EXAMPLE),
+        401: _err("Email or password is incorrect.", "Invalid credentials"),
+        403: _err("The account or tenant is disabled, or the email domain is not permitted.", "Account disabled"),
+        429: {"description": "Rate limit exceeded — too many attempts from this IP. Retry after the window resets."},
+    },
+)
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 async def login(
     request: Request,
@@ -130,7 +170,26 @@ async def login(
     }
 
 
-@router.post("/refresh")
+@router.post(
+    "/refresh",
+    summary="Refresh the access token",
+    description=(
+        "Exchange the refresh-token cookie for a new access token.\n\n"
+        "When an access token expires (after 15 minutes), call this to obtain a new one "
+        "without asking the user to log in again. The refresh token is read from the "
+        "httpOnly `refresh_token` cookie set at login — there is **no request body**. The "
+        "refresh token is rotated on every call: the old one is invalidated and a new "
+        "cookie is issued.\n\n"
+        "**Authentication:** Requires the `refresh_token` cookie. Rate-limited per IP.\n\n"
+        "**Returns:** A new access token."
+    ),
+    responses={
+        200: _ok("Returns a new access token.", {"accessToken": _ACCESS_TOKEN_EXAMPLE}),
+        401: _err("Missing, invalid, or expired refresh token. The user must log in again.", "Invalid or expired refresh token"),
+        403: _err("The account or tenant is disabled.", "Account disabled"),
+        429: {"description": "Rate limit exceeded — too many attempts from this IP. Retry after the window resets."},
+    },
+)
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 async def refresh(
     request: Request,
@@ -178,7 +237,19 @@ async def refresh(
     return {"accessToken": access_token}
 
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    summary="Log out",
+    description=(
+        "End the current session.\n\n"
+        "Deletes the server-side refresh token and clears the `refresh_token` cookie. The "
+        "access token is stateless and simply expires on its own — discard it on the "
+        "client.\n\n"
+        "**Authentication:** Public; uses the `refresh_token` cookie if present.\n\n"
+        "**Returns:** A simple status acknowledgement."
+    ),
+    responses={200: _ok("Session ended.", {"status": "ok"})},
+)
 async def logout(
     request: Request,
     response: Response,
@@ -196,7 +267,23 @@ async def logout(
     return {"status": "ok"}
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    summary="Get the current user",
+    description=(
+        "Return the profile of the authenticated user.\n\n"
+        "Use this to load the signed-in user's identity, tenant, role, effective "
+        "permissions, and accessible apps — for example to drive UI gating right after "
+        "login or a token refresh.\n\n"
+        "**Authentication:** Requires a bearer access token.\n\n"
+        "**Returns:** The user profile."
+    ),
+    responses={
+        200: _ok("The authenticated user's profile.", _USER_PROFILE_EXAMPLE),
+        401: {"description": "Missing or invalid access token."},
+        404: _err("The user or tenant no longer exists.", "User not found"),
+    },
+)
 async def get_me(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
@@ -226,7 +313,26 @@ def _validate_password_strength(password: str) -> str | None:
     return None
 
 
-@router.put("/me/password")
+@router.put(
+    "/me/password",
+    summary="Change the current user's password",
+    description=(
+        "Update the authenticated user's password.\n\n"
+        "Requires the current password for confirmation. The new password must meet the "
+        "strength rules (minimum 8 characters, with an uppercase letter, a lowercase "
+        "letter, a digit, and a special character) and must differ from the current one. "
+        "On success, **all of the user's refresh tokens are revoked**, forcing re-login on "
+        "every other device.\n\n"
+        "**Authentication:** Requires a bearer access token.\n\n"
+        "**Returns:** A simple status acknowledgement."
+    ),
+    responses={
+        200: _ok("Password changed; other sessions revoked.", {"status": "ok"}),
+        400: _err("Current password is wrong, the new password is too weak, or it matches the current one.", "Current password incorrect"),
+        401: {"description": "Missing or invalid access token."},
+        404: _err("The user no longer exists.", "User not found"),
+    },
+)
 async def change_password(
     body: ChangePasswordRequest,
     auth: AuthContext = Depends(get_auth_context),
@@ -279,7 +385,34 @@ async def _validate_invite(token: str, db: AsyncSession) -> tuple[IdentityInvite
     return invite, tenant
 
 
-@router.get("/validate-invite")
+@router.get(
+    "/validate-invite",
+    summary="Validate an invite link",
+    description=(
+        "Check whether an invite token is still valid before showing the signup form.\n\n"
+        "Given the token from an invite link, returns whether it is active and, when valid, "
+        "the tenant name, the role the new user will receive, the expiry, and any "
+        "email-domain restrictions — so the signup screen can guide the user. This does "
+        "**not** consume the invite. An invalid or expired token returns "
+        "`{ \"valid\": false }` with a 200 status (not an error).\n\n"
+        "**Authentication:** Public. Rate-limited per IP.\n\n"
+        "**Returns:** Validity and, when valid, the invite metadata."
+    ),
+    responses={
+        200: _ok(
+            "Validity of the token. When valid, includes invite metadata.",
+            {
+                "valid": True,
+                "tenantName": "Acme Health",
+                "roleId": "5c7d8e9f-0a1b-2c3d-4e5f-6a7b8c9d0e1f",
+                "roleName": "Analyst",
+                "expiresAt": "2026-06-30T12:00:00+00:00",
+                "allowedDomains": ["acme.com"],
+            },
+        ),
+        429: {"description": "Rate limit exceeded — too many attempts from this IP. Retry after the window resets."},
+    },
+)
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 async def validate_invite(
     request: Request,  # required by slowapi for IP keying
@@ -314,7 +447,26 @@ async def validate_invite(
     }
 
 
-@router.post("/signup")
+@router.post(
+    "/signup",
+    summary="Create an account from an invite",
+    description=(
+        "Redeem an invite link to create a new user account.\n\n"
+        "Validates the invite token, enforces the tenant's email-domain policy and the "
+        "password-strength rules, creates the user with the role attached to the invite, "
+        "and immediately starts a session — returning an access token and refresh cookie "
+        "exactly like login. The invite's usage count is incremented and the invite is "
+        "marked exhausted once it reaches its usage limit.\n\n"
+        "**Authentication:** Public. Rate-limited per IP.\n\n"
+        "**Returns:** The access token and the new user's profile."
+    ),
+    responses={
+        200: _ok("Account created and session started.", _TOKEN_AND_USER_EXAMPLE),
+        400: _err("Invite is invalid/expired/for SSO, email domain not allowed, password too weak, or the email already exists.", "Invalid or expired invite link"),
+        403: _err("The email domain is not permitted for this tenant.", "Email domain not allowed"),
+        429: {"description": "Rate limit exceeded — too many attempts from this IP. Retry after the window resets."},
+    },
+)
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 async def signup(
     request: Request,

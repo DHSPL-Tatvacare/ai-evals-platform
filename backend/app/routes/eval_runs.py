@@ -16,6 +16,7 @@ from app.models.evaluation_dataset import EvaluationDataset
 from app.models.job import BackgroundJob
 from app.models.user import User
 from app.models.report_run import ReportGenerationRun
+from app.openapi_examples import err, ok
 from app.schemas.base import CamelModel
 from app.schemas.eval_run import EvalRunVisibilityUpdate
 from app.services.evaluators.adversarial_canonical import enrich_adversarial_result_for_api
@@ -27,6 +28,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/eval-runs", tags=["eval-runs"])
 threads_router = APIRouter(prefix="/api/threads", tags=["threads"])
+
+# Representative subset of the run shape (the full payload also carries legacy
+# snake_case mirrors of these fields for backward compatibility).
+_RUN_EXAMPLE = {
+    "id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809",
+    "appId": "support-assistant",
+    "evalType": "batch_thread",
+    "status": "completed",
+    "listingId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "evaluatorId": "f0e1d2c3-b4a5-6079-8a1b-2c3d4e5f6071",
+    "jobId": "b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f",
+    "summary": {"completed": 12, "errors": 0, "avg_intent_accuracy": 0.92},
+    "passRate": None,
+    "durationMs": 84210,
+    "llmProvider": "azure-openai",
+    "llmModel": "gpt-4.1",
+    "visibility": "private",
+    "createdAt": "2026-05-20T09:25:00Z",
+    "completedAt": "2026-05-20T09:26:24Z",
+}
 
 
 def _app_access_clause(model, auth: AuthContext):
@@ -157,23 +178,38 @@ def _log_mapping_to_dict(log: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.get("")
+@router.get(
+    "",
+    summary="List evaluation runs",
+    description=(
+        "The unified query for evaluation runs, scoped to runs you can read (your own plus "
+        "any shared with you). Filter by app, type, listing, session, evaluator, status, or "
+        "a free-text search, and sort/paginate the result.\n\n"
+        "**Two response shapes:** pass `page` to get a paginated envelope "
+        "`{ items, totalItems, page, pageSize }`; omit it to get a flat list (legacy "
+        "`limit`/`offset`).\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={200: ok("A page of runs (when `page` is set) or a flat list.", {
+        "items": [_RUN_EXAMPLE], "total_items": 1, "page": 1, "page_size": 25,
+    })},
+)
 async def list_eval_runs(
-    app_id: Optional[str] = Query(None),
-    eval_type: Optional[str] = Query(None),
-    listing_id: Optional[str] = Query(None),
-    session_id: Optional[str] = Query(None),
-    evaluator_id: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    app_id: Optional[str] = Query(None, description="Restrict to one app."),
+    eval_type: Optional[str] = Query(None, description="Exact stored type, e.g. `batch_thread`, `batch_adversarial`."),
+    listing_id: Optional[str] = Query(None, description="Only runs derived from this listing."),
+    session_id: Optional[str] = Query(None, description="Only runs for this chat/session id."),
+    evaluator_id: Optional[str] = Query(None, description="Only runs produced by this evaluator."),
+    status: Optional[str] = Query(None, description="e.g. `pending`, `running`, `completed`, `failed`, `cancelled`."),
     command: Optional[str] = Query(None, description="Legacy filter — maps to eval_type"),
     run_type: Optional[str] = Query(None, description="UI-level type: batch/adversarial/thread/custom/evaluation"),
-    q: Optional[str] = Query(None, description="Search run id, evaluator name"),
+    q: Optional[str] = Query(None, description="Free-text search across run id, evaluator and batch name."),
     sort: Optional[str] = Query(None, description="Sort column: created_at, status, eval_type, duration_ms"),
     order: Optional[str] = Query(None, description="asc or desc"),
-    page: Optional[int] = Query(None, ge=1),
-    page_size: Optional[int] = Query(None, ge=1, le=200),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: Optional[int] = Query(None, ge=1, description="1-based page number. Switches the response to the paginated envelope."),
+    page_size: Optional[int] = Query(None, ge=1, le=200, description="Items per page when paginating."),
+    limit: int = Query(50, ge=1, le=200, description="Flat-list page size (when `page` is omitted)."),
+    offset: int = Query(0, ge=0, description="Flat-list offset (when `page` is omitted)."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -269,7 +305,21 @@ class CsvPreviewResponse(CamelModel):
     messages_with_images: int
 
 
-@router.post("/preview", response_model=CsvPreviewResponse)
+@router.post(
+    "/preview",
+    response_model=CsvPreviewResponse,
+    summary="Preview a conversation CSV",
+    description=(
+        "Parse an uploaded conversation CSV and return summary statistics — message, "
+        "thread and user counts, date range, intent distribution — **without persisting "
+        "anything**. Use it to validate a dataset before kicking off a batch evaluation.\n\n"
+        "**Authentication:** Bearer token with access to the app."
+    ),
+    responses={
+        400: err("The upload is not a CSV or is not valid UTF-8 text.", "File must be a CSV"),
+        422: err("The CSV could not be parsed into conversations.", "Failed to parse CSV: ..."),
+    },
+)
 async def preview_csv(
     file: UploadFile = File(...),
     _auth: AuthContext = require_app_access(),
@@ -306,9 +356,28 @@ async def preview_csv(
     )
 
 
-@router.get("/stats/summary")
+@router.get(
+    "/stats/summary",
+    summary="Aggregate run statistics",
+    description=(
+        "Roll up headline metrics across the runs you can read — total runs, threads and "
+        "adversarial tests evaluated, correctness/efficiency/adversarial verdict "
+        "distributions, and average intent accuracy. Optionally scope to one app.\n\n"
+        "**Authentication:** Bearer token with `insights:view`."
+    ),
+    responses={200: ok("Aggregated metrics.", {
+        "total_runs": 42,
+        "total_threads_evaluated": 318,
+        "total_adversarial_tests": 57,
+        "correctness_distribution": {"PASS": 280, "SOFT FAIL": 25, "HARD FAIL": 13},
+        "efficiency_distribution": {"EFFICIENT": 240, "ACCEPTABLE": 60, "FRICTION": 18},
+        "adversarial_distribution": {"PASS": 49, "FAIL": 8},
+        "avg_intent_accuracy": 0.92,
+        "intent_distribution": {"CORRECT": 293, "INCORRECT": 25},
+    })},
+)
 async def get_summary_stats(
-    app_id: Optional[str] = Query(None),
+    app_id: Optional[str] = Query(None, description="Restrict the rollup to one app."),
     auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -417,10 +486,25 @@ async def get_summary_stats(
     }
 
 
-@router.get("/trends")
+@router.get(
+    "/trends",
+    summary="Correctness trend by day",
+    description=(
+        "Return daily counts of correctness verdicts over a trailing window, for charting "
+        "how quality moves over time. Scoped to readable runs, optionally one app.\n\n"
+        "**Authentication:** Bearer token with `insights:view`."
+    ),
+    responses={200: ok("Per-day verdict counts.", {
+        "data": [
+            {"day": "2026-05-18", "worst_correctness": "PASS", "cnt": 22},
+            {"day": "2026-05-18", "worst_correctness": "HARD FAIL", "cnt": 3},
+        ],
+        "days": 30,
+    })},
+)
 async def get_trends(
-    days: int = Query(30, ge=1, le=365),
-    app_id: Optional[str] = Query(None),
+    days: int = Query(30, ge=1, le=365, description="Trailing window length in days (1–365)."),
+    app_id: Optional[str] = Query(None, description="Restrict to one app."),
     auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -458,12 +542,30 @@ async def get_trends(
     }
 
 
-@router.get("/logs")
+@router.get(
+    "/logs",
+    summary="List LLM call logs",
+    description=(
+        "Return the raw LLM/API call logs behind your readable runs — prompts, responses, "
+        "model, token counts, latency, and errors. Filter to one run or app and paginate. "
+        "This is the audit trail for what the evaluator actually sent and received.\n\n"
+        "**Authentication:** Bearer token with `insights:view`."
+    ),
+    responses={200: ok("A page of call logs with the total count.", {
+        "logs": [{
+            "id": 9001, "run_id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809", "thread_id": "t-42",
+            "provider": "azure-openai", "model": "gpt-4.1", "method": "chat",
+            "duration_ms": 1840, "tokens_in": 1203, "tokens_out": 88, "error": None,
+            "created_at": "2026-05-20T09:25:40Z",
+        }],
+        "total": 144, "limit": 200, "offset": 0, "run_id": None,
+    })},
+)
 async def list_all_logs(
-    run_id: Optional[str] = Query(None),
-    app_id: Optional[str] = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    run_id: Optional[str] = Query(None, description="Restrict to one run's logs."),
+    app_id: Optional[str] = Query(None, description="Restrict to one app's logs."),
+    limit: int = Query(200, ge=1, le=1000, description="Page size (1–1000)."),
+    offset: int = Query(0, ge=0, description="Rows to skip."),
     auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -514,10 +616,19 @@ async def list_all_logs(
     }
 
 
-@router.delete("/logs")
+@router.delete(
+    "/logs",
+    summary="Delete LLM call logs",
+    description=(
+        "Delete the LLM call logs for runs you own, optionally narrowed to one run or app. "
+        "Frees storage from large prompt/response bodies; the runs themselves are kept.\n\n"
+        "**Authentication:** Bearer token with `evaluation:manage`."
+    ),
+    responses={200: ok("Number of log rows deleted.", {"deleted": 144, "run_id": None})},
+)
 async def delete_logs(
-    run_id: Optional[str] = Query(None),
-    app_id: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None, description="Restrict deletion to one run."),
+    app_id: Optional[str] = Query(None, description="Restrict deletion to one app."),
     auth: AuthContext = require_permission('evaluation:manage'),
     db: AsyncSession = Depends(get_db),
 ):
@@ -543,7 +654,19 @@ async def delete_logs(
 
 
 
-@router.get("/{run_id}")
+@router.get(
+    "/{run_id}",
+    summary="Get an evaluation run",
+    description=(
+        "Fetch a single run by id — its status, config, summary metrics, evaluator "
+        "descriptors, and timing. Returns any run you can read (your own or shared).\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={
+        200: ok("The run.", _RUN_EXAMPLE),
+        404: err("No run with that id is readable by you.", "Run not found"),
+    },
+)
 async def get_eval_run(
     run_id: UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -553,7 +676,20 @@ async def get_eval_run(
     return _run_to_dict(run)
 
 
-@router.patch("/{run_id}/visibility")
+@router.patch(
+    "/{run_id}/visibility",
+    summary="Share or unshare a run",
+    description=(
+        "Change a run's visibility between `private` and `shared`. Sharing makes the run "
+        "(and any reports generated from it) readable by others in your tenant and records "
+        "who shared it and when. Only the run's owner can change this.\n\n"
+        "**Authentication:** Bearer token with `evaluation:manage`."
+    ),
+    responses={
+        200: ok("The updated run.", {**_RUN_EXAMPLE, "visibility": "shared"}),
+        404: err("No such run owned by you.", "Run not found"),
+    },
+)
 async def patch_eval_run_visibility(
     run_id: UUID,
     req: EvalRunVisibilityUpdate,
@@ -585,7 +721,21 @@ async def patch_eval_run_visibility(
     return _run_to_dict(run)
 
 
-@router.delete("/{run_id}")
+@router.delete(
+    "/{run_id}",
+    summary="Delete an evaluation run",
+    description=(
+        "Permanently delete a run and all its cascaded data — thread results, adversarial "
+        "results, and call logs — plus the originating background job. A run that is still "
+        "`running` must be cancelled first. Not reversible.\n\n"
+        "**Authentication:** Bearer token with `evaluation:manage`."
+    ),
+    responses={
+        200: ok("The run and its dependent rows were deleted.", {"deleted": True, "run_id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809"}),
+        400: err("The run is still running; cancel it before deleting.", "Cannot delete a running evaluation. Cancel it first."),
+        404: err("No such run owned by you.", "Run not found"),
+    },
+)
 async def delete_eval_run(
     run_id: UUID,
     auth: AuthContext = require_permission('evaluation:manage'),
@@ -615,7 +765,20 @@ async def delete_eval_run(
     return {"deleted": True, "run_id": str(run_id)}
 
 
-@router.get("/{run_id}/threads")
+@router.get(
+    "/{run_id}/threads",
+    summary="Get a run's thread results",
+    description=(
+        "Return the per-conversation results for a thread-style run — each thread's "
+        "correctness, efficiency, intent accuracy, and the canonical transcript. This is "
+        "the drill-down behind a batch evaluation's summary.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={
+        200: ok("The run's thread results.", {"run_id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809", "evaluations": [], "total": 0}),
+        404: err("No such readable run.", "Run not found"),
+    },
+)
 async def get_run_threads(
     run_id: UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -630,7 +793,20 @@ async def get_run_threads(
     return {"run_id": str(run_id), "evaluations": [_thread_to_dict(e) for e in evals], "total": len(evals)}
 
 
-@router.get("/{run_id}/adversarial")
+@router.get(
+    "/{run_id}/adversarial",
+    summary="Get a run's adversarial results",
+    description=(
+        "Return the per-case results for an adversarial run — each case's verdict, whether "
+        "the goal was achieved, the active traits, turn count, and the canonical "
+        "transcript. The drill-down behind an adversarial run's summary.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={
+        200: ok("The run's adversarial results.", {"run_id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809", "evaluations": [], "total": 0}),
+        404: err("No such readable run.", "Run not found"),
+    },
+)
 async def get_run_adversarial(
     run_id: UUID,
     auth: AuthContext = Depends(get_auth_context),
@@ -645,11 +821,23 @@ async def get_run_adversarial(
     return {"run_id": str(run_id), "evaluations": [_adv_to_dict(e) for e in evals], "total": len(evals)}
 
 
-@router.get("/{run_id}/logs")
+@router.get(
+    "/{run_id}/logs",
+    summary="Get a run's call logs",
+    description=(
+        "Return the LLM/API call logs for a single run — full prompts, responses, model, "
+        "tokens, latency, and errors — newest first and paginated.\n\n"
+        "**Authentication:** Bearer token; the run must be readable by you."
+    ),
+    responses={
+        200: ok("The run's call logs.", {"run_id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809", "logs": []}),
+        404: err("No such readable run.", "Run not found"),
+    },
+)
 async def get_run_logs(
     run_id: UUID,
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000, description="Page size (1–1000)."),
+    offset: int = Query(0, ge=0, description="Rows to skip."),
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -664,7 +852,17 @@ async def get_run_logs(
 
 # ── Thread history (separate router) ───────────────────────────
 
-@threads_router.get("/{thread_id}/history")
+@threads_router.get(
+    "/{thread_id}/history",
+    summary="Get a thread's evaluation history",
+    description=(
+        "Return every evaluation result recorded for one conversation thread, across all "
+        "runs you can read, newest first. Use it to see how a single conversation has "
+        "scored over time and across evaluators.\n\n"
+        "**Authentication:** Bearer token."
+    ),
+    responses={200: ok("The thread's evaluation history.", {"thread_id": "t-42", "history": [], "total": 0})},
+)
 async def get_thread_history(
     thread_id: str,
     auth: AuthContext = Depends(get_auth_context),

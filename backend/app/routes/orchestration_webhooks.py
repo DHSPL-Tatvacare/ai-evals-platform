@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.orchestration import WorkflowTrigger
 from app.models.provider_connection import ProviderConnection
+from app.openapi_examples import err, ok
 from app.services.orchestration.adapters import (
     AdapterNotRegisteredError,
     resolve_adapter,
@@ -68,10 +69,25 @@ async def _dispatch_to_adapter(
     return {"status": "ok"}
 
 
-@router.post("/messaging/{vendor}/{token}", status_code=200)
+@router.post(
+    "/messaging/{vendor}/{token}",
+    status_code=200,
+    summary="Messaging provider callback (inbound)",
+    description=(
+        "Public ingest for messaging-provider callbacks — delivery, read, and reply events "
+        "from WhatsApp/SMS providers. `{vendor}` selects the provider adapter; `{token}` "
+        "resolves to the owning connection's tenant and app. **Authenticated solely by the "
+        "URL token** — unknown or vendor-mismatched tokens return an opaque 404.\n\n"
+        "**Authentication:** None (the token in the path is the credential)."
+    ),
+    responses={
+        200: ok("Event accepted.", {"status": "ok"}),
+        404: err("Unknown vendor, unknown/inactive token, or vendor mismatch (deliberately undifferentiated).", "not found"),
+    },
+)
 async def messaging_webhook(
-    vendor: str = Path(...),
-    token: str = Path(...),
+    vendor: str = Path(..., description="Messaging provider key, e.g. `wati`, `aisensy`."),
+    token: str = Path(..., description="The connection's webhook token."),
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
@@ -80,10 +96,25 @@ async def messaging_webhook(
     )
 
 
-@router.post("/voice/{vendor}/{token}", status_code=200)
+@router.post(
+    "/voice/{vendor}/{token}",
+    status_code=200,
+    summary="Voice provider callback (inbound)",
+    description=(
+        "Public ingest for voice-provider callbacks — call status and completion events "
+        "(e.g. from Bolna). `{vendor}` selects the adapter; `{token}` resolves to the "
+        "owning connection's tenant and app. This is the real-time complement to dispatch "
+        "polling; correctness never depends on it arriving.\n\n"
+        "**Authentication:** None (the token in the path is the credential)."
+    ),
+    responses={
+        200: ok("Event accepted.", {"status": "ok"}),
+        404: err("Unknown vendor, unknown/inactive token, or vendor mismatch.", "not found"),
+    },
+)
 async def voice_webhook(
-    vendor: str = Path(...),
-    token: str = Path(...),
+    vendor: str = Path(..., description="Voice provider key, e.g. `bolna`."),
+    token: str = Path(..., description="The connection's webhook token."),
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
@@ -114,11 +145,35 @@ async def _resolve_trigger_by_token(
     return trig
 
 
-@router.post("/event/{vendor}/{token}", status_code=200)
+@router.post(
+    "/event/{vendor}/{token}",
+    status_code=200,
+    summary="Ingest an external event",
+    description=(
+        "Public endpoint where a CRM or clinical system POSTs an event. The `{token}` "
+        "resolves to exactly one event trigger — one workflow and tenant, no shared "
+        "secret. The vendor adapter verifies the signature, maps the native event to a "
+        "canonical name, and fires the workflow for the event's recipients; any recipients "
+        "already waiting on this event are resumed too. Returns 200 even when the event "
+        "maps to nothing, so the source stops retrying. Use `vendor=webhook` for a generic "
+        "identity passthrough.\n\n"
+        "**Authentication:** None (the token in the path is the credential)."
+    ),
+    responses={
+        200: ok("Event accepted; reports how many workflow runs were created.", {
+            "status": "ok", "runsCreated": 2, "deduped": False,
+            "runIds": ["c1a2b3d4-e5f6-7081-92a3-b4c5d6e7f809", "d2b3c4e5-f6a7-8190-a2b3-c4d5e6f70812"],
+        }),
+        400: err("The event payload violates the trigger's expected contract.", "Missing required field: contact.phone"),
+        409: err("The resolved trigger is misconfigured for this event.", "Trigger is not configured for event 'lead.created'"),
+        413: err("The event body or its recipient count exceeds the ingest limits.", "too many recipients in one event"),
+        404: err("Unknown vendor, unknown/inactive token, vendor mismatch, or failed signature.", "not found"),
+    },
+)
 async def event_ingest_webhook(
     request: Request,
-    vendor: str = Path(...),
-    token: str = Path(...),
+    vendor: str = Path(..., description="Event-source vendor key (e.g. `lsq`, `webhook` for identity passthrough)."),
+    token: str = Path(..., description="The trigger's webhook token."),
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:

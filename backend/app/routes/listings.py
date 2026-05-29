@@ -9,14 +9,45 @@ from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.evaluation_dataset import EvaluationDataset
 from app.models.application_uploaded_file import ApplicationUploadedFile
+from app.openapi_examples import err, ok
 from app.schemas.listing import ListingCreate, ListingUpdate, ListingResponse
 
 router = APIRouter(prefix="/api/listings", tags=["listings"])
 
+_LISTING_EXAMPLE = {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "appId": "support-assistant",
+    "title": "Call with Jane Cooper — 2026-05-20",
+    "status": "ready",
+    "sourceType": "upload",
+    "audioFile": {"id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d", "originalName": "call-0420.mp3"},
+    "transcriptFile": None,
+    "structuredJsonFile": None,
+    "transcript": None,
+    "apiResponse": None,
+    "structuredOutputReferences": [],
+    "structuredOutputs": [],
+    "createdAt": "2026-05-20T09:15:00Z",
+    "updatedAt": "2026-05-20T09:15:00Z",
+    "tenantId": "3a2e1b0c-9d8e-7f6a-5b4c-3d2e1f0a9b8c",
+    "userId": "9b1f2c3d-4e5a-6b7c-8d9e-0f1a2b3c4d5e",
+}
 
-@router.get("", response_model=list[ListingResponse])
+
+@router.get(
+    "",
+    response_model=list[ListingResponse],
+    summary="List listings",
+    description=(
+        "Return every listing for an app, most recently updated first. Use it to populate "
+        "a picker or dashboard of the conversations and records available to evaluate. "
+        "Results are always scoped to your tenant, app, and user.\n\n"
+        "**Authentication:** Bearer token with access to the requested app."
+    ),
+    responses={200: ok("Listings for the app, newest first.", [_LISTING_EXAMPLE])},
+)
 async def list_listings(
-    app_id: str = Query(..., description="App ID filter (required)"),
+    app_id: str = Query(..., description="The app whose listings to return."),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -33,10 +64,21 @@ async def list_listings(
     return result.scalars().all()
 
 
-@router.get("/search", response_model=list[ListingResponse])
+@router.get(
+    "/search",
+    response_model=list[ListingResponse],
+    summary="Search listings by title",
+    description=(
+        "Filter an app's listings by a case-insensitive substring match on the title. "
+        "An empty query returns everything (same as listing). Useful for type-ahead and "
+        "search boxes.\n\n"
+        "**Authentication:** Bearer token with access to the requested app."
+    ),
+    responses={200: ok("Matching listings, newest first.", [_LISTING_EXAMPLE])},
+)
 async def search_listings(
-    app_id: str = Query(...),
-    q: str = Query("", description="Search query for title"),
+    app_id: str = Query(..., description="The app to search within."),
+    q: str = Query("", description="Case-insensitive substring matched against the listing title."),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -54,10 +96,23 @@ async def search_listings(
     return result.scalars().all()
 
 
-@router.get("/{listing_id}", response_model=ListingResponse)
+@router.get(
+    "/{listing_id}",
+    response_model=ListingResponse,
+    summary="Get a listing",
+    description=(
+        "Fetch a single listing by id, including its source data references (audio, "
+        "transcript, structured output).\n\n"
+        "**Authentication:** Bearer token with access to the requested app."
+    ),
+    responses={
+        200: ok("The listing.", _LISTING_EXAMPLE),
+        404: err("No listing with that id exists for your tenant, app, and user.", "Listing not found"),
+    },
+)
 async def get_listing(
     listing_id: UUID,
-    app_id: str = Query(...),
+    app_id: str = Query(..., description="The app the listing belongs to."),
     auth: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -76,7 +131,23 @@ async def get_listing(
     return listing
 
 
-@router.post("", response_model=ListingResponse, status_code=201)
+@router.post(
+    "",
+    response_model=ListingResponse,
+    status_code=201,
+    summary="Create a listing",
+    description=(
+        "Register a new listing — the input record an evaluation runs against. Set "
+        "`sourceType` to declare where its data comes from: `upload` (you attach uploaded "
+        "audio/transcript files) or `api` (you supply a captured API response). The type is "
+        "fixed once chosen, so pick the flow up front.\n\n"
+        "**Authentication:** Bearer token with `listing:manage` and access to the app."
+    ),
+    responses={
+        201: ok("The created listing.", _LISTING_EXAMPLE),
+        403: err("You lack `listing:manage` or access to this app.", "Forbidden"),
+    },
+)
 async def create_listing(
     body: ListingCreate,
     auth: AuthContext = require_permission('listing:manage'),
@@ -95,7 +166,22 @@ async def create_listing(
     return listing
 
 
-@router.put("/{listing_id}", response_model=ListingResponse)
+@router.put(
+    "/{listing_id}",
+    response_model=ListingResponse,
+    summary="Update a listing",
+    description=(
+        "Partially update a listing — only the fields you send are changed. Note two "
+        "guards: `sourceType` cannot change once it is set (create a new listing for a "
+        "different flow), and you cannot attach an API response to an upload-flow listing.\n\n"
+        "**Authentication:** Bearer token with `listing:manage` and access to the app."
+    ),
+    responses={
+        200: ok("The updated listing.", _LISTING_EXAMPLE),
+        400: err("Attempted to change a fixed `sourceType`, or mix incompatible source data.", "Cannot change sourceType"),
+        404: err("No such listing for your tenant and user.", "Listing not found"),
+    },
+)
 async def update_listing(
     listing_id: UUID,
     body: ListingUpdate,
@@ -137,10 +223,23 @@ async def update_listing(
     return listing
 
 
-@router.delete("/{listing_id}")
+@router.delete(
+    "/{listing_id}",
+    summary="Delete a listing",
+    description=(
+        "Permanently delete a listing. This **cascades**: every evaluation run derived "
+        "from it (and their detail rows) is removed, and any uploaded audio file it owns "
+        "is deleted from storage. Not reversible.\n\n"
+        "**Authentication:** Bearer token with `listing:manage` and access to the app."
+    ),
+    responses={
+        200: ok("The listing and its dependent rows were deleted.", {"deleted": True, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}),
+        404: err("No such listing for your tenant and user.", "Listing not found"),
+    },
+)
 async def delete_listing(
     listing_id: UUID,
-    app_id: str = Query(...),
+    app_id: str = Query(..., description="The app the listing belongs to."),
     auth: AuthContext = require_permission('listing:manage'),
     _app_check: AuthContext = require_app_access(),
     db: AsyncSession = Depends(get_db),
