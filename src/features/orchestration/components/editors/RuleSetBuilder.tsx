@@ -25,6 +25,14 @@ import { cn } from '@/utils';
 
 type Combinator = 'all' | 'any';
 
+// Canonical outcome step-field keys the engine actually writes as a
+// dispatch outcome. Voice writes `voice_outcome`
+// (upstream_variables._DISPATCH_EMITS["voice.place_call"]); messaging writes
+// reply fields (wa_button_id / wa_reply_text), NOT a canonical outcome — so a
+// messaging producer contributes outcome enums but no entry here. A producer's
+// outcome path is dropdown-eligible only if the engine declares it upstream.
+const OUTCOME_FIELD_KEYS = new Set<string>(['voice_outcome']);
+
 /** A rule is either a single leaf condition or a one-level nested group. */
 type Rule = LeafPredicate | AndPredicate | OrPredicate;
 
@@ -215,8 +223,31 @@ function LeafRow({
     }
     return Array.from(byCanonical.values());
   }, [outcomeOptions, value.value]);
+  // A leaf is outcome-bearing only when its field is a producer's canonical
+  // outcome path — `steps.<sourceNodeId>.<key>` where the producer is present
+  // in outcomeOptions AND `<key>` is a canonical-outcome field the engine
+  // writes (OUTCOME_FIELD_KEYS). This is producer-general: a messaging producer
+  // surfaces outcome enums but writes no canonical outcome field, so its phantom
+  // `steps.<wa>.voice_outcome` never qualifies. When upstream declares the step
+  // fields (fieldOptions), the path must also be engine-declared, so a producer
+  // can only ever expose the outcome field the runtime actually populates.
+  const outcomeFieldPaths = useMemo(() => {
+    const declared = new Set(fieldOptions ?? []);
+    const paths = new Set<string>();
+    for (const o of outcomeOptions ?? []) {
+      for (const key of OUTCOME_FIELD_KEYS) {
+        const path = `steps.${o.sourceNodeId}.${key}`;
+        if ((fieldOptions?.length ?? 0) === 0 || declared.has(path)) {
+          paths.add(path);
+        }
+      }
+    }
+    return paths;
+  }, [outcomeOptions, fieldOptions]);
   const useOutcomeDropdown =
-    (outcomeOptions?.length ?? 0) > 0 && !isListOperator(value.op);
+    (outcomeOptions?.length ?? 0) > 0 &&
+    !isListOperator(value.op) &&
+    outcomeFieldPaths.has(value.field);
   // Always offer the current field as an option so a hand-typed key isn't
   // dropped when upstream suggestions don't include it.
   const options = useMemo(() => {

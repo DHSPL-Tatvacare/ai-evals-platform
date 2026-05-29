@@ -11,8 +11,9 @@ as ``unresolved``.
 """
 from __future__ import annotations
 
+import enum
 import uuid
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,16 @@ _DISPATCH_EMITS: dict[str, list[str]] = {
 
 class UpstreamSourceNotFound(Exception):
     """An upstream cohort/dataset reference is missing or not owned by the tenant."""
+
+
+class _ConnectionMissing(enum.Enum):
+    """Sentinel: a same-tenant connection_id that resolves to no row (deleted/missing).
+    Degrades to an unresolved entry rather than 404-ing the whole picker."""
+
+    TOKEN = enum.auto()
+
+
+_CONNECTION_MISSING = _ConnectionMissing.TOKEN
 
 
 def _collect_ancestors(
@@ -219,14 +230,19 @@ async def _lookup_connection_provider(
     connection_id_raw: Any,
     tenant_id: uuid.UUID,
     app_id: str,
-) -> Optional[tuple[str, bool]]:
+) -> tuple[str, bool] | None | _ConnectionMissing:
     """Read-only, tenant+app-scoped vendor lookup for a producer's connection_id.
 
-    Mirrors the resolver's cross-tenant 404 contract: a connection that does not
-    exist for this tenant+app raises ``UpstreamSourceNotFound``. A missing/blank
-    id yields ``None`` (the node is unconfigured — surface nothing rather than
-    guess a provider). Returns ``(provider, active)`` for an existing row so a
-    deactivated connection is reported, not silently skipped."""
+    A missing/blank id yields ``None`` (the node is unconfigured — surface
+    nothing rather than guess a provider). Returns ``(provider, active)`` for an
+    existing row so a deactivated connection is reported, not silently skipped.
+
+    When the scoped row is absent we disambiguate two cases that must NOT be
+    conflated: a row that exists under a *different* tenant raises
+    ``UpstreamSourceNotFound`` (cross-tenant 404, no existence oracle); a row
+    that exists nowhere — same-tenant deleted/missing — returns the
+    ``_CONNECTION_MISSING`` sentinel so the caller degrades it to an unresolved
+    entry instead of 404-ing the whole picker for unrelated downstream nodes."""
     if connection_id_raw in (None, ""):
         return None
     try:
@@ -242,11 +258,18 @@ async def _lookup_connection_provider(
             )
         )
     ).first()
-    if row is None:
+    if row is not None:
+        return row[0], bool(row[1])
+    exists_anywhere = (
+        await db.execute(
+            select(ProviderConnection.id).where(ProviderConnection.id == connection_id)
+        )
+    ).first() is not None
+    if exists_anywhere:
         raise UpstreamSourceNotFound(
             f"connection not found or not owned by tenant: {connection_id}"
         )
-    return row[0], bool(row[1])
+    return _CONNECTION_MISSING
 
 
 async def _resolve_producer(
@@ -266,6 +289,13 @@ async def _resolve_producer(
         app_id=app_id,
     )
     if resolved is None:
+        return
+    if resolved is _CONNECTION_MISSING:
+        add_unresolved(UpstreamUnresolved(
+            node_id=node.id,
+            label=node.data.get("label") or node.type,
+            reason="The connected provider could not be found — it may have been deleted. Reconnect a provider to surface its outcomes and events.",
+        ))
         return
     provider, active = resolved
     if not active:

@@ -47,9 +47,9 @@ interface SecondsProps {
 
 interface HoursProps {
   mode: 'hours';
-  /** Canonical stored value — an int number of hours (e.g. wait timeout_hours). */
+  /** Canonical stored value — a float number of hours (e.g. wait timeout_hours). */
   hours: number | null;
-  /** Emits the recomposed int number of hours; the stored contract is unchanged. */
+  /** Emits the recomposed float number of hours; the stored contract is unchanged. */
   onChange: (hours: number) => void;
   /** Optional contract floor — emitted hours are clamped up to this minimum. */
   minHours?: number;
@@ -63,8 +63,8 @@ type DurationFieldProps = ValueUnitProps | SecondsProps | HoursProps;
  * - `value-unit` stores the raw amount + unit (wait node duration).
  * - `seconds` displays friendly units but stores an int number of seconds
  *   (e.g. webhook_ttl_seconds 259200 ↔ "3 days"), so the config contract holds.
- * - `hours` displays friendly units but stores an int number of hours
- *   (e.g. wait timeout_hours 24 ↔ "1 day"), so the config contract holds.
+ * - `hours` displays friendly units but stores a float number of hours
+ *   (e.g. wait timeout_hours 24 ↔ "1 day", 0.5 ↔ "30 minutes"), so the config contract holds.
  */
 export function DurationField(props: DurationFieldProps) {
   if (props.mode === 'hours') {
@@ -74,8 +74,9 @@ export function DurationField(props: DurationFieldProps) {
         ? decompose(canonical)
         : { value: null as number | null, unit: 'hours' as DurationUnit };
     const floor = props.minHours ?? 0;
+    // timeout_hours is a float downstream, so 30 min -> 0.5h is preserved without int rounding.
     const toHours = (seconds: number) =>
-      Math.max(Math.round(seconds / UNIT_SECONDS.hours), floor);
+      Math.max(seconds / UNIT_SECONDS.hours, floor);
     return (
       <Row
         value={value}

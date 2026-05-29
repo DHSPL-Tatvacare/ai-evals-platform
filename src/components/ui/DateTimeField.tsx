@@ -99,10 +99,17 @@ export function DateTimeField({
 
   // Clamp an incoming value that sits before `min` forward to `min`, so a stale
   // or typed past instant can never be persisted from this future-only field.
+  // Guard against the SAME seconds-zeroed/rounded target the clamp produces, so
+  // a `min` with seconds>0 cannot re-fire onChange every render (render storm).
   useEffect(() => {
     if (!min || !localDate) return;
-    if (localDate.getTime() >= min.getTime()) return;
-    onChange(buildUtcIso(min, String(minHour).padStart(2, '0'), String(minMinuteStep).padStart(2, '0')));
+    const target = buildUtcIso(
+      min,
+      String(minHour).padStart(2, '0'),
+      String(minMinuteStep).padStart(2, '0'),
+    );
+    if (localDate.getTime() >= new Date(target).getTime()) return;
+    onChange(target);
     // localDate is derived from value; depending on value covers it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, min]);

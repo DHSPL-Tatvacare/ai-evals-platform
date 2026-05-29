@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+
 import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -90,6 +92,9 @@ export function WaitConditionEditor({ value, onChange, eventOptions }: Props) {
 
   const setMode = (next: SelectableMode) => emitForMode(next, {});
 
+  // Stable "now" so DateTimeField's min identity doesn't change every render.
+  const nowMin = useMemo(() => new Date(), []);
+
   // For event modes, ensure a default timeout is visible even on legacy pure-event defs
   // so the author can save without blanking out the field (no silent mutation on open).
   const isEventMode = displayMode === 'event_or_timeout';
@@ -144,7 +149,7 @@ export function WaitConditionEditor({ value, onChange, eventOptions }: Props) {
         <Field label="Wake at (UTC ISO datetime)">
           <DateTimeField
             value={value.until_datetime ?? ''}
-            min={new Date()}
+            min={nowMin}
             onChange={(next) => emitForMode('until_datetime', { until_datetime: next })}
           />
         </Field>

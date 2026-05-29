@@ -208,6 +208,39 @@ async def test_cross_tenant_connection_stays_not_found(db_session):
         )
 
 
+@pytest.mark.asyncio
+async def test_same_tenant_missing_connection_degrades_to_unresolved(db_session):
+    # A producer wired to a connection_id that is a valid UUID but whose row was
+    # deleted (or never existed) for this tenant must NOT 404 the whole picker.
+    # It degrades to an unresolved entry so the rest of the graph — other nodes'
+    # fields/events/outcomes — still resolves.
+    from app.services.orchestration.upstream_variables import resolve_upstream_variables
+
+    tenant_id = await _make_tenant(db_session)
+    missing_conn_id = uuid.uuid4()
+    nodes = [
+        _node("extract", "llm.extract", {
+            "output_namespace": "ai",
+            "output_schema": [{"key": "intent", "type": "text"}],
+        }),
+        _node("call", "voice.place_call", {"connection_id": str(missing_conn_id)}),
+        _node("wait", "logic.wait", {}),
+    ]
+    edges = [_edge("extract", "call"), _edge("call", "wait")]
+
+    result = await resolve_upstream_variables(
+        db_session, tenant_id=tenant_id, app_id=APP_ID, workflow_type="crm",
+        nodes=nodes, edges=edges, target_node_id="wait",
+    )
+
+    # Unrelated upstream field still resolves.
+    assert any(f.path == "ai.intent" for f in result.fields)
+    # Missing producer degrades, does not raise.
+    assert any(u.node_id == "call" for u in result.unresolved)
+    assert result.outcome_enums == []
+    assert result.events == []
+
+
 # ─── publish-time validation ──────────────────────────────────────────────────
 
 

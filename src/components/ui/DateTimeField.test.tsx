@@ -138,5 +138,33 @@ describe('DateTimeField', () => {
       const emitted: string = onChange.mock.calls[0][0];
       expect(new Date(emitted).getTime()).toBeGreaterThanOrEqual(min.getTime());
     });
+
+    it('clamps at most once when min carries seconds and its identity is fresh each render', () => {
+      const onChange = vi.fn();
+      // min has seconds>0 — the clamp target zeroes seconds, so a naive guard
+      // re-fires every render against a fresh, later min (render storm).
+      const baseMin = new Date();
+      baseMin.setHours(15, 0, 37, 0);
+      const value = new Date();
+      value.setHours(9, 0, 0, 0);
+
+      // A fresh min identity on every render reproduces the call-site footgun.
+      const freshMin = () => new Date(baseMin.getTime());
+
+      const { rerender } = render(
+        <DateTimeField value={localToUtcIso(value)} onChange={onChange} min={freshMin()} />,
+      );
+      // Re-render several times with a brand-new min object but the SAME instant.
+      // After the first clamp the emitted value must satisfy the guard so no
+      // further onChange fires regardless of fresh min identity.
+      const clamped: string = onChange.mock.calls[0][0];
+      for (let i = 0; i < 5; i++) {
+        rerender(
+          <DateTimeField value={clamped} onChange={onChange} min={freshMin()} />,
+        );
+      }
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
   });
 });

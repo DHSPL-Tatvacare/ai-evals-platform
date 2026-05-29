@@ -89,6 +89,39 @@ describe('DurationField (hours mode)', () => {
     expect(onChange).toHaveBeenCalledWith(48);
   });
 
+  it('displays a stored 0.5 hours as 30 minutes (lossless decompose)', () => {
+    const onChange = vi.fn();
+    render(<DurationField mode="hours" hours={0.5} onChange={onChange} />);
+    expect(screen.getByRole('spinbutton')).toHaveValue(30);
+    expect(screen.getByText('Minutes')).toBeInTheDocument();
+  });
+
+  it('stores 0.5 hours when 30 minutes is entered (no int rounding)', () => {
+    const onChange = vi.fn();
+    // Stored 0.25h surfaces as 15 minutes; bumping to 30 minutes must store 0.5h, not round to 1h.
+    render(<DurationField mode="hours" hours={0.25} onChange={onChange} />);
+    expect(screen.getByRole('spinbutton')).toHaveValue(15);
+    expect(screen.getByText('Minutes')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
+    expect(onChange).toHaveBeenLastCalledWith(0.5);
+  });
+
+  it('stores 1.5 hours when 90 minutes is entered (no round to 2h)', () => {
+    const onChange = vi.fn();
+    // Stored 0.5h surfaces as 30 minutes; bumping to 90 minutes must store 1.5h.
+    render(<DurationField mode="hours" hours={0.5} onChange={onChange} />);
+    expect(screen.getByText('Minutes')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '90' } });
+    expect(onChange).toHaveBeenLastCalledWith(1.5);
+  });
+
+  it('keeps whole-unit hours values displaying cleanly', () => {
+    const onChange = vi.fn();
+    render(<DurationField mode="hours" hours={6} onChange={onChange} />);
+    expect(screen.getByRole('spinbutton')).toHaveValue(6);
+    expect(screen.getByText('Hours')).toBeInTheDocument();
+  });
+
   it('clamps below-floor seconds emissions to the contract minimum', () => {
     const onChange = vi.fn();
     render(<DurationField mode="seconds" seconds={259200} minSeconds={60} onChange={onChange} />);

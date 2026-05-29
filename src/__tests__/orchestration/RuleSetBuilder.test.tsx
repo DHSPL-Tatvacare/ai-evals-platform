@@ -66,11 +66,12 @@ describe('RuleSetBuilder', () => {
 
   it('renders the leaf VALUE as an outcome dropdown (no free-text) when outcomeOptions are provided', () => {
     const onChange = vi.fn();
-    const value: LeafPredicate = { field: 'outcome', op: 'eq', value: '' };
+    const value: LeafPredicate = { field: 'steps.v1.voice_outcome', op: 'eq', value: '' };
     render(
       <RuleSetBuilder
         value={value}
         onChange={onChange}
+        fieldOptions={['steps.v1.voice_outcome']}
         outcomeOptions={[
           { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
           { canonical: 'no-answer', providerLabel: 'bolna_rnr', sourceNodeId: 'v1', provider: 'bolna' },
@@ -85,13 +86,89 @@ describe('RuleSetBuilder', () => {
     expect(screen.getByText('no-answer · bolna_rnr')).toBeInTheDocument();
   });
 
-  it('stores the canonical outcome value (not the provider label) when selected', () => {
+  it('keeps a free-text value input for a non-outcome leaf field even when outcomeOptions are present', () => {
     const onChange = vi.fn();
-    const value: LeafPredicate = { field: 'outcome', op: 'eq', value: '' };
+    // A non-outcome field (wa_button_id) compared while an upstream voice
+    // outcome exists must stay authorable as free text, not be forced into the
+    // outcome dropdown.
+    const value: LeafPredicate = {
+      field: 'steps.wa.wa_button_id',
+      op: 'eq',
+      value: '',
+    };
     render(
       <RuleSetBuilder
         value={value}
         onChange={onChange}
+        fieldOptions={['steps.v1.voice_outcome', 'steps.wa.wa_button_id']}
+        outcomeOptions={[
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+        ]}
+      />,
+    );
+    expect(screen.getByPlaceholderText('value')).toBeInTheDocument();
+    expect(screen.queryByText('Select an outcome')).not.toBeInTheDocument();
+  });
+
+  it('shows the outcome dropdown only for the matching producer outcome field', () => {
+    const onChange = vi.fn();
+    // The leaf field targets the voice producer's outcome path
+    // (steps.<sourceNodeId>.voice_outcome) so the dropdown should appear.
+    const value: LeafPredicate = {
+      field: 'steps.v1.voice_outcome',
+      op: 'eq',
+      value: '',
+    };
+    render(
+      <RuleSetBuilder
+        value={value}
+        onChange={onChange}
+        fieldOptions={['steps.v1.voice_outcome']}
+        outcomeOptions={[
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+        ]}
+      />,
+    );
+    expect(screen.queryByPlaceholderText('value')).not.toBeInTheDocument();
+    expect(screen.getByText('Select an outcome')).toBeInTheDocument();
+  });
+
+  it('keeps free text for a messaging producer whose outcome field the engine never writes', () => {
+    const onChange = vi.fn();
+    // A messaging producer (WhatsApp) emits outcome enums, but the runtime
+    // writes NO canonical outcome payload field for it — its only step fields
+    // are wa_button_id / wa_reply_text. The voice-only field key
+    // (steps.<wa>.voice_outcome) is a phantom path the engine never populates,
+    // so a leaf targeting it must NOT be forced into the outcome dropdown.
+    const value: LeafPredicate = {
+      field: 'steps.wa1.voice_outcome',
+      op: 'eq',
+      value: '',
+    };
+    render(
+      <RuleSetBuilder
+        value={value}
+        onChange={onChange}
+        // The engine declares only the messaging producer's reply fields — no
+        // canonical outcome field — so the voice_outcome path is never offered.
+        fieldOptions={['steps.wa1.wa_button_id', 'steps.wa1.wa_reply_text']}
+        outcomeOptions={[
+          { canonical: 'replied', providerLabel: 'wati_replied', sourceNodeId: 'wa1', provider: 'wati' },
+        ]}
+      />,
+    );
+    expect(screen.getByPlaceholderText('value')).toBeInTheDocument();
+    expect(screen.queryByText('Select an outcome')).not.toBeInTheDocument();
+  });
+
+  it('stores the canonical outcome value (not the provider label) when selected', () => {
+    const onChange = vi.fn();
+    const value: LeafPredicate = { field: 'steps.v1.voice_outcome', op: 'eq', value: '' };
+    render(
+      <RuleSetBuilder
+        value={value}
+        onChange={onChange}
+        fieldOptions={['steps.v1.voice_outcome']}
         outcomeOptions={[
           { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
         ]}
