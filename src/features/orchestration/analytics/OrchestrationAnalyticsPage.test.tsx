@@ -16,7 +16,7 @@ vi.mock('./queries', () => ({
   useOrchestrationRuns: vi.fn(),
   useOrchestrationTrend: vi.fn(),
   useOrchestrationSignals: vi.fn(),
-  useOrchestrationRunDetail: vi.fn(),
+  useOrchestrationRunReport: vi.fn(),
 }));
 
 vi.mock('@/features/analytics/components/ChartRenderer', () => ({
@@ -26,7 +26,7 @@ vi.mock('@/features/analytics/components/ChartRenderer', () => ({
 import {
   useOrchestrationBreakdown,
   useOrchestrationOverview,
-  useOrchestrationRunDetail,
+  useOrchestrationRunReport,
   useOrchestrationRuns,
   useOrchestrationSignals,
   useOrchestrationTrend,
@@ -88,21 +88,23 @@ function seedHooks() {
     data: { signals: [], generatedAt: null },
     isLoading: false,
   });
-  asMock(useOrchestrationRunDetail).mockReturnValue({
+  asMock(useOrchestrationRunReport).mockReturnValue({
     data: {
       runId: 'run-1',
       workflowId: 'wf-1',
       workflowName: 'Welcome blast',
+      appId: 'inside-sales',
       status: 'completed',
       triggeredBy: 'manual',
-      cohortSize: 100,
       startedAt: '2026-05-20T10:00:00Z',
       completedAt: '2026-05-20T11:00:00Z',
-      buckets: { positive: 20, reached: 40, noResponse: 10, failed: 5, inFlight: 0 },
+      durationSeconds: 3600,
+      recipientsTotal: 100,
       spend: 1.25,
-      nodeSteps: [],
-      actions: [],
-      actionsTotal: 0,
+      buckets: { positive: 20, reached: 40, noResponse: 10, failed: 5, inFlight: 0 },
+      channels: [],
+      recipients: [],
+      recipientsTotalCount: 0,
     },
     isLoading: false,
   });

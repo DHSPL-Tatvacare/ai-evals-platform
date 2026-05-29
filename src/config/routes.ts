@@ -31,6 +31,8 @@ export const routes = {
   profile: '/profile',
   guide: '/guide',
   printReportRun: (reportRunId: string) => `/print/report-runs/${reportRunId}`,
+  printCampaignRun: (runId: string, appId: string, scope: string) =>
+    `/print/campaign-runs/${runId}?appId=${appId}&scope=${scope}`,
   voiceRx: {
     home: "/",
     listing: (id: string) => `/listing/${id}`,

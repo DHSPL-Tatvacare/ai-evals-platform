@@ -44,6 +44,7 @@ import { landingRouteForApp } from "@/config/sidebarNav";
 
 const GuidePage = lazyWithRetry(() => import("@/features/guide"));
 const PrintReportRun = lazyWithRetry(() => import("@/features/evalRuns/pages/PrintReportRun").then(m => ({ default: m.PrintReportRun })));
+const PrintCampaignRun = lazyWithRetry(() => import("@/features/orchestration/analytics/PrintCampaignRun").then(m => ({ default: m.PrintCampaignRun })));
 const AnalyticsLibraryPage = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsLibraryPage').then(m => ({ default: m.AnalyticsLibraryPage })));
 const AnalyticsChartDetail = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsChartDetail').then(m => ({ default: m.AnalyticsChartDetail })));
 const AnalyticsDashboardDetail = lazyWithRetry(() => import('@/features/analytics/pages/AnalyticsDashboardDetail').then(m => ({ default: m.AnalyticsDashboardDetail })));
@@ -92,6 +93,14 @@ export function Router() {
           element={
             <Suspense fallback={ROUTE_FALLBACK}>
               <PrintReportRun />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/print/campaign-runs/:runId"
+          element={
+            <Suspense fallback={ROUTE_FALLBACK}>
+              <PrintCampaignRun />
             </Suspense>
           }
         />

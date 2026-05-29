@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiRequest, apiDownload } from './client';
 import type {
   AnalyticsQueryParams,
   BreakdownDimension,
@@ -60,6 +60,16 @@ export function fetchRunReport(
   const q = new URLSearchParams({ appId: params.appId, scope: params.scope });
   return apiRequest<RunReportResponse>(
     `${BASE}/runs/${encodeURIComponent(runId)}/report?${q.toString()}`,
+  );
+}
+
+export function exportRunPdf(
+  runId: string,
+  params: { appId: string; scope: AnalyticsQueryParams['scope'] },
+): Promise<Blob> {
+  const q = new URLSearchParams({ appId: params.appId, scope: params.scope });
+  return apiDownload(
+    `${BASE}/runs/${encodeURIComponent(runId)}/export-pdf?${q.toString()}`,
   );
 }
 

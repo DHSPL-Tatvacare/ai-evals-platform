@@ -173,7 +173,7 @@ def _compose_pdf_header_template(meta: dict[str, str]) -> str:
     confined to this function.
     """
     title_safe = html.escape(meta.get('title', ''))
-    label_safe = html.escape(_PDF_HEADER_LABEL)
+    label_safe = html.escape(meta.get('label', _PDF_HEADER_LABEL))
     return (
         '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;'
         'font-size:8.5px;color:#64748b;width:100%;padding:0 14mm;'

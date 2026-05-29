@@ -1,20 +1,14 @@
-import { useMemo } from 'react';
-import { ExternalLink, X } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Download, ExternalLink, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import {
-  Badge,
-  Card,
-  DataTable,
-  FunnelCard,
-  IconButton,
-  LoadingState,
-  type ColumnDef,
-} from '@/components/ui';
-import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
+
+import { Button, IconButton, LoadingState } from '@/components/ui';
+import { exportRunPdf } from '@/services/api/orchestrationAnalytics';
+import { notificationService } from '@/services/notifications';
 import { useOrchestrationRoutes } from '../hooks/useOrchestrationRoutes';
-import { useOrchestrationRunDetail } from './queries';
-import { formatUsd } from './format';
-import type { AnalyticsScope, OrchestrationRunAction } from './types';
+import { useOrchestrationRunReport } from './queries';
+import { CampaignRunReportView } from './report/CampaignRunReportView';
+import type { AnalyticsScope } from './types';
 
 interface RunDrillOverProps {
   runId: string;
@@ -24,82 +18,55 @@ interface RunDrillOverProps {
   labelledBy?: string;
 }
 
-const BUCKET_LABELS: { key: keyof OutcomeBuckets; label: string }[] = [
-  { key: 'positive', label: 'Positive' },
-  { key: 'reached', label: 'Reached' },
-  { key: 'noResponse', label: 'No response' },
-  { key: 'failed', label: 'Failed' },
-  { key: 'inFlight', label: 'In-flight' },
-];
-
-interface OutcomeBuckets {
-  positive: number;
-  reached: number;
-  noResponse: number;
-  failed: number;
-  inFlight: number;
-}
-
-// Node steps carry only `nodeType` (e.g. "voice.place_call"); the run_detail
-// contract has no provider slug, so we surface the capability prefix rather
-// than a misleading provider logo. See report flag if a provider is needed.
-function capabilityOf(nodeType: string): string {
-  return nodeType.split('.')[0] || nodeType;
-}
-
 export function RunDrillOver({ runId, appId, scope, onClose, labelledBy }: RunDrillOverProps) {
   const orchestrationRoutes = useOrchestrationRoutes();
-  const { data, isLoading } = useOrchestrationRunDetail(runId, { appId, scope });
+  const { data, isLoading } = useOrchestrationRunReport(runId, { appId, scope });
+  const [exporting, setExporting] = useState(false);
 
-  const donutData = useMemo(() => {
-    if (!data) return [];
-    return BUCKET_LABELS.map(({ key, label }) => ({ name: label, value: data.buckets[key] })).filter(
-      (d) => d.value > 0,
-    );
-  }, [data]);
-
-  const funnelStages = useMemo(() => {
-    if (!data) return [];
-    return BUCKET_LABELS.map(({ key, label }) => ({ key, label, value: data.buckets[key] }));
-  }, [data]);
-
-  const actionColumns: ColumnDef<OrchestrationRunAction>[] = [
-    { key: 'recipient', header: 'Recipient', textBehavior: 'truncate', render: (a) => a.contact ?? a.recipientId },
-    { key: 'channel', header: 'Channel', width: 'w-24', render: (a) => a.channel },
-    { key: 'action', header: 'Action', width: 'w-32', textBehavior: 'truncate', render: (a) => a.actionType },
-    {
-      key: 'outcome',
-      header: 'Outcome',
-      width: 'w-28',
-      render: (a) => (a.outcomeBucket ? <Badge variant="neutral">{a.outcomeBucket}</Badge> : '—'),
-    },
-    {
-      key: 'cost',
-      header: 'Cost',
-      width: 'w-20',
-      cellClassName: 'text-right tabular-nums',
-      headerClassName: 'text-right',
-      render: (a) => (a.cost != null ? formatUsd(a.cost) : '—'),
-    },
-  ];
+  const handleExportPdf = useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const blob = await exportRunPdf(runId, { appId, scope });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `campaign-run-${runId.slice(0, 8)}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      notificationService.success('PDF exported');
+    } catch {
+      notificationService.error('Failed to export PDF');
+    } finally {
+      setExporting(false);
+    }
+  }, [appId, exporting, runId, scope]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-4">
-        <div className="min-w-0">
-          <h2 id={labelledBy} className="truncate text-base font-semibold text-[var(--text-primary)]">
-            {data?.workflowName ?? 'Run detail'}
-          </h2>
-          {data && (
-            <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
-              {data.status} · {data.triggeredBy} · {data.cohortSize} recipients · {formatUsd(data.spend)}
-            </p>
-          )}
-        </div>
+        <h2
+          id={labelledBy}
+          className="min-w-0 truncate text-base font-semibold text-[var(--text-primary)]"
+        >
+          {data?.workflowName ?? 'Run detail'}
+        </h2>
         <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Download}
+            isLoading={exporting}
+            disabled={exporting || !data}
+            onClick={() => void handleExportPdf()}
+          >
+            Export PDF
+          </Button>
           <Link
             to={orchestrationRoutes.campaignRunDetail(runId)}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--interactive-secondary)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--interactive-secondary-hover)]"
           >
             <ExternalLink className="h-3.5 w-3.5" />
             Open full run
@@ -113,63 +80,8 @@ export function RunDrillOver({ runId, appId, scope, onClose, labelledBy }: RunDr
           <LoadingState />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="flex flex-col p-4">
-              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Outcomes</h3>
-              {donutData.length === 0 ? (
-                <p className="py-6 text-center text-xs text-[var(--text-muted)]">No outcomes recorded</p>
-              ) : (
-                <ChartRenderer
-                  type="donut"
-                  data={donutData}
-                  xKey="name"
-                  yKey="value"
-                  height={240}
-                  legendPosition="right"
-                  hideSliceLabels
-                />
-              )}
-            </Card>
-            <FunnelCard title="This run" stages={funnelStages} />
-          </div>
-
-          <Card className="p-4">
-            <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Node path</h3>
-            {data.nodeSteps.length === 0 ? (
-              <p className="text-xs text-[var(--text-muted)]">No node steps recorded.</p>
-            ) : (
-              <ol className="flex flex-wrap items-center gap-2">
-                {data.nodeSteps.map((step) => (
-                  <li
-                    key={step.nodeStepId}
-                    className="flex items-center gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px]"
-                  >
-                    <span className="font-mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                      {capabilityOf(step.nodeType)}
-                    </span>
-                    <span className="text-[var(--text-secondary)]">{step.nodeId}</span>
-                    <Badge variant="neutral">{step.status}</Badge>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </Card>
-
-          <Card className="flex min-h-0 flex-col p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Action log</h3>
-              <span className="text-[11.5px] text-[var(--text-muted)]">{data.actionsTotal} actions</span>
-            </div>
-            <DataTable
-              columns={actionColumns}
-              data={data.actions}
-              keyExtractor={(a) => a.actionId}
-              minWidth="0"
-              emptyTitle="No actions"
-              emptyDescription="This run has no recorded actions yet."
-            />
-          </Card>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+          <CampaignRunReportView report={data} />
         </div>
       )}
     </div>

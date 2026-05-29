@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from app.auth.context import AuthContext
 from app.auth.permissions import require_any_permission
@@ -37,6 +38,7 @@ from app.schemas.orchestration_analytics import (
     TrendPointResponse,
     TrendResponse,
 )
+from app.routes.reports import _render_pdf_via_print_route
 from app.services.orchestration.analytics import read_service
 from app.services.orchestration.analytics.scope import (
     ScopeForbidden,
@@ -318,6 +320,53 @@ async def get_run_report(
             for r in report.recipients
         ],
         recipients_total_count=report.recipients_total_count,
+    )
+
+
+def _campaign_pdf_meta(report) -> dict[str, str]:
+    """Running header/footer text for the campaign PDF. Keys mirror
+    ``_compose_pdf_header_template`` (title) / ``_compose_pdf_footer_template``
+    (subtitle) in ``routes.reports``. Subtitle stays generic + data-driven —
+    no app-specific copy."""
+    channels = ", ".join(
+        sorted({c.connection_label or c.vendor or c.capability for c in report.channels})
+    )
+    subtitle = (
+        f"{report.recipients_total} contacts across {channels}"
+        if channels
+        else "Campaign run report"
+    )
+    return {"label": "Campaign Report", "title": report.workflow_name or "Campaign run", "subtitle": subtitle}
+
+
+@router.get("/runs/{run_id}/export-pdf")
+async def export_run_pdf(
+    run_id: str,
+    app_id: str = Query(..., alias="appId"),
+    scope: str = Query("mine"),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = require_any_permission("insights:view", "orchestration:manage"),
+) -> Response:
+    await ensure_orchestration_enabled(db, app_id)
+    scope_clause = _resolve_scope(auth, scope)
+    report = await read_service.run_report(
+        db, run_id=run_id, tenant_id=auth.tenant_id, scope_clause=scope_clause,
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    pdf_bytes = await _render_pdf_via_print_route(
+        print_path=f"/print/campaign-runs/{run_id}?appId={app_id}&scope={scope}",
+        auth=auth,
+        log_id=f"campaign run {run_id}",
+        pdf_meta=_campaign_pdf_meta(report),
+    )
+    short_id = str(run_id)[:8]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="campaign-run-{short_id}.pdf"',
+        },
     )
 
 

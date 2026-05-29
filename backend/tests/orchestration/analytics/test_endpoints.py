@@ -228,6 +228,95 @@ async def test_run_report_scope_leak_non_owner_mine_404_zero_recipients(
 
 
 @pytest.mark.asyncio
+async def test_export_pdf_admin_200_application_pdf(
+    db_session, client, seed_orchestration_run, monkeypatch
+):
+    slug = await _seed_app(db_session, enabled=True)
+    tenant = await _seed_tenant(db_session)
+    seeded = await seed_orchestration_run(
+        tenant_id=tenant, app_id=slug,
+        recipients=[
+            {"recipient_id": "r0", "channel": "voice",
+             "action_type": "bolna_answered", "bucket": "positive"},
+        ],
+    )
+
+    calls: dict = {}
+
+    async def _fake_render(*, print_path, auth, log_id, pdf_meta=None):
+        calls["print_path"] = print_path
+        calls["pdf_meta"] = pdf_meta
+        return b"%PDF-1.7 fake"
+
+    monkeypatch.setattr(
+        "app.routes.orchestration_analytics._render_pdf_via_print_route", _fake_render
+    )
+    _override(db_session, _admin_auth(tenant))
+    r = await client.get(
+        f"/api/orchestration/analytics/runs/{seeded['run_id']}/export-pdf?appId={slug}&scope=tenant"
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content == b"%PDF-1.7 fake"
+    assert str(seeded["run_id"]) in calls["print_path"]
+    assert f"appId={slug}" in calls["print_path"]
+    assert "scope=tenant" in calls["print_path"]
+    assert calls["print_path"].startswith("/print/campaign-runs/")
+
+
+@pytest.mark.asyncio
+async def test_export_pdf_scope_leak_non_owner_mine_404_render_not_called(
+    db_session, client, seed_orchestration_run, monkeypatch
+):
+    # Run owned by SYSTEM_USER_ID, private, in caller tenant. A non-owner with
+    # scope=mine must get 404 BEFORE any PDF render fires (no recipient leak).
+    slug = await _seed_app(db_session, enabled=True)
+    caller_tenant = await _seed_tenant(db_session)
+    seeded = await seed_orchestration_run(
+        tenant_id=caller_tenant, app_id=slug,
+        recipients=[
+            {"recipient_id": "secret", "channel": "voice",
+             "action_type": "bolna_answered", "bucket": "positive",
+             "attributes": {"name": "Private Patient"}},
+        ],
+    )
+
+    render_called = {"value": False}
+
+    async def _fake_render(*, print_path, auth, log_id, pdf_meta=None):
+        render_called["value"] = True
+        return b"%PDF leak"
+
+    monkeypatch.setattr(
+        "app.routes.orchestration_analytics._render_pdf_via_print_route", _fake_render
+    )
+    _override(db_session, _insights_auth(caller_tenant))
+    r = await client.get(
+        f"/api/orchestration/analytics/runs/{seeded['run_id']}/export-pdf?appId={slug}&scope=mine"
+    )
+    assert r.status_code == 404, r.text
+    assert render_called["value"] is False
+    assert "Private Patient" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_export_pdf_no_permission_403(db_session, client, monkeypatch):
+    slug = await _seed_app(db_session, enabled=True)
+
+    async def _fake_render(*, print_path, auth, log_id, pdf_meta=None):
+        raise AssertionError("render must not run without permission")
+
+    monkeypatch.setattr(
+        "app.routes.orchestration_analytics._render_pdf_via_print_route", _fake_render
+    )
+    _override(db_session, _no_perm_auth(uuid.uuid4()))
+    r = await client.get(
+        f"/api/orchestration/analytics/runs/{uuid.uuid4()}/export-pdf?appId={slug}&scope=tenant"
+    )
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
 async def test_signals_returns_empty_pre_phase3(db_session, client):
     slug = await _seed_app(db_session, enabled=True)
     _override(db_session, _admin_auth(uuid.uuid4()))
