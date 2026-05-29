@@ -119,6 +119,13 @@ class _Config(BaseModel):
         elif self.mode == "until_datetime":
             if self.until_datetime is None:
                 raise ValueError("'until_datetime' required when mode='until_datetime'")
+            # Publish guard: a wake time already in the past is a misconfiguration.
+            # Runtime stays tolerant (execute resolves a past instant to immediate wake).
+            wake = self.until_datetime
+            if wake.tzinfo is None:
+                wake = wake.replace(tzinfo=timezone.utc)
+            if wake <= datetime.now(timezone.utc):
+                raise ValueError("'until_datetime' must be in the future")
         elif self.mode == "event":
             if not self.event_name:
                 raise ValueError("'event_name' required when mode='event'")

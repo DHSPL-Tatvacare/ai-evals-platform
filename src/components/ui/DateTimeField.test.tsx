@@ -1,7 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DateTimeField } from './DateTimeField';
+
+/** Local Date → the UTC ISO string DateTimeField expects as `value`. */
+function localToUtcIso(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
 
 // All assertions work against the UTC ISO string that onChange receives, so
 // there are no local-timezone assumptions in these tests.
@@ -64,5 +70,73 @@ describe('DateTimeField', () => {
     const caption = screen.getByText(/Stored as/);
     expect(caption.textContent).toContain('2026-03-15T08:00:00Z');
     expect(caption.textContent).not.toContain('.000');
+  });
+
+  describe('future-only guard (min prop)', () => {
+    it('disables past days in the calendar when min is set', () => {
+      // min = today at noon local; the calendar must not render yesterday.
+      const min = new Date();
+      min.setHours(12, 0, 0, 0);
+      const yesterday = new Date(min);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      render(<DateTimeField value="" onChange={vi.fn()} min={min} />);
+      fireEvent.click(screen.getByRole('button'));
+
+      // The day-cell for yesterday is suppressed (out-of-range days are not
+      // rendered as clickable buttons by Calendar).
+      if (yesterday.getMonth() === min.getMonth()) {
+        const dayLabel = String(yesterday.getDate());
+        const dayButtons = screen
+          .queryAllByRole('button', { name: new RegExp(`^${dayLabel}$`) });
+        expect(dayButtons.length).toBe(0);
+      }
+    });
+
+    it('clamps hour options earlier than min when the selected date is today', async () => {
+      const user = userEvent.setup();
+      // min today at 13:00 local; value today at 18:00 local.
+      const min = new Date();
+      min.setHours(13, 0, 0, 0);
+      const value = new Date();
+      value.setHours(18, 0, 0, 0);
+
+      render(
+        <DateTimeField value={localToUtcIso(value)} onChange={vi.fn()} min={min} />,
+      );
+
+      // Open the popover (trigger is the first button) so the Selects mount.
+      await user.click(screen.getAllByRole('button')[0]);
+      // Open the hour Select (first combobox in the time row).
+      const comboboxes = await screen.findAllByRole('combobox');
+      await user.click(comboboxes[0]);
+
+      const listbox = await screen.findByRole('listbox');
+      const earlier = String(min.getHours() - 1).padStart(2, '0');
+      const atMin = String(min.getHours()).padStart(2, '0');
+      const later = String(min.getHours() + 1).padStart(2, '0');
+
+      // An hour before min is not offered; min's hour and later are.
+      expect(within(listbox).queryByRole('option', { name: earlier })).toBeNull();
+      expect(within(listbox).getByRole('option', { name: atMin })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: later })).toBeInTheDocument();
+    });
+
+    it('clamps a typed value earlier than min up to min on today', () => {
+      const onChange = vi.fn();
+      // value sits before min on the same day → must snap forward to min.
+      const min = new Date();
+      min.setHours(15, 0, 0, 0);
+      const value = new Date();
+      value.setHours(9, 0, 0, 0);
+
+      render(
+        <DateTimeField value={localToUtcIso(value)} onChange={onChange} min={min} />,
+      );
+
+      // On mount the out-of-range value is corrected to min.
+      const emitted: string = onChange.mock.calls[0][0];
+      expect(new Date(emitted).getTime()).toBeGreaterThanOrEqual(min.getTime());
+    });
   });
 });

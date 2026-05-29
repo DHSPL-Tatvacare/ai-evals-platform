@@ -6,6 +6,8 @@ must coerce to None instead of failing the strict datetime parse.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 import app.services.orchestration.nodes  # noqa: F401 — register handlers
@@ -48,8 +50,82 @@ def test_blank_until_datetime_still_required_in_until_mode():
 
 
 def test_real_until_datetime_still_parses():
+    future = datetime.now(timezone.utc) + timedelta(days=365)
     cfg = _Config.model_validate(
-        {"mode": "until_datetime", "until_datetime": "2026-05-01T00:00:00Z"}
+        {"mode": "until_datetime", "until_datetime": future.isoformat()}
     )
     assert cfg.until_datetime is not None
-    assert cfg.until_datetime.year == 2026
+    assert cfg.until_datetime.year == future.year
+
+
+def _past_iso() -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
+
+def _future_iso() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+
+
+def test_publish_rejects_past_until_datetime():
+    """Publish-mode validation must reject a wake time already in the past."""
+    with pytest.raises(ValueError):
+        _Config.model_validate(
+            {"mode": "until_datetime", "until_datetime": _past_iso()},
+            context={"mode": "publish"},
+        )
+
+
+def test_publish_accepts_future_until_datetime():
+    cfg = _Config.model_validate(
+        {"mode": "until_datetime", "until_datetime": _future_iso()},
+        context={"mode": "publish"},
+    )
+    assert cfg.until_datetime is not None
+
+
+def test_draft_tolerates_past_until_datetime():
+    """Draft mode keeps its tolerance — a past wake time saves without error."""
+    cfg = _Config.model_validate(
+        {"mode": "until_datetime", "until_datetime": _past_iso()},
+        context={"mode": "draft"},
+    )
+    assert cfg.until_datetime is not None
+
+
+class _FakeCtx:
+    """Minimal ctx for execute(): records set_recipient_state calls, no DB I/O."""
+
+    def __init__(self) -> None:
+        self.db = None
+        self.run_id = "run-1"
+        self.states: list[dict] = []
+
+    async def set_recipient_state(self, rid, *, status, wakeup_at):
+        self.states.append({"rid": rid, "status": status, "wakeup_at": wakeup_at})
+
+
+async def _one_recipient():
+    yield ("r1", {})
+
+
+@pytest.mark.asyncio
+async def test_runtime_past_until_datetime_wakes_immediately(monkeypatch):
+    """At runtime a past until_datetime must resolve to a past wakeup_at (picked
+    up immediately by the resume poller) — it must never raise."""
+    import app.services.orchestration.dispatch.resume_enqueue as resume_enqueue
+
+    async def _noop_enqueue(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(resume_enqueue, "enqueue_resume_for_recipient", _noop_enqueue)
+
+    cfg = _Config.model_validate(
+        {"mode": "until_datetime", "until_datetime": _past_iso()},
+        context={"mode": "draft"},
+    )
+    from app.services.orchestration.nodes.logic_wait import _Handler
+
+    ctx = _FakeCtx()
+    result = await _Handler().execute(_one_recipient(), cfg, ctx)
+    assert result.suspended is True
+    assert ctx.states[0]["wakeup_at"] < datetime.now(timezone.utc)

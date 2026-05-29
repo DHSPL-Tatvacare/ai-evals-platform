@@ -146,6 +146,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
         <Field label="Wake at (UTC ISO datetime)">
           <DateTimeField
             value={value.until_datetime ?? ''}
+            min={new Date()}
             onChange={(next) => emitForMode('until_datetime', { until_datetime: next })}
           />
         </Field>

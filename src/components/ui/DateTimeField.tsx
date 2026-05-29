@@ -1,7 +1,7 @@
 /** Date + time picker that emits a UTC ISO string (no milliseconds). */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Calendar as CalendarIcon } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isSameDay } from 'date-fns';
 import { cn } from '@/utils/cn';
 import { Popover, PopoverTrigger, PopoverContent } from './Popover';
 import { Calendar } from './Calendar';
@@ -31,6 +31,11 @@ const MINUTE_OPTIONS: SelectOption[] = Array.from({ length: 12 }, (_, i) => ({
 }));
 
 const TZ_NAME = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** Round a minute up to the nearest 5-minute grid step (capped at 55). */
+function ceilToStep(minute: number): number {
+  return Math.min(Math.ceil(minute / 5) * 5, 55);
+}
 
 /** Parse a UTC ISO string into a local Date, or null if empty/invalid. */
 function parseUtcToLocal(utcIso: string): Date | null {
@@ -75,6 +80,32 @@ export function DateTimeField({
         .padStart(2, '0')
         .replace('60', '55')
     : '00';
+
+  // When a future-only `min` is set and the selected date is min's calendar
+  // day, the hour/minute lists are clamped so an earlier time on today is not
+  // pickable. Other days keep the full grid (min already gates the date).
+  const minOnSelectedDay = min && localDate ? isSameDay(localDate, min) : false;
+  const minHour = min ? min.getHours() : 0;
+  const minMinuteStep = min ? ceilToStep(min.getMinutes()) : 0;
+
+  const hourOptions = minOnSelectedDay
+    ? HOUR_OPTIONS.filter((o) => parseInt(o.value, 10) >= minHour)
+    : HOUR_OPTIONS;
+
+  const minuteOptions =
+    minOnSelectedDay && parseInt(localHour, 10) === minHour
+      ? MINUTE_OPTIONS.filter((o) => parseInt(o.value, 10) >= minMinuteStep)
+      : MINUTE_OPTIONS;
+
+  // Clamp an incoming value that sits before `min` forward to `min`, so a stale
+  // or typed past instant can never be persisted from this future-only field.
+  useEffect(() => {
+    if (!min || !localDate) return;
+    if (localDate.getTime() >= min.getTime()) return;
+    onChange(buildUtcIso(min, String(minHour).padStart(2, '0'), String(minMinuteStep).padStart(2, '0')));
+    // localDate is derived from value; depending on value covers it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, min]);
 
   const triggerLabel = localDate
     ? format(localDate, 'dd MMM yyyy, HH:mm')
@@ -128,7 +159,7 @@ export function DateTimeField({
                 className="w-[72px]"
                 value={localHour}
                 onChange={handleHourChange}
-                options={HOUR_OPTIONS}
+                options={hourOptions}
                 placeholder="HH"
                 side="top"
               />
@@ -138,7 +169,7 @@ export function DateTimeField({
                 className="w-[72px]"
                 value={localMinute}
                 onChange={handleMinuteChange}
-                options={MINUTE_OPTIONS}
+                options={minuteOptions}
                 placeholder="MM"
                 side="top"
               />
