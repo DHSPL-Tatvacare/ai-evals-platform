@@ -613,6 +613,24 @@ function SectionContent({
             ))}
           </div>
         ) : null}
+        {'strategicRecommendations' in narrative && narrative.strategicRecommendations.length > 0 ? (
+          <div className="space-y-2">
+            {narrative.strategicRecommendations.map((item, index) => (
+              <SectionShell key={`${item.priority}-${index}`} tone="info">
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
+                    style={{ backgroundColor: toneSurface('info'), color: toneText('info') }}
+                  >
+                    {item.priority}
+                  </span>
+                  <span className="text-sm font-medium text-[var(--text-primary)]">{item.action}</span>
+                </div>
+                {item.expectedImpact ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{item.expectedImpact}</div> : null}
+              </SectionShell>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -949,6 +967,12 @@ function SummarySectionContent({
   }
 
   if (componentId === 'narrative') {
+    // Cross-run: the AI narrative IS the summary — render it in full (executive
+    // summary, trend, patterns, recommendations), identical to the Detailed tab.
+    // Single-run keeps the condensed headline-only summary.
+    if (report && !isSingleRunPayload(report)) {
+      return <SectionContent section={section} presentationSection={presentationSection} report={report} />;
+    }
     const narrativeData = (section as NarrativeSection).data as PlatformRunNarrative | undefined;
     return narrativeData?.executiveSummary ? (
       <SectionShell tone="info" bodyClassName="px-4 py-3">

@@ -52,9 +52,71 @@ function makeCrossRunReport(): PlatformCrossRunPayload {
   };
 }
 
+function makeNarrativeCrossRunReport(): PlatformCrossRunPayload {
+  return {
+    schemaVersion: 'v1',
+    metadata: {
+      appId: 'kaira-bot',
+      reportKind: 'cross_run',
+      computedAt: '2026-05-01T00:00:00Z',
+      sourceRunCount: 3,
+      totalRunsAvailable: 3,
+      cacheKey: null,
+    },
+    presentation: {
+      sections: [
+        {
+          sectionId: 'narr',
+          componentId: 'narrative',
+          title: 'AI Narrative',
+          description: null,
+          variant: 'default',
+          printable: true,
+        },
+      ],
+      rendererId: 'cross-run-v1',
+      layoutGroups: [
+        { id: 'summary-default', tab: 'summary', layout: 'stack', sectionIds: ['narr'] },
+        { id: 'detailed-default', tab: 'detailed', layout: 'stack', sectionIds: ['narr'] },
+      ],
+      density: 'comfortable',
+      designTokens: {},
+      themeTokens: {},
+    },
+    sections: [
+      {
+        id: 'narr',
+        type: 'narrative',
+        title: 'AI Narrative',
+        description: null,
+        variant: 'default',
+        data: {
+          schemaVersion: 'v1',
+          schemaKey: 'platform_cross_run_narrative_v1',
+          schemaOwner: 'backend',
+          executiveSummary: 'Overall summary text.',
+          trendAnalysis: 'Trend text.',
+          criticalPatterns: [{ title: 'Pattern Alpha', summary: 'pattern detail', affectedRuns: 2 }],
+          strategicRecommendations: [{ priority: 'P0', action: 'Do the thing', expectedImpact: 'big impact' }],
+        },
+      },
+    ],
+  };
+}
+
 describe('PlatformReportView cross-run payload', () => {
   it('renders without crashing when given a cross-run payload', () => {
     expect(() => render(<PlatformReportView report={makeCrossRunReport()} actions={null} />)).not.toThrow();
+  });
+
+  it('renders the full cross-run narrative (patterns + recommendations) in the Summary tab', () => {
+    // Summary is the default tab. "Full narrative" means the patterns and the
+    // strategic recommendations show — not just the executive-summary headline.
+    render(<PlatformReportView report={makeNarrativeCrossRunReport()} actions={null} />);
+    // Rendered in BOTH the Summary and Detailed panels (Tabs mounts both) — the
+    // Summary tab now shows the full narrative, not a single executive-summary block.
+    expect(screen.getAllByText('Pattern Alpha').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Do the thing').length).toBeGreaterThanOrEqual(2);
   });
 
   it('shows the Summary tab', () => {

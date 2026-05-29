@@ -122,13 +122,48 @@ def _default_single_run_layout_groups(
     return groups
 
 
+def _default_cross_run_layout_groups(
+    section_configs: list[PresentationSectionConfig],
+) -> list[dict[str, Any]]:
+    """Cross-run summary tab = the AI narrative (the cross-run synthesis);
+    detailed tab = every section. The KPI cards render in the report header,
+    so they are intentionally not duplicated into the summary body."""
+    if not section_configs:
+        return []
+
+    ordered_ids = [section.section_id for section in section_configs]
+    summary_ids = [
+        section.section_id
+        for section in section_configs
+        if section.component_id == 'narrative'
+    ]
+
+    groups: list[dict[str, Any]] = []
+    if summary_ids:
+        groups.append({
+            'id': 'summary-default',
+            'tab': 'summary',
+            'layout': 'stack',
+            'sectionIds': summary_ids,
+        })
+    if ordered_ids:
+        groups.append({
+            'id': 'detailed-default',
+            'tab': 'detailed',
+            'layout': 'stack',
+            'sectionIds': ordered_ids,
+        })
+    return groups
+
+
 def _effective_layout_groups(
     presentation_config: PresentationConfig,
     section_configs: list[PresentationSectionConfig],
+    default_builder: Callable[[list[PresentationSectionConfig]], list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     if presentation_config.layout_groups:
         return presentation_config.layout_groups
-    return _default_single_run_layout_groups(section_configs)
+    return default_builder(section_configs)
 
 
 async def _load_run_and_profile(db, *, tenant_id: uuid.UUID, user_id: uuid.UUID, run_id: str):
@@ -246,6 +281,8 @@ class ReportScopeSpec:
     build_base_payload: Callable[..., Awaitable[Any]]
     # (metadata, app_id) -> (title, subtitle, doc_metadata) for compose_document.
     export_meta: Callable[[Any, str], tuple[str, str | None, dict[str, str | None]]]
+    # (presentation_section_configs) -> summary/detailed tab layout groups.
+    layout_groups_builder: Callable[[list[PresentationSectionConfig]], list[dict[str, Any]]]
 
 
 def _single_run_export_meta(
@@ -382,19 +419,19 @@ async def compose_report_payload(
         composition.sections,
     )
 
-    # Single-run ships a full presentation (renderer + layout groups); cross-run
-    # leaves it defaulted to match the prior inline behaviour.
-    presentation = None
-    if scope_spec.scope == 'single_run':
-        layout_groups = _effective_layout_groups(presentation_config, presentation_sections)
-        presentation = PlatformReportPresentation(
-            renderer_id=presentation_config.renderer_id or export_config.document_variant or report_config.report_id,
-            layout_groups=layout_groups,
-            density=presentation_config.density,
-            design_tokens=presentation_config.design_tokens,
-            theme_tokens=presentation_config.theme_tokens,
-            sections=presentation_sections,
-        )
+    # Both scopes ship a full presentation (renderer + layout groups); the
+    # per-scope summary/detailed grouping comes from the scope's builder.
+    layout_groups = _effective_layout_groups(
+        presentation_config, presentation_sections, scope_spec.layout_groups_builder,
+    )
+    presentation = PlatformReportPresentation(
+        renderer_id=presentation_config.renderer_id or export_config.document_variant or report_config.report_id,
+        layout_groups=layout_groups,
+        density=presentation_config.density,
+        design_tokens=presentation_config.design_tokens,
+        theme_tokens=presentation_config.theme_tokens,
+        sections=presentation_sections,
+    )
 
     # Stamp narrative_status now so the composed payload carries it.
     metadata = metadata.model_copy(update={'narrative_status': narrative_status})
@@ -491,6 +528,7 @@ SINGLE_RUN_SCOPE_SPEC = ReportScopeSpec(
     composition=lambda analytics_config: analytics_config.single_run,
     build_base_payload=_build_single_run_base_payload,
     export_meta=_single_run_export_meta,
+    layout_groups_builder=_default_single_run_layout_groups,
 )
 
 
@@ -662,6 +700,7 @@ CROSS_RUN_SCOPE_SPEC = ReportScopeSpec(
     composition=lambda analytics_config: analytics_config.cross_run,
     build_base_payload=_build_cross_run_base_payload,
     export_meta=_cross_run_export_meta,
+    layout_groups_builder=_default_cross_run_layout_groups,
 )
 
 

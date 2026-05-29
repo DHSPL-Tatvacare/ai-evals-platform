@@ -400,7 +400,9 @@ export function CrossRunReportPage() {
         }
       >
         {artifactQuery.data && (
-          <RunReportSurface report={artifactQuery.data} runId={completedRun!.id} actions={null} />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <RunReportSurface report={artifactQuery.data} runId={completedRun!.id} actions={null} />
+          </div>
         )}
       </PageSurface>
 
