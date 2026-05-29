@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { DataTable, type ColumnDef } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type {
@@ -16,6 +17,7 @@ interface RecipientTableProps {
 }
 
 const STAGE_DOT_LIMIT = 3;
+const RECIPIENTS_PER_PAGE = 10;
 
 function findChannel(
   channels: RunReportRecipientChannel[],
@@ -70,6 +72,12 @@ export function RecipientTable({
   totalCount,
   printMode = false,
 }: RecipientTableProps) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(recipients.length / RECIPIENTS_PER_PAGE));
+  const pageRows = printMode
+    ? recipients
+    : recipients.slice((page - 1) * RECIPIENTS_PER_PAGE, page * RECIPIENTS_PER_PAGE);
+
   const columns: ColumnDef<RunReportRecipient>[] = [
     {
       key: 'contact',
@@ -150,11 +158,23 @@ export function RecipientTable({
       </p>
       <DataTable
         columns={columns}
-        data={recipients}
+        data={pageRows}
         keyExtractor={(row) => row.recipientId}
         stickyHeader={!printMode}
         emptyTitle="No contacts"
         emptyDescription="This run has no recipient activity yet."
+        pagination={
+          printMode || recipients.length <= RECIPIENTS_PER_PAGE
+            ? undefined
+            : {
+                page,
+                totalPages,
+                onPageChange: setPage,
+                pageSize: RECIPIENTS_PER_PAGE,
+                totalItems: recipients.length,
+                showCount: true,
+              }
+        }
       />
     </div>
   );

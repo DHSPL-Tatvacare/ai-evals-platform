@@ -37,8 +37,9 @@ export function RunDrillOver({ runId, appId, scope, onClose, labelledBy }: RunDr
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
       notificationService.success('PDF exported');
-    } catch {
-      notificationService.error('Failed to export PDF');
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Please try again.';
+      notificationService.error(detail, 'PDF export failed');
     } finally {
       setExporting(false);
     }

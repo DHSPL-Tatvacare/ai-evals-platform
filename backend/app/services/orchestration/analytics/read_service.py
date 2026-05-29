@@ -1064,6 +1064,50 @@ def _recipient_display(payload: dict) -> tuple[Optional[str], dict[str, Any]]:
     return display_name, clean
 
 
+async def _resolve_channel_providers(db: AsyncSession, run_id) -> dict[str, tuple]:
+    """capability -> (provider, connection_name) from the run's version node configs."""
+    import uuid as _uuid
+
+    row = (
+        await db.execute(
+            select(WorkflowVersion.definition)
+            .join(WorkflowRun, WorkflowRun.workflow_version_id == WorkflowVersion.id)
+            .where(WorkflowRun.id == run_id)
+        )
+    ).first()
+    definition = row[0] if row else None
+    if not definition:
+        return {}
+    cap_conn: dict[str, str] = {}
+    for node in definition.get("nodes") or []:
+        ntype = node.get("type") or ""
+        cap = ntype.split(".")[0] if "." in ntype else None
+        conn = (node.get("config") or {}).get("connection_id")
+        if cap and conn:
+            cap_conn.setdefault(cap, str(conn))
+    if not cap_conn:
+        return {}
+    conn_uuids = []
+    for c in set(cap_conn.values()):
+        try:
+            conn_uuids.append(_uuid.UUID(c))
+        except (ValueError, TypeError):
+            pass
+    meta: dict[str, tuple] = {}
+    if conn_uuids:
+        for cid, provider, name in (
+            await db.execute(
+                select(
+                    ProviderConnection.id,
+                    ProviderConnection.provider,
+                    ProviderConnection.name,
+                ).where(ProviderConnection.id.in_(conn_uuids))
+            )
+        ).all():
+            meta[str(cid)] = (provider, name)
+    return {cap: meta.get(conn, (None, None)) for cap, conn in cap_conn.items()}
+
+
 async def run_report(
     db: AsyncSession,
     *,
@@ -1132,11 +1176,13 @@ async def run_report(
                 talk_total[capability] = talk_total.get(capability, 0.0) + secs
                 talk_count[capability] = talk_count.get(capability, 0) + 1
 
+    cap_providers = await _resolve_channel_providers(db, run_id)
     channels: list[RunReportChannel] = []
     for capability in sorted(caps_present):
         adapter = cap_adapter.get(capability)
         if adapter is None:
             continue
+        provider, conn_name = cap_providers.get(capability, (None, None))
         bucket_counts: dict[str, int] = {}
         for (_rid, cap), bucket in rep_bucket.items():
             if cap == capability:
@@ -1150,7 +1196,7 @@ async def run_report(
                 "avgDurationSec": int(round(talk_total[capability] / n)) if n else 0,
             }
         channels.append(RunReportChannel(
-            capability=capability, vendor=None, connection_label=None,
+            capability=capability, vendor=provider, connection_label=conn_name,
             stages=_stage_counts(adapter, bucket_counts), metrics=metrics,
         ))
 
