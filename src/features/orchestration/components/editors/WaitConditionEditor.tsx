@@ -1,12 +1,10 @@
-import { cn } from '@/utils/cn';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { DateTimeField } from '@/components/ui/DateTimeField';
+import { DurationField, type DurationUnit } from '@/components/ui/DurationField';
 import type { PredicateAst, WaitMode } from '@/features/orchestration/types';
 
 import { PredicateBuilder } from './PredicateBuilder';
-
-type DurationUnit = 'minutes' | 'hours' | 'days';
 
 // Modes offered in the dropdown — pure 'event' is no longer selectable.
 type SelectableMode = Exclude<WaitMode, 'event'>;
@@ -23,12 +21,6 @@ interface WaitConfig {
   event_match?: PredicateAst;
   timeout_hours?: number;
 }
-
-const UNIT_OPTIONS: { value: DurationUnit; label: string }[] = [
-  { value: 'minutes', label: 'Minutes' },
-  { value: 'hours',   label: 'Hours'   },
-  { value: 'days',    label: 'Days'    },
-];
 
 interface Props {
   value: WaitConfig;
@@ -112,33 +104,17 @@ export function WaitConditionEditor({ value, onChange }: Props) {
 
       {displayMode === 'duration' ? (
         <Field label="Duration">
-          <div className={cn('flex gap-2')}>
-            <Input
-              type="number"
-              min={0}
-              className="flex-1"
-              value={value.duration_value ?? value.duration_hours ?? ''}
-              onChange={(e) =>
-                emitForMode('duration', {
-                  duration_value: Number(e.target.value),
-                  duration_unit: value.duration_unit ?? 'hours',
-                })
-              }
-              placeholder="amount"
-            />
-            <div className="w-32">
-              <Select
-                value={value.duration_unit ?? 'hours'}
-                onChange={(next) =>
-                  emitForMode('duration', {
-                    duration_unit: next as DurationUnit,
-                    duration_value: value.duration_value ?? value.duration_hours ?? 1,
-                  })
-                }
-                options={UNIT_OPTIONS}
-              />
-            </div>
-          </div>
+          <DurationField
+            mode="value-unit"
+            value={value.duration_value ?? value.duration_hours ?? null}
+            unit={value.duration_unit ?? 'hours'}
+            onChange={(nextValue, nextUnit) =>
+              emitForMode('duration', {
+                duration_value: nextValue,
+                duration_unit: nextUnit,
+              })
+            }
+          />
         </Field>
       ) : null}
 
@@ -200,17 +176,16 @@ export function WaitConditionEditor({ value, onChange }: Props) {
       ) : null}
 
       {isEventMode ? (
-        <Field label="Time limit (hours)">
-          <Input
-            type="number"
-            min={0}
+        <Field label="Time limit">
+          <DurationField
+            mode="hours"
             // For legacy pure-event defs opened without a timeout, default to 24 in the input
             // so the field isn't blank — without writing back until the author changes it.
-            value={value.timeout_hours ?? 24}
-            onChange={(e) =>
-              emitForMode('event_or_timeout', { timeout_hours: Number(e.target.value) })
+            hours={value.timeout_hours ?? 24}
+            minHours={1}
+            onChange={(nextHours) =>
+              emitForMode('event_or_timeout', { timeout_hours: nextHours })
             }
-            placeholder="hours before giving up"
           />
         </Field>
       ) : null}

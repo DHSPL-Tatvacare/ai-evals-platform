@@ -3,6 +3,7 @@ import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+import { DurationField } from '@/components/ui/DurationField';
 import type {
   AttemptPolicy,
   StructuredRequestBody,
@@ -350,6 +351,19 @@ function FieldRenderer({
           onCheckedChange={(checked) => onChange(fieldKey, checked)}
         />
       </div>
+    );
+  }
+  if (fieldKey === 'webhook_ttl_seconds') {
+    // Stored as an int number of seconds; surfaced as a friendly value+unit.
+    const seconds =
+      typeof fieldValue === 'number' && Number.isFinite(fieldValue) ? fieldValue : null;
+    return (
+      <DurationField
+        mode="seconds"
+        seconds={seconds}
+        minSeconds={60}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
     );
   }
   if (prop.type === 'number' || prop.type === 'integer') {

@@ -118,9 +118,12 @@ describe('WaitConditionEditor', () => {
     );
     expect(screen.getByPlaceholderText('voice.completed')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('recipient_id')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('hours before giving up')).toBeInTheDocument();
-    // No duration input.
-    expect(screen.queryByPlaceholderText('amount')).not.toBeInTheDocument();
+    // Timeout now routes through the shared DurationField (amount + unit).
+    expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
+    // The old raw hours input placeholder is gone.
+    expect(
+      screen.queryByPlaceholderText('hours before giving up'),
+    ).not.toBeInTheDocument();
   });
 
   it('steers legacy pure-event mode to event_or_timeout display — no blank Select', () => {
@@ -134,8 +137,8 @@ describe('WaitConditionEditor', () => {
     // Event fields still render.
     expect(screen.getByPlaceholderText('voice.completed')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('recipient_id')).toBeInTheDocument();
-    // Timeout field renders (defaulted to 24).
-    expect(screen.getByPlaceholderText('hours before giving up')).toBeInTheDocument();
+    // Timeout field renders via the shared DurationField (defaulted to 24h -> 1 day).
+    expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
     // The caveat line is gone.
     expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
     // onChange has NOT been called (no silent mutation on open).
@@ -231,6 +234,48 @@ describe('WaitConditionEditor', () => {
     expect(
       deriveWaitBodySummary(waitNode({ mode: 'event', event_name: 'crm.updated' })),
     ).toBe('Wait for: crm.updated');
+  });
+
+  it('emits duration_value with the existing unit via the shared DurationField', () => {
+    const onChange = vi.fn();
+    render(
+      <WaitConditionEditor
+        value={{ mode: 'duration', duration_value: 2, duration_unit: 'days' }}
+        onChange={onChange}
+      />,
+    );
+    // DurationField shows the unit in its trigger.
+    expect(screen.getByText('Days')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('amount'), {
+      target: { value: '6' },
+    });
+    const next = onChange.mock.calls[0][0];
+    expect(next.mode).toBe('duration');
+    expect(next.duration_value).toBe(6);
+    expect(next.duration_unit).toBe('days');
+  });
+
+  it('emits timeout_hours via the shared DurationField in event_or_timeout mode', () => {
+    const onChange = vi.fn();
+    render(
+      <WaitConditionEditor
+        value={{
+          mode: 'event_or_timeout',
+          event_name: 'voice.completed',
+          correlation: { recipient_id_field: 'recipient_id' },
+          timeout_hours: 24,
+        }}
+        onChange={onChange}
+      />,
+    );
+    // 24h decomposes to "1 day"; the shared field shows amount + the Days unit.
+    const amount = screen.getByPlaceholderText('amount');
+    expect(amount).toHaveValue(1);
+    expect(screen.getByText('Days')).toBeInTheDocument();
+    // 1 day -> 2 days = 48 hours, stored as the canonical timeout_hours int.
+    fireEvent.change(amount, { target: { value: '2' } });
+    const next = onChange.mock.calls[0][0];
+    expect(next.timeout_hours).toBe(48);
   });
 
   it('shows updated approved copy for event_or_timeout mode', () => {
