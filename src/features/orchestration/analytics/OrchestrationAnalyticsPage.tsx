@@ -24,7 +24,6 @@ import {
   MetricBreakdownCard,
   PageSurface,
   RightSlideOverShell,
-  ScopeToggle,
   StatCard,
   Tabs,
   TrendCard,
@@ -39,8 +38,8 @@ import {
   useOrchestrationOverview,
   useOrchestrationRuns,
   useOrchestrationSignals,
+  useOrchestrationTrend,
 } from './queries';
-import { useCanSeeTenantAnalytics } from './useCanSeeTenantAnalytics';
 import { RunDrillOver } from './RunDrillOver';
 import { formatInt, formatPct, formatUsd } from './format';
 import type {
@@ -83,13 +82,10 @@ const BREAKDOWN_TABS: { id: BreakdownDimension; label: string; nameHeader: strin
   { id: 'connection', label: 'By connection', nameHeader: 'Connection' },
 ];
 
-export function OrchestrationAnalyticsPage() {
+export function OrchestrationAnalyticsPage({ scope = 'mine' }: { scope?: AnalyticsScope }) {
   const appId = useCurrentAppId();
-  const canSeeTenant = useCanSeeTenantAnalytics();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const requestedScope = (searchParams.get('scope') as AnalyticsScope | null) ?? (canSeeTenant ? 'tenant' : 'mine');
-  const scope: AnalyticsScope = requestedScope === 'tenant' && canSeeTenant ? 'tenant' : 'mine';
   const range = searchParams.get('range') ?? DEFAULT_RANGE;
   const { from, to } = useMemo(() => resolveRange(range), [range]);
 
@@ -102,6 +98,7 @@ export function OrchestrationAnalyticsPage() {
   const signals = useOrchestrationSignals(params);
   const campaignBreakdown = useOrchestrationBreakdown({ ...params, dimension: 'campaign' });
   const runs = useOrchestrationRuns(params);
+  const trend = useOrchestrationTrend(params);
 
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -120,9 +117,10 @@ export function OrchestrationAnalyticsPage() {
     [campaignRows],
   );
 
-  // Trend derived from the runs rows (real data) grouped by start day, since the
-  // overview endpoint returns no time series. Stacked area by outcome bucket.
-  const trendData = useMemo(() => buildTrend(runs.data?.rows ?? []), [runs.data?.rows]);
+  const trendData = useMemo(
+    () => (trend.data?.points ?? []) as unknown as Record<string, unknown>[],
+    [trend.data?.points],
+  );
 
   // The funnel adapts to the selected campaign when one is picked, else the all-up reach.
   const funnelStages = useMemo(() => {
@@ -181,20 +179,20 @@ export function OrchestrationAnalyticsPage() {
     void signals.refetch?.();
     void campaignBreakdown.refetch?.();
     void runs.refetch?.();
+    void trend.refetch?.();
   };
 
   return (
     <PageSurface
       icon={BarChart3}
       title="Campaign analytics"
-      subtitle="Outcomes, channels, connections, and spend across your campaigns."
+      subtitle={
+        scope === 'tenant'
+          ? 'Outcomes, channels, connections, and spend across all campaigns.'
+          : 'Outcomes, channels, connections, and spend across your campaigns.'
+      }
       filters={
         <div className="flex flex-wrap items-center gap-3">
-          <ScopeToggle
-            value={scope}
-            canSeeTenant={canSeeTenant}
-            onChange={(next) => setParam('scope', next)}
-          />
           <DateRangePicker
             presets={PRESETS}
             activePreset={PRESET_IDS.has(range) ? range : null}
@@ -219,7 +217,7 @@ export function OrchestrationAnalyticsPage() {
         </Button>
       }
     >
-      <div className="flex h-full min-h-0 flex-col space-y-4 pb-6">
+      <div className="h-full min-h-0 space-y-4 overflow-y-auto pb-6">
         <SignalsBox
           signals={signals.data?.signals ?? []}
           generatedAt={signals.data?.generatedAt ?? null}
@@ -258,7 +256,7 @@ export function OrchestrationAnalyticsPage() {
           <TrendCard
             title="Outcomes over time"
             data={trendData}
-            xKey="day"
+            xKey="date"
             seriesKeys={['positive', 'reached', 'failed']}
           />
           <FunnelCard
@@ -280,7 +278,7 @@ export function OrchestrationAnalyticsPage() {
 
         <BreakdownTabs params={params} />
 
-        <Card className="flex min-h-0 flex-col p-4">
+        <Card className="flex flex-col p-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">Recent runs</h3>
             <span className="text-[11.5px] text-[var(--text-muted)]">{runs.data?.total ?? 0} runs</span>
@@ -318,26 +316,6 @@ export function OrchestrationAnalyticsPage() {
   );
 }
 
-interface TrendPoint {
-  day: string;
-  positive: number;
-  reached: number;
-  failed: number;
-}
-
-function buildTrend(rows: OrchestrationRunRow[]): Record<string, unknown>[] {
-  const byDay = new Map<string, TrendPoint>();
-  for (const r of rows) {
-    if (!r.startedAt) continue;
-    const day = format(parseISO(r.startedAt), 'yyyy-MM-dd');
-    const point = byDay.get(day) ?? { day, positive: 0, reached: 0, failed: 0 };
-    point.positive += r.positive;
-    point.reached += r.reached;
-    byDay.set(day, point);
-  }
-  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)) as unknown as Record<string, unknown>[];
-}
-
 function BreakdownTabs({ params }: { params: { appId: string; scope: AnalyticsScope; from: string; to: string } }) {
   const tabs = BREAKDOWN_TABS.map((tab) => ({
     id: tab.id,
@@ -345,8 +323,10 @@ function BreakdownTabs({ params }: { params: { appId: string; scope: AnalyticsSc
     content: <BreakdownPanel dimension={tab.id} nameHeader={tab.nameHeader} params={params} />,
   }));
   return (
-    <Card className="flex min-h-0 flex-col p-2">
-      <Tabs tabs={tabs} defaultTab="campaign" mountStrategy="active-only" />
+    <Card className="flex flex-col p-2">
+      <div className="h-[360px]">
+        <Tabs tabs={tabs} defaultTab="campaign" mountStrategy="active-only" fillHeight />
+      </div>
     </Card>
   );
 }

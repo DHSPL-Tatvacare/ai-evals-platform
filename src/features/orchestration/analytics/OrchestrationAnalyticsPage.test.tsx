@@ -10,15 +10,11 @@ vi.mock('@/hooks', async (importOriginal) => {
   return { ...actual, useCurrentAppId: () => 'inside-sales' };
 });
 
-const mockCanSeeTenant = vi.fn();
-vi.mock('./useCanSeeTenantAnalytics', () => ({
-  useCanSeeTenantAnalytics: () => mockCanSeeTenant(),
-}));
-
 vi.mock('./queries', () => ({
   useOrchestrationOverview: vi.fn(),
   useOrchestrationBreakdown: vi.fn(),
   useOrchestrationRuns: vi.fn(),
+  useOrchestrationTrend: vi.fn(),
   useOrchestrationSignals: vi.fn(),
   useOrchestrationRunDetail: vi.fn(),
 }));
@@ -33,6 +29,7 @@ import {
   useOrchestrationRunDetail,
   useOrchestrationRuns,
   useOrchestrationSignals,
+  useOrchestrationTrend,
 } from './queries';
 import { OrchestrationAnalyticsPage } from './OrchestrationAnalyticsPage';
 
@@ -83,6 +80,10 @@ function seedHooks() {
     },
     isLoading: false,
   });
+  asMock(useOrchestrationTrend).mockReturnValue({
+    data: { points: [] },
+    isLoading: false,
+  });
   asMock(useOrchestrationSignals).mockReturnValue({
     data: { signals: [], generatedAt: null },
     isLoading: false,
@@ -107,10 +108,10 @@ function seedHooks() {
   });
 }
 
-function renderPage() {
+function renderPage(scope?: 'mine' | 'tenant') {
   return render(
     <MemoryRouter initialEntries={['/inside-sales/analytics/orchestration']}>
-      <OrchestrationAnalyticsPage />
+      <OrchestrationAnalyticsPage scope={scope} />
     </MemoryRouter>,
   );
 }
@@ -122,7 +123,6 @@ describe('OrchestrationAnalyticsPage', () => {
   });
 
   it('renders KPI values from the overview', () => {
-    mockCanSeeTenant.mockReturnValue(true);
     renderPage();
     expect(screen.getByText('Campaigns')).toBeInTheDocument();
     expect(screen.getAllByText('Recipients').length).toBeGreaterThan(0);
@@ -132,21 +132,13 @@ describe('OrchestrationAnalyticsPage', () => {
     expect(screen.getAllByText('320').length).toBeGreaterThan(0);
   });
 
-  it('hides the tenant scope option for a non-admin user', () => {
-    mockCanSeeTenant.mockReturnValue(false);
-    renderPage();
-    expect(screen.getByRole('tab', { name: /my campaigns/i })).toBeInTheDocument();
+  it('renders no scope toggle when mounted with a fixed tenant scope', () => {
+    renderPage('tenant');
+    expect(screen.queryByRole('tab', { name: /my campaigns/i })).toBeNull();
     expect(screen.queryByRole('tab', { name: /all campaigns/i })).toBeNull();
   });
 
-  it('shows the tenant scope option for an admin user', () => {
-    mockCanSeeTenant.mockReturnValue(true);
-    renderPage();
-    expect(screen.getByRole('tab', { name: /all campaigns/i })).toBeInTheDocument();
-  });
-
   it('opens the run drill-over when a run row is clicked', () => {
-    mockCanSeeTenant.mockReturnValue(true);
     renderPage();
     fireEvent.click(screen.getByText('Welcome blast'));
     expect(screen.getByText(/open full run/i)).toBeInTheDocument();
