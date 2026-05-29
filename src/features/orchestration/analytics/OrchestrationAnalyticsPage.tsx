@@ -458,8 +458,8 @@ function RecentRunsPanel({
 }: RecentRunsPanelProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return (
-    <Card className="flex h-full min-h-0 flex-col p-4">
-      <div className="mb-3 flex items-center justify-between">
+    <section className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-[var(--text-primary)]">Recent runs</h3>
         <span className="text-[11.5px] text-[var(--text-muted)]">{total} runs</span>
       </div>
@@ -474,7 +474,7 @@ function RecentRunsPanel({
         emptyDescription="No campaign runs in the selected range."
         pagination={{ page, totalPages, onPageChange, pageSize, totalItems: total, showCount: true }}
       />
-    </Card>
+    </section>
   );
 }
 
