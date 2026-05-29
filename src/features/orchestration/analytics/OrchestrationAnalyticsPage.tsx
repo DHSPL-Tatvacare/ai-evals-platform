@@ -33,6 +33,7 @@ import {
 } from '@/components/ui';
 import { useCurrentAppId } from '@/hooks';
 import { cn } from '@/utils/cn';
+import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
 import {
   useOrchestrationBreakdown,
   useOrchestrationOverview,
@@ -245,7 +246,7 @@ export function OrchestrationAnalyticsPage({
       {
         id: 'breakdowns',
         label: 'Breakdowns',
-        content: <BreakdownTabs params={params} />,
+        content: <BreakdownsPanel params={params} />,
       },
       {
         id: 'recent-runs',
@@ -353,7 +354,7 @@ function OverviewPanel({
   onCampaignFilterChange,
 }: OverviewPanelProps) {
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <div className="flex flex-col gap-4 pb-2">
       <SignalsBox signals={signals} generatedAt={generatedAt} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
@@ -385,13 +386,14 @@ function OverviewPanel({
         />
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
-        <TrendCard
-          title="Outcomes over time"
-          data={trendData}
-          xKey="date"
-          seriesKeys={['positive', 'reached', 'failed']}
-        />
+      <TrendCard
+        title="Outcomes over time"
+        data={trendData}
+        xKey="date"
+        seriesKeys={['positive', 'reached', 'failed']}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-2">
         <FunnelCard
           title="Conversion funnel"
           stages={funnelStages}
@@ -407,8 +409,39 @@ function OverviewPanel({
             </div>
           }
         />
+        <OutcomeMixDonut ov={ov} />
       </div>
     </div>
+  );
+}
+
+function OutcomeMixDonut({ ov }: { ov?: OrchestrationOverview }) {
+  const data = [
+    { name: 'Positive', value: ov?.positive ?? 0 },
+    { name: 'Reached', value: ov?.reached ?? 0 },
+    { name: 'No response', value: ov?.noResponse ?? 0 },
+    { name: 'Failed', value: ov?.failed ?? 0 },
+  ].filter((d) => d.value > 0);
+  return (
+    <Card className="flex flex-col p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Outcome mix</h3>
+        <span className="text-[11.5px] text-[var(--text-muted)]">share of recipients</span>
+      </div>
+      {data.length === 0 ? (
+        <p className="py-6 text-center text-xs text-[var(--text-muted)]">No outcomes recorded</p>
+      ) : (
+        <ChartRenderer
+          type="donut"
+          data={data}
+          xKey="name"
+          yKey="value"
+          height={260}
+          legendPosition="right"
+          hideSliceLabels
+        />
+      )}
+    </Card>
   );
 }
 
@@ -447,16 +480,19 @@ function RecentRunsPanel({
   );
 }
 
-function BreakdownTabs({ params }: { params: AnalyticsParams }) {
-  const tabs = BREAKDOWN_TABS.map((tab) => ({
-    id: tab.id,
-    label: tab.label,
-    content: <BreakdownPanel dimension={tab.id} nameHeader={tab.nameHeader} params={params} />,
-  }));
+function BreakdownsPanel({ params }: { params: AnalyticsParams }) {
   return (
-    <Card className="flex h-full min-h-0 flex-col p-2">
-      <Tabs tabs={tabs} defaultTab="campaign" mountStrategy="active-only" fillHeight />
-    </Card>
+    <div className="flex flex-col gap-4 pb-2">
+      {BREAKDOWN_TABS.map((tab) => (
+        <BreakdownPanel
+          key={tab.id}
+          title={tab.label}
+          dimension={tab.id}
+          nameHeader={tab.nameHeader}
+          params={params}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -470,10 +506,12 @@ const BREAKDOWN_COLUMNS: MetricBreakdownColumn<OrchestrationBreakdownRow>[] = [
 ];
 
 function BreakdownPanel({
+  title,
   dimension,
   nameHeader,
   params,
 }: {
+  title: string;
   dimension: BreakdownDimension;
   nameHeader: string;
   params: AnalyticsParams;
@@ -482,6 +520,7 @@ function BreakdownPanel({
   const rows = data?.rows ?? [];
   return (
     <MetricBreakdownCard
+      title={title}
       nameHeader={nameHeader}
       rows={rows}
       columns={BREAKDOWN_COLUMNS}

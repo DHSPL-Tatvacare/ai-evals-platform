@@ -58,8 +58,9 @@ function StageDots({
 }
 
 function attributeSummary(attributes: Record<string, unknown>): string {
-  return Object.entries(attributes)
-    .map(([key, value]) => `${key}: ${String(value)}`)
+  return Object.values(attributes)
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value && value !== 'null' && value !== 'undefined')
     .join(' · ');
 }
 

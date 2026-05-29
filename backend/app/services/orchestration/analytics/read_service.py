@@ -1003,6 +1003,67 @@ def _stage_counts(adapter, bucket_counts: dict[str, int]) -> list[RunReportFunne
     return out
 
 
+def _parse_step_fields(payload: dict) -> dict[str, dict[str, Any]]:
+    """Group flat ``steps.<capability>.<node>.<field>`` payload keys by capability."""
+    by_cap: dict[str, dict[str, Any]] = {}
+    for key, val in payload.items():
+        if not key.startswith("steps."):
+            continue
+        parts = key.split(".")
+        if len(parts) < 4:
+            continue
+        by_cap.setdefault(parts[1], {})[parts[-1]] = val
+    return by_cap
+
+
+def _channel_detail(field_bag: dict[str, Any], stage_keys: list[str]) -> dict[str, Any]:
+    """Per-recipient channel outcome/stage/summary/duration from a step-field bag.
+    Fields matched by suffix (outcome|status, duration_sec, transcript|summary) so no
+    provider field name is hardcoded."""
+    outcome = duration = summary = None
+    for field, val in field_bag.items():
+        f = field.lower()
+        if outcome is None and (f.endswith("outcome") or f.endswith("status")):
+            outcome = str(val) if val is not None else None
+        elif f.endswith("duration_sec"):
+            try:
+                duration = int(float(val))
+            except (TypeError, ValueError):
+                duration = None
+        elif summary is None and (f.endswith("transcript") or f.endswith("summary")):
+            summary = str(val) if val else None
+    stage_reached = None
+    if outcome is not None and stage_keys:
+        if outcome in stage_keys:
+            stage_reached = outcome
+        elif outcome in ("answered", "positive", "connected", "completed"):
+            stage_reached = "answered" if "answered" in stage_keys else stage_keys[-1]
+        else:
+            stage_reached = stage_keys[0]
+    metrics = {"durationSec": duration} if duration and duration > 0 else {}
+    return {"outcome": outcome, "stage_reached": stage_reached, "summary": summary, "metrics": metrics}
+
+
+def _recipient_display(payload: dict) -> tuple[Optional[str], dict[str, Any]]:
+    """Clean dataset attributes (no step bags / framework keys) + best-guess display name."""
+    attrs = {
+        k: v for k, v in payload.items()
+        if not k.startswith("steps.") and k not in _RESERVED_PAYLOAD_KEYS
+    }
+    display_name = None
+    name_key = None
+    for k, v in attrs.items():
+        lk = k.lower()
+        if lk.endswith("name") and "plan" not in lk and v:
+            display_name, name_key = str(v), k
+            break
+    clean = {
+        k: v for k, v in attrs.items()
+        if k != name_key and "phone" not in k.lower()
+    }
+    return display_name, clean
+
+
 async def run_report(
     db: AsyncSession,
     *,
@@ -1110,24 +1171,34 @@ async def run_report(
             default=0,
         )
 
+    SUMMARY_MAX = 160
     ordered = sorted(states, key=lambda s: _best_rank(s.recipient_id), reverse=True)
     recipients: list[RunReportRecipient] = []
     for s in ordered[:recipient_limit]:
         payload = s.payload or {}
-        attributes = {k: v for k, v in payload.items() if k not in _RESERVED_PAYLOAD_KEYS}
+        display_name, attributes = _recipient_display(payload)
         contact = payload.get("contact")
         last4 = str(contact)[-4:] if contact else None
-        rec_channels = [
-            RunReportRecipientChannel(
-                capability=cap, outcome_bucket=bucket, stage_reached=None,
-                summary=None, metrics={},
-            )
-            for (rid, cap), bucket in rep_bucket.items()
-            if rid == s.recipient_id
-        ]
+        step_bags = _parse_step_fields(payload)
+        rec_caps = {cap for (rid, cap) in rep_bucket if rid == s.recipient_id} | set(step_bags)
+        rec_channels: list[RunReportRecipientChannel] = []
+        for cap in sorted(rec_caps):
+            adapter = cap_adapter.get(cap)
+            stage_keys = [st.key for st in adapter.funnel_stages()] if adapter else []
+            ch = _channel_detail(step_bags.get(cap, {}), stage_keys)
+            summary = ch["summary"]
+            if summary and len(summary) > SUMMARY_MAX:
+                summary = summary[:SUMMARY_MAX].rstrip() + "…"
+            rec_channels.append(RunReportRecipientChannel(
+                capability=cap,
+                outcome_bucket=ch["outcome"] or rep_bucket.get((s.recipient_id, cap)),
+                stage_reached=ch["stage_reached"],
+                summary=summary,
+                metrics=ch["metrics"],
+            ))
         recipients.append(RunReportRecipient(
-            recipient_id=s.recipient_id, display_name=None, contact_last4=last4,
-            attributes=attributes, channels=rec_channels,
+            recipient_id=s.recipient_id, display_name=display_name,
+            contact_last4=last4, attributes=attributes, channels=rec_channels,
         ))
 
     return RunReportResult(

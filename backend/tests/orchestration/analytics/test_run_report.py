@@ -111,8 +111,10 @@ async def test_run_report_two_channels_funnel_talktime_and_recipients(
     assert report.recipients[0].recipient_id == "v-ans"  # positive ranks first
 
     asha = by_id["v-ans"]
-    assert asha.attributes.get("name") == "Asha"
+    # The name attribute is lifted to display_name; remaining dataset attrs stay opaque.
+    assert asha.display_name == "Asha"
     assert asha.attributes.get("plan") == "gold"
+    assert "name" not in asha.attributes
 
     # A recipient whose dataset attributes are absent degrades to null/empty.
     fail = by_id["v-fail"]
@@ -122,3 +124,54 @@ async def test_run_report_two_channels_funnel_talktime_and_recipients(
     # Per-recipient channels are a generic list, never typed voice_*/wa_* fields.
     voice_chan = next(c for c in asha.channels if c.capability == "voice")
     assert voice_chan.outcome_bucket == "positive"
+
+
+def test_recipient_payload_parsing_matches_real_flat_step_shape():
+    """Locks parsing of the REAL recipient payload (flat ``steps.<cap>.<node>.<field>``
+    keys + dataset attrs) — the prod shape that the prior seed-only test missed."""
+    from app.services.orchestration.analytics.read_service import (
+        _channel_detail,
+        _parse_step_fields,
+        _recipient_display,
+    )
+
+    payload = {
+        "contact": "+917624943942",
+        "last_outcome": "bolna_rnr",
+        "customer_name": "Haseen",
+        "last_event_at": "2026-05-29T07:25:19+00:00",
+        "customer_plan_name": "Comprehensive 6 months",
+        "customer_phone_number": "+917624943942",
+        "steps.voice.place_call-1779963292471-6z4zyj.voice_outcome": "answered",
+        "steps.voice.place_call-1779963292471-6z4zyj.voice_duration_sec": 19,
+        "steps.voice.place_call-1779963292471-6z4zyj.voice_transcript": "assistant: Hello " * 30,
+        "steps.messaging.send_whatsapp_template-1779964073680-fg5i0v.wa_status": "read",
+    }
+
+    # Clean display: name extracted, plan kept, phone + framework + step keys excluded.
+    name, attrs = _recipient_display(payload)
+    assert name == "Haseen"
+    assert attrs == {"customer_plan_name": "Comprehensive 6 months"}
+    assert not any(k.startswith("steps.") for k in attrs)
+
+    bags = _parse_step_fields(payload)
+    assert set(bags) == {"voice", "messaging"}
+
+    voice = _channel_detail(bags["voice"], ["dialed", "connected", "answered", "positive"])
+    assert voice["outcome"] == "answered"
+    assert voice["stage_reached"] == "answered"
+    assert voice["metrics"] == {"durationSec": 19}
+    assert voice["summary"].startswith("assistant: Hello")
+
+    # wa_status value is itself a stage key → stage_reached mirrors it.
+    msg = _channel_detail(bags["messaging"], ["sent", "delivered", "read", "replied"])
+    assert msg["outcome"] == "read"
+    assert msg["stage_reached"] == "read"
+
+    # A no-answer (0s) maps to the first stage and carries no talk-time metric.
+    nd = _channel_detail(
+        {"voice_outcome": "no_answer", "voice_duration_sec": 0},
+        ["dialed", "connected", "answered", "positive"],
+    )
+    assert nd["stage_reached"] == "dialed"
+    assert nd["metrics"] == {}
