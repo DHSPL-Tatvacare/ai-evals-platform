@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { CustomEvaluationResult, EvaluatorDescriptor } from '@/types/evalRuns';
 import { FieldValue } from '../OutputFieldRenderer';
-import { cn } from '@/utils';
+import { EvaluatorPills } from '@/features/evals/components/EvaluatorPills';
 import { humanize } from '@/utils/evalFormatters';
 
 interface Props {
@@ -28,22 +28,11 @@ export default function CustomEvalsTab({ customEvaluations, evaluatorDescriptors
     <div className="space-y-3 h-full px-4 pb-4">
       {/* Sub-nav pills if multiple evaluators */}
       {entries.length > 1 && (
-        <div className="flex flex-wrap gap-1">
-          {entries.map(([, ce]) => (
-            <button
-              key={ce.evaluator_id}
-              onClick={() => setActiveEvalId(ce.evaluator_id)}
-              className={cn(
-                'px-2.5 py-1 text-xs rounded-full border transition-colors',
-                activeEvalId === ce.evaluator_id
-                  ? 'border-[var(--border-brand)] bg-[var(--surface-info)] text-[var(--text-brand)]'
-                  : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]',
-              )}
-            >
-              {ce.evaluator_name}
-            </button>
-          ))}
-        </div>
+        <EvaluatorPills
+          items={entries.map(([, ce]) => ({ id: ce.evaluator_id, name: ce.evaluator_name }))}
+          activeId={activeEvalId ?? ''}
+          onSelect={setActiveEvalId}
+        />
       )}
 
       {/* Render active evaluator */}
