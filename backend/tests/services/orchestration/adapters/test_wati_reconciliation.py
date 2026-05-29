@@ -107,6 +107,20 @@ async def test_status_event_matches_on_correlation_column_and_captures_reply_ref
 @pytest.mark.asyncio
 async def test_reply_matches_on_provider_reply_ref_column(db_session, seed_full_run):
     run, version, workflow, node_step, tenant_id, app_id = seed_full_run
+    # The recipient parks at a logic.wait gated on the messaging reply event, so
+    # the shared resume core (which resolves the wait from the version definition)
+    # can flip waiting -> ready when the reply arrives.
+    version.definition = {
+        "nodes": [{
+            "id": "n1", "type": "logic.wait",
+            "config": {
+                "mode": "event", "event_name": "messaging.replied", "timeout_hours": 24,
+                "correlation": {"recipient_id_field": "recipient_id"},
+            },
+        }],
+        "edges": [],
+    }
+    await db_session.flush()
     local_msg_id = f"lm-{uuid.uuid4().hex[:8]}"
     parent = await _seed_dispatch(
         db_session, run=run, version=version, workflow=workflow,

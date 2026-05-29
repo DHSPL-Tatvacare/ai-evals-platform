@@ -27,10 +27,12 @@ from app.services.orchestration.adapters.canonical import (
     CanonicalSendRequest,
     CanonicalSendResponse,
     VariableSurface,
+    messaging_resume_event_names,
 )
 from app.services.orchestration.adapters.protocol import FunnelStage
 from app.services.orchestration.analytics.outcomes import EngagementBucket
 from app.services.orchestration.dispatch.bag import bag_write
+from app.services.orchestration.dispatch.event_resume import resume_waiting_on_event
 
 _log = logging.getLogger(__name__)
 
@@ -50,6 +52,18 @@ _EVENT_MAP: dict[str, tuple[str, Optional[str], bool]] = {
     "messageReceived":          ("replied",   "wa_replied",   True),
     "templateMessageFailed":    ("failed",    "wa_failed",    False),
 }
+
+def canonical_outcome_by_action_type() -> dict[str, str]:
+    """child_action_type → canonical_status, derived from ``_EVENT_MAP``.
+
+    The single source for the canonical<-raw outcome mapping WATI already owns;
+    downstream pickers read this instead of restating the pairs."""
+    return {
+        child_action_type: canonical_status
+        for canonical_status, child_action_type, _resumes in _EVENT_MAP.values()
+        if child_action_type is not None
+    }
+
 
 _INBOUND_REPLY_EVENTS = frozenset({"messageReceived", "sentMessageREPLIED_v2"})
 
@@ -560,26 +574,19 @@ class WatiAdapter:
             .values(payload=WorkflowRunRecipientState.payload.op("||")(namespaced))
         )
 
+        # A reply resumes ONLY through the shared gated core, which wakes the
+        # recipient iff it parks at a logic.wait whose event_name matches the
+        # canonical messaging reply event AND any event_match predicate passes.
+        # This forbids a WhatsApp reply from waking a voice / CRM / timer wait.
         if resumes:
-            flip = await db.execute(
-                update(WorkflowRunRecipientState)
-                .where(
-                    WorkflowRunRecipientState.run_id == parent.run_id,
-                    WorkflowRunRecipientState.recipient_id == parent.recipient_id,
-                    WorkflowRunRecipientState.status == "waiting",
-                    ttl_gate,
-                )
-                .values(status="ready", wakeup_at=None)
+            await resume_waiting_on_event(
+                db,
+                run_id=parent.run_id,
+                recipient_id=parent.recipient_id,
+                event_names=messaging_resume_event_names(),
+                payload=bag_fields,
+                reason=f"ready:wati:{event_type}:{local_msg_id}",
             )
-            if getattr(flip, "rowcount", 0):
-                from app.services.orchestration.dispatch.resume_enqueue import (
-                    enqueue_resume_for_recipient,
-                )
-                await enqueue_resume_for_recipient(
-                    db, run_id=parent.run_id, recipient_id=parent.recipient_id,
-                    available_at=None,
-                    reason=f"ready:wati:{event_type}:{local_msg_id}",
-                )
         await db.flush()
 
     async def _find_parent(
@@ -712,4 +719,5 @@ __all__ = [
     "_extract_template_candidates",
     "_normalize_template_candidate",
     "extract_variables",
+    "canonical_outcome_by_action_type",
 ]

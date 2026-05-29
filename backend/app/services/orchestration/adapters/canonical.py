@@ -12,6 +12,17 @@ from typing import Any, Optional
 from app.services.orchestration.analytics.outcomes import EngagementBucket  # noqa: F401  re-export: single import site
 
 
+# Canonical messaging reply event — capability-local, mirrors bolna's voice event
+# names. A messaging adapter resumes a logic.wait gated on this name; deliberately
+# NOT in event_catalog.py (that catalog is for inbound CRM/clinical triggers).
+MESSAGING_REPLY_EVENT = "messaging.replied"
+
+
+def messaging_resume_event_names() -> frozenset[str]:
+    # The event-name set an inbound reply satisfies on a logic.wait.
+    return frozenset({MESSAGING_REPLY_EVENT})
+
+
 @dataclass(frozen=True)
 class VariableSurface:
     """A provider entity's variable surface — the variables it exposes plus any
