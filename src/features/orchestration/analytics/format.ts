@@ -22,3 +22,12 @@ export function formatPct(value: number, total: number): string {
   if (!total) return '0%';
   return `${Math.round((value / total) * 100)}%`;
 }
+
+/** Seconds rendered as a compact talk-time string, e.g. 95 -> "1m 35s", 42 -> "42s". */
+export function formatDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(Number.isFinite(totalSeconds) ? totalSeconds : 0));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+}

@@ -7,6 +7,7 @@ import type {
   OrchestrationRunDetail,
   OrchestrationRuns,
   OrchestrationSignals,
+  RunReportResponse,
   TrendResponse,
 } from '@/features/orchestration/analytics/types';
 
@@ -49,6 +50,16 @@ export function fetchRunDetail(
   if (params.pageSize) q.set('pageSize', String(params.pageSize));
   return apiRequest<OrchestrationRunDetail>(
     `${BASE}/runs/${encodeURIComponent(runId)}?${q.toString()}`,
+  );
+}
+
+export function fetchRunReport(
+  runId: string,
+  params: { appId: string; scope: AnalyticsQueryParams['scope'] },
+): Promise<RunReportResponse> {
+  const q = new URLSearchParams({ appId: params.appId, scope: params.scope });
+  return apiRequest<RunReportResponse>(
+    `${BASE}/runs/${encodeURIComponent(runId)}/report?${q.toString()}`,
   );
 }
 

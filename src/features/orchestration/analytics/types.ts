@@ -130,6 +130,54 @@ export interface OrchestrationSignals {
   generatedAt?: string | null;
 }
 
+export interface RunReportStage {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface RunReportChannel {
+  capability: string;
+  vendor?: string | null;
+  connectionLabel?: string | null;
+  stages: RunReportStage[];
+  metrics: Record<string, number>;
+}
+
+export interface RunReportRecipientChannel {
+  capability: string;
+  outcomeBucket?: string | null;
+  stageReached?: string | null;
+  summary?: string | null;
+  metrics: Record<string, number>;
+}
+
+export interface RunReportRecipient {
+  recipientId: string;
+  displayName?: string | null;
+  contactLast4?: string | null;
+  attributes: Record<string, unknown>;
+  channels: RunReportRecipientChannel[];
+}
+
+export interface RunReportResponse {
+  runId: string;
+  workflowId: string;
+  workflowName: string;
+  appId: string;
+  status: string;
+  triggeredBy: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  durationSeconds?: number | null;
+  recipientsTotal: number;
+  spend: number;
+  buckets: OrchestrationRunBuckets;
+  channels: RunReportChannel[];
+  recipients: RunReportRecipient[];
+  recipientsTotalCount: number;
+}
+
 /** Shared range + scope inputs for every analytics query. */
 export interface AnalyticsQueryParams {
   appId: string;
