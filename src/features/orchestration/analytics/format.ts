@@ -8,6 +8,7 @@ const USD = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 4,
 });
 
+// Cost is stored and reported in USD platform-wide; this formatter assumes USD.
 export function formatUsd(value: number): string {
   return USD.format(Number.isFinite(value) ? value : 0);
 }

@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 import {
   Badge,
   Card,
-  ConnectionProviderLogo,
   DataTable,
   FunnelCard,
   IconButton,
@@ -12,7 +11,7 @@ import {
   type ColumnDef,
 } from '@/components/ui';
 import { ChartRenderer } from '@/features/analytics/components/ChartRenderer';
-import { routes } from '@/config/routes';
+import { useOrchestrationRoutes } from '../hooks/useOrchestrationRoutes';
 import { useOrchestrationRunDetail } from './queries';
 import { formatUsd } from './format';
 import type { AnalyticsScope, OrchestrationRunAction } from './types';
@@ -41,7 +40,15 @@ interface OutcomeBuckets {
   inFlight: number;
 }
 
+// Node steps carry only `nodeType` (e.g. "voice.place_call"); the run_detail
+// contract has no provider slug, so we surface the capability prefix rather
+// than a misleading provider logo. See report flag if a provider is needed.
+function capabilityOf(nodeType: string): string {
+  return nodeType.split('.')[0] || nodeType;
+}
+
 export function RunDrillOver({ runId, appId, scope, onClose, labelledBy }: RunDrillOverProps) {
+  const orchestrationRoutes = useOrchestrationRoutes();
   const { data, isLoading } = useOrchestrationRunDetail(runId, { appId, scope });
 
   const donutData = useMemo(() => {
@@ -91,7 +98,7 @@ export function RunDrillOver({ runId, appId, scope, onClose, labelledBy }: RunDr
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Link
-            to={routes.insideSales.campaignRunDetail(runId)}
+            to={orchestrationRoutes.campaignRunDetail(runId)}
             className="inline-flex items-center gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
           >
             <ExternalLink className="h-3.5 w-3.5" />
@@ -138,7 +145,9 @@ export function RunDrillOver({ runId, appId, scope, onClose, labelledBy }: RunDr
                     key={step.nodeStepId}
                     className="flex items-center gap-1.5 rounded-[var(--radius-default)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px]"
                   >
-                    <ConnectionProviderLogo provider={step.nodeType} size={16} />
+                    <span className="font-mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                      {capabilityOf(step.nodeType)}
+                    </span>
                     <span className="text-[var(--text-secondary)]">{step.nodeId}</span>
                     <Badge variant="neutral">{step.status}</Badge>
                   </li>
