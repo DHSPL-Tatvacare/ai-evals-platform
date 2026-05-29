@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import Numeric, case, distinct, func, select, tuple_
+from sqlalchemy import Numeric, case, distinct, func, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.orchestration import (
@@ -40,12 +40,66 @@ _COST_EXPR = func.coalesce(
 )
 
 
-def _bucket_count(bucket: EngagementBucket):
+# Most-advanced wins: a recipient's representative bucket is the highest-ranked
+# outcome across its rows so the five buckets partition recipients.
+_BUCKET_RANK = {
+    EngagementBucket.positive.value: 5,
+    EngagementBucket.reached.value: 4,
+    EngagementBucket.no_response.value: 3,
+    EngagementBucket.failed.value: 2,
+    EngagementBucket.in_flight.value: 1,
+}
+_RANK_TO_BUCKET = {rank: value for value, rank in _BUCKET_RANK.items()}
+
+
+def _bucket_rank_expr():
+    """Map a row's outcome_bucket to its rank; null buckets rank 0 (ignored)."""
+    return case(
+        *[
+            (WorkflowRunRecipientAction.outcome_bucket == value, literal(rank))
+            for value, rank in _BUCKET_RANK.items()
+        ],
+        else_=literal(0),
+    )
+
+
+def _collapsed_bucket_count(rep_bucket_col, bucket: EngagementBucket):
     return func.coalesce(
-        func.sum(
-            case((WorkflowRunRecipientAction.outcome_bucket == bucket.value, 1), else_=0)
-        ),
-        0,
+        func.sum(case((rep_bucket_col == bucket.value, 1), else_=0)), 0
+    )
+
+
+def _collapsed_recipient_subquery(
+    *, tenant_id, app_id, scope_clause, date_from, date_to, extra_group_cols=()
+):
+    """Per (run_id, recipient_id [, extra dims]) max-rank outcome bucket.
+
+    Counts each recipient once by its most-advanced outcome so the five buckets
+    partition recipients. Rows with a null outcome_bucket rank 0 and never win a
+    terminal bucket; a recipient with only pending dispatch rows yields max_rank 0.
+    """
+    group_cols = [
+        WorkflowRunRecipientAction.run_id,
+        WorkflowRunRecipientAction.recipient_id,
+        *extra_group_cols,
+    ]
+    stmt = select(
+        *group_cols,
+        func.max(_bucket_rank_expr()).label("max_rank"),
+    )
+    stmt = _base_join(stmt)
+    stmt = _scope_filters(
+        stmt, tenant_id=tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=date_from, date_to=date_to,
+    ).group_by(*group_cols)
+    return stmt.subquery()
+
+
+def _rep_bucket_from_rank(max_rank_col):
+    """Translate a recipient's max rank back to its bucket value string."""
+    return case(
+        *[(max_rank_col == rank, literal(value)) for rank, value in _RANK_TO_BUCKET.items()],
+        else_=literal(None),
     )
 
 
@@ -108,11 +162,6 @@ async def overview(
         func.count(distinct(WorkflowRunRecipientAction.run_id)),
         recipient_pair,
         func.count(distinct(WorkflowRunRecipientAction.contact_phone_e164)),
-        _bucket_count(EngagementBucket.positive),
-        _bucket_count(EngagementBucket.reached),
-        _bucket_count(EngagementBucket.no_response),
-        _bucket_count(EngagementBucket.failed),
-        _bucket_count(EngagementBucket.in_flight),
         _COST_EXPR,
     )
     stmt = _base_join(stmt)
@@ -121,6 +170,20 @@ async def overview(
         date_from=date_from, date_to=date_to,
     )
     row = (await db.execute(stmt)).one()
+
+    collapsed = _collapsed_recipient_subquery(
+        tenant_id=tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=date_from, date_to=date_to,
+    )
+    rep = _rep_bucket_from_rank(collapsed.c.max_rank)
+    bucket_stmt = select(
+        _collapsed_bucket_count(rep, EngagementBucket.positive),
+        _collapsed_bucket_count(rep, EngagementBucket.reached),
+        _collapsed_bucket_count(rep, EngagementBucket.no_response),
+        _collapsed_bucket_count(rep, EngagementBucket.failed),
+        _collapsed_bucket_count(rep, EngagementBucket.in_flight),
+    ).select_from(collapsed)
+    brow = (await db.execute(bucket_stmt)).one()
 
     in_flight_stmt = select(
         func.count(distinct(WorkflowRun.id))
@@ -137,12 +200,12 @@ async def overview(
         runs=int(row[1] or 0),
         recipients=int(row[2] or 0),
         unique_contacts=int(row[3] or 0),
-        positive=int(row[4] or 0),
-        reached=int(row[5] or 0),
-        no_response=int(row[6] or 0),
-        failed=int(row[7] or 0),
-        in_flight=int(row[8] or 0),
-        spend=float(row[9] or 0),
+        positive=int(brow[0] or 0),
+        reached=int(brow[1] or 0),
+        no_response=int(brow[2] or 0),
+        failed=int(brow[3] or 0),
+        in_flight=int(brow[4] or 0),
+        spend=float(row[4] or 0),
         in_flight_runs=int(in_flight_runs),
     )
 
@@ -168,17 +231,6 @@ class BreakdownRow:
 _DISPATCH_NODE_TYPES = ("voice.place_call", "messaging.send_whatsapp_template", "core.webhook_out")
 
 
-def _bucket_columns():
-    return [
-        _bucket_count(EngagementBucket.positive),
-        _bucket_count(EngagementBucket.reached),
-        _bucket_count(EngagementBucket.no_response),
-        _bucket_count(EngagementBucket.failed),
-        _bucket_count(EngagementBucket.in_flight),
-        _COST_EXPR,
-    ]
-
-
 def _recipient_count():
     return func.count(
         distinct(
@@ -191,7 +243,13 @@ def _recipient_count():
 
 
 def _dispatched_count():
-    return func.count(WorkflowRunRecipientAction.id)
+    """Dispatch attempts = parent dispatch rows, not lifecycle-event children."""
+    return func.coalesce(
+        func.sum(
+            case((WorkflowRunRecipientAction.parent_action_id.is_(None), 1), else_=0)
+        ),
+        0,
+    )
 
 
 async def breakdown(
@@ -213,13 +271,16 @@ async def breakdown(
 
     if dimension == "campaign":
         group_key, group_label = Workflow.id, Workflow.name
+        dim_col = WorkflowRunRecipientAction.workflow_id
     elif dimension == "channel":
         group_key = group_label = WorkflowRunRecipientAction.channel
+        dim_col = WorkflowRunRecipientAction.channel
     else:
         raise ValueError(f"unknown breakdown dimension: {dimension}")
 
+    # Row-level aggregate: recipients (distinct), dispatched (parent rows), cost.
     stmt = select(
-        group_key, group_label, _recipient_count(), _dispatched_count(), *_bucket_columns()
+        group_key, group_label, _recipient_count(), _dispatched_count(), _COST_EXPR
     )
     stmt = _base_join(stmt)
     stmt = _scope_filters(
@@ -227,16 +288,37 @@ async def breakdown(
         date_from=date_from, date_to=date_to,
     ).group_by(group_key, group_label)
     rows = (await db.execute(stmt)).all()
-    return [
-        BreakdownRow(
+
+    # Collapsed bucket counts: one most-advanced bucket per recipient, per dimension.
+    collapsed = _collapsed_recipient_subquery(
+        tenant_id=tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=date_from, date_to=date_to,
+        extra_group_cols=(dim_col.label("dim_key"),),
+    )
+    rep = _rep_bucket_from_rank(collapsed.c.max_rank)
+    bucket_stmt = select(
+        collapsed.c.dim_key,
+        _collapsed_bucket_count(rep, EngagementBucket.positive),
+        _collapsed_bucket_count(rep, EngagementBucket.reached),
+        _collapsed_bucket_count(rep, EngagementBucket.no_response),
+        _collapsed_bucket_count(rep, EngagementBucket.failed),
+        _collapsed_bucket_count(rep, EngagementBucket.in_flight),
+    ).select_from(collapsed).group_by(collapsed.c.dim_key)
+    buckets_by_key = {
+        str(b[0]): (int(b[1] or 0), int(b[2] or 0), int(b[3] or 0), int(b[4] or 0), int(b[5] or 0))
+        for b in (await db.execute(bucket_stmt)).all()
+    }
+
+    out: list[BreakdownRow] = []
+    for r in rows:
+        pos, rch, nr, fail, infl = buckets_by_key.get(str(r[0]), (0, 0, 0, 0, 0))
+        out.append(BreakdownRow(
             key=str(r[0]), label=str(r[1]), provider=None,
             recipients=int(r[2] or 0), dispatched=int(r[3] or 0),
-            positive=int(r[4] or 0), reached=int(r[5] or 0),
-            no_response=int(r[6] or 0), failed=int(r[7] or 0),
-            in_flight=int(r[8] or 0), cost=float(r[9] or 0),
-        )
-        for r in rows
-    ]
+            positive=pos, reached=rch, no_response=nr, failed=fail,
+            in_flight=infl, cost=float(r[4] or 0),
+        ))
+    return out
 
 
 def _extract_connection_ids(definition: dict[str, Any]) -> dict[str, str]:
@@ -260,7 +342,7 @@ async def _connection_breakdown(
         WorkflowRunNodeStep.node_id,
         _recipient_count(),
         _dispatched_count(),
-        *_bucket_columns(),
+        _COST_EXPR,
     )
     stmt = stmt.select_from(WorkflowRunRecipientAction).join(
         WorkflowRunNodeStep,
@@ -277,6 +359,43 @@ async def _connection_breakdown(
     node_rows = (await db.execute(stmt)).all()
     if not node_rows:
         return []
+
+    # Collapsed buckets per (version, node_id): one most-advanced bucket per recipient.
+    bucket_inner = select(
+        WorkflowRunRecipientAction.run_id,
+        WorkflowRunRecipientAction.recipient_id,
+        WorkflowRunRecipientAction.workflow_version_id.label("ver"),
+        WorkflowRunNodeStep.node_id.label("nid"),
+        func.max(_bucket_rank_expr()).label("max_rank"),
+    ).select_from(WorkflowRunRecipientAction).join(
+        WorkflowRunNodeStep,
+        WorkflowRunRecipientAction.node_step_id == WorkflowRunNodeStep.id,
+    ).join(
+        WorkflowRun, WorkflowRunRecipientAction.run_id == WorkflowRun.id
+    ).join(Workflow, WorkflowRun.workflow_id == Workflow.id)
+    bucket_inner = _scope_filters(
+        bucket_inner, tenant_id=tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=date_from, date_to=date_to,
+    ).group_by(
+        WorkflowRunRecipientAction.run_id,
+        WorkflowRunRecipientAction.recipient_id,
+        WorkflowRunRecipientAction.workflow_version_id,
+        WorkflowRunNodeStep.node_id,
+    ).subquery()
+    rep = _rep_bucket_from_rank(bucket_inner.c.max_rank)
+    bucket_stmt = select(
+        bucket_inner.c.ver,
+        bucket_inner.c.nid,
+        _collapsed_bucket_count(rep, EngagementBucket.positive),
+        _collapsed_bucket_count(rep, EngagementBucket.reached),
+        _collapsed_bucket_count(rep, EngagementBucket.no_response),
+        _collapsed_bucket_count(rep, EngagementBucket.failed),
+        _collapsed_bucket_count(rep, EngagementBucket.in_flight),
+    ).select_from(bucket_inner).group_by(bucket_inner.c.ver, bucket_inner.c.nid)
+    node_buckets = {
+        (b[0], b[1]): (int(b[2] or 0), int(b[3] or 0), int(b[4] or 0), int(b[5] or 0), int(b[6] or 0))
+        for b in (await db.execute(bucket_stmt)).all()
+    }
 
     # 2. Resolve each (version, node_id) to its connection_id via the version definition.
     version_ids = {r[0] for r in node_rows}
@@ -314,14 +433,15 @@ async def _connection_breakdown(
     for r in node_rows:
         conn_id = node_to_conn.get((r[0], r[1]))
         key = conn_id or "unmapped"
+        pos, rch, nr, fail, infl = node_buckets.get((r[0], r[1]), (0, 0, 0, 0, 0))
         bucket = acc.setdefault(key, [0, 0, 0, 0, 0, 0, 0.0])
         bucket[0] += int(r[2] or 0)  # recipients
         bucket[1] += int(r[3] or 0)  # dispatched
-        bucket[2] += int(r[4] or 0)  # positive
-        bucket[3] += int(r[5] or 0)  # reached
-        bucket[4] += int(r[6] or 0)  # no_response
-        bucket[5] += int(r[7] or 0)  # failed
-        bucket[6] += float(r[9] or 0)  # cost (r[8] is in_flight)
+        bucket[2] += pos
+        bucket[3] += rch
+        bucket[4] += nr
+        bucket[5] += fail
+        bucket[6] += float(r[4] or 0)  # cost
 
     out: list[BreakdownRow] = []
     for key, b in acc.items():
@@ -381,21 +501,29 @@ async def runs(
     page_size: int = 20,
 ) -> RunsResult:
     """Paginated run rows with reach/positive/cost rolled up from the action fact."""
-    reached_expr = func.coalesce(
-        func.sum(
-            case(
-                (
-                    WorkflowRunRecipientAction.outcome_bucket.in_(
-                        (EngagementBucket.positive.value, EngagementBucket.reached.value)
-                    ),
-                    1,
-                ),
-                else_=0,
-            )
-        ),
-        0,
-    )
     channel_expr = func.max(WorkflowRunRecipientAction.channel)
+
+    # Per-run reach/positive: collapse each recipient to its most-advanced bucket,
+    # then count runs' recipients so reach/positive can't exceed recipient count.
+    collapsed = _collapsed_recipient_subquery(
+        tenant_id=tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=date_from, date_to=date_to,
+        extra_group_cols=(),
+    )
+    rep = _rep_bucket_from_rank(collapsed.c.max_rank)
+    run_buckets = select(
+        collapsed.c.run_id.label("rb_run_id"),
+        func.coalesce(
+            func.sum(
+                case(
+                    (rep.in_((EngagementBucket.positive.value, EngagementBucket.reached.value)), 1),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("reached"),
+        _collapsed_bucket_count(rep, EngagementBucket.positive).label("positive"),
+    ).select_from(collapsed).group_by(collapsed.c.run_id).subquery()
 
     base = (
         select(
@@ -406,8 +534,8 @@ async def runs(
             WorkflowRun.triggered_by,
             WorkflowRun.status,
             WorkflowRun.cohort_size_at_entry,
-            reached_expr,
-            _bucket_count(EngagementBucket.positive),
+            func.coalesce(func.max(run_buckets.c.reached), 0),
+            func.coalesce(func.max(run_buckets.c.positive), 0),
             _COST_EXPR,
             WorkflowRun.started_at,
         )
@@ -416,6 +544,11 @@ async def runs(
         .join(
             WorkflowRunRecipientAction,
             WorkflowRunRecipientAction.run_id == WorkflowRun.id,
+            isouter=True,
+        )
+        .join(
+            run_buckets,
+            run_buckets.c.rb_run_id == WorkflowRun.id,
             isouter=True,
         )
         .where(
@@ -537,15 +670,40 @@ async def run_detail(
     if head is None:
         return None
 
-    bucket_stmt = (
-        select(*_bucket_columns())
+    # Collapse each recipient to its most-advanced bucket for this run.
+    rep_inner = (
+        select(
+            WorkflowRunRecipientAction.recipient_id,
+            func.max(_bucket_rank_expr()).label("max_rank"),
+        )
         .select_from(WorkflowRunRecipientAction)
         .where(
             WorkflowRunRecipientAction.run_id == run_id,
             WorkflowRunRecipientAction.tenant_id == tenant_id,
         )
+        .group_by(WorkflowRunRecipientAction.recipient_id)
+        .subquery()
     )
+    rep = _rep_bucket_from_rank(rep_inner.c.max_rank)
+    bucket_stmt = select(
+        _collapsed_bucket_count(rep, EngagementBucket.positive),
+        _collapsed_bucket_count(rep, EngagementBucket.reached),
+        _collapsed_bucket_count(rep, EngagementBucket.no_response),
+        _collapsed_bucket_count(rep, EngagementBucket.failed),
+        _collapsed_bucket_count(rep, EngagementBucket.in_flight),
+    ).select_from(rep_inner)
     b = (await db.execute(bucket_stmt)).one()
+
+    spend_row = (
+        await db.execute(
+            select(_COST_EXPR)
+            .select_from(WorkflowRunRecipientAction)
+            .where(
+                WorkflowRunRecipientAction.run_id == run_id,
+                WorkflowRunRecipientAction.tenant_id == tenant_id,
+            )
+        )
+    ).scalar() or 0
 
     steps = (
         await db.execute(
@@ -601,7 +759,7 @@ async def run_detail(
             no_response=int(b[2] or 0), failed=int(b[3] or 0),
             in_flight=int(b[4] or 0),
         ),
-        spend=float(b[5] or 0),
+        spend=float(spend_row or 0),
         node_steps=[
             RunNodeStep(
                 node_step_id=s.id, node_id=s.node_id, node_type=s.node_type,

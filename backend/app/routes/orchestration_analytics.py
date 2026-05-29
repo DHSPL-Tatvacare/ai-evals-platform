@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.auth.context import AuthContext
 from app.auth.permissions import require_permission
 from app.database import get_db
+from app.models.orchestration_signal import OrchestrationSignalSnapshot
 from app.schemas.orchestration_analytics import (
     BreakdownResponse,
     BreakdownRowResponse,
@@ -228,13 +229,6 @@ async def get_signals(
 ) -> SignalsResponse:
     await ensure_orchestration_enabled(db, app_id)
     _resolve_scope(auth, scope)
-    # Phase 3 ships the snapshot writer + model; until then this lights up via
-    # a defensive import so the endpoint works pre-Phase-3 (empty list).
-    try:
-        from app.models.orchestration_signal import OrchestrationSignalSnapshot  # type: ignore
-    except ImportError:
-        return SignalsResponse(signals=[])
-
     snapshot = (
         await db.execute(
             select(OrchestrationSignalSnapshot)

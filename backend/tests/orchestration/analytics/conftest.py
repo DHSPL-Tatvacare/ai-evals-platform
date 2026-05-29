@@ -27,6 +27,12 @@ async def seed_orchestration_run(db_session):
 
     ``recipients`` is a list of dicts: {recipient_id, bucket, channel, cost,
     contact}. Each yields one recipient state + one recipient action row.
+
+    A recipient dict may instead carry ``events``: a list of child-event dicts
+    {action_type, bucket} which seed a parent dispatch row (parent_action_id
+    NULL, outcome_bucket NULL) plus one child action per event (parent_action_id
+    set, the lifecycle outcome_bucket). This mirrors the WhatsApp/WATI adapter
+    that persists one child row per lifecycle event.
     """
 
     async def _make(
@@ -91,6 +97,43 @@ async def seed_orchestration_run(db_session):
                 run_id=run.id, recipient_id=recipient_id,
                 status="completed", payload={"contact": contact},
             ))
+            if rec.get("events") is not None:
+                # WhatsApp-style: one parent dispatch row (no outcome_bucket) +
+                # one child action row per lifecycle event.
+                parent = WorkflowRunRecipientAction(
+                    id=_uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+                    workflow_id=workflow.id, workflow_version_id=version.id,
+                    run_id=run.id, node_step_id=node_step.id,
+                    recipient_id=recipient_id, channel=channel,
+                    action_type=rec.get("dispatch_action_type", "wa-sent"),
+                    status="success",
+                    idempotency_key=f"idem-{run.id}-{recipient_id}-{idx}-parent",
+                    payload={"contact": contact},
+                    response={"total_cost": cost} if cost is not None else None,
+                    parent_action_id=None,
+                    outcome_bucket=None,
+                )
+                db_session.add(parent)
+                await db_session.flush()
+                action_ids.append(parent.id)
+                for evt_idx, evt in enumerate(rec["events"]):
+                    child = WorkflowRunRecipientAction(
+                        id=_uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
+                        workflow_id=workflow.id, workflow_version_id=version.id,
+                        run_id=run.id, node_step_id=node_step.id,
+                        recipient_id=recipient_id, channel=channel,
+                        action_type=evt["action_type"], status="success",
+                        idempotency_key=(
+                            f"idem-{run.id}-{recipient_id}-{idx}-{evt['action_type']}"
+                        ),
+                        payload={"contact": contact},
+                        response=None,
+                        parent_action_id=parent.id,
+                        outcome_bucket=evt["bucket"],
+                    )
+                    db_session.add(child)
+                    action_ids.append(child.id)
+                continue
             action = WorkflowRunRecipientAction(
                 id=_uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
                 workflow_id=workflow.id, workflow_version_id=version.id,
@@ -100,6 +143,7 @@ async def seed_orchestration_run(db_session):
                 idempotency_key=f"idem-{run.id}-{recipient_id}-{idx}",
                 payload={"contact": contact},
                 response={"total_cost": cost} if cost is not None else None,
+                parent_action_id=None,
                 outcome_bucket=rec["bucket"],
             )
             db_session.add(action)

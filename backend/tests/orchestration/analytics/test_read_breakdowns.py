@@ -36,6 +36,35 @@ async def test_channel_breakdown(db_session, seed_orchestration_run):
 
 
 @pytest.mark.asyncio
+async def test_channel_breakdown_collapses_whatsapp_lifecycle(
+    db_session, seed_orchestration_run
+):
+    # One WhatsApp recipient with a parent dispatch + 3 event children. dispatched
+    # must count the single parent dispatch row (1), not all 4 action rows; and the
+    # recipient's most-advanced bucket (positive) is counted once.
+    seeded = await seed_orchestration_run(
+        recipients=[
+            {
+                "recipient_id": "wa1",
+                "channel": "whatsapp",
+                "events": [
+                    {"action_type": "wa_delivered", "bucket": "reached"},
+                    {"action_type": "wa_read", "bucket": "reached"},
+                    {"action_type": "wa_replied", "bucket": "positive"},
+                ],
+            },
+        ],
+    )
+    rows = await read_service.breakdown(db_session, dimension="channel", **_scope(seeded))
+    by_label = {r.label: r for r in rows}
+    wa = by_label["whatsapp"]
+    assert wa.recipients == 1
+    assert wa.dispatched == 1
+    assert wa.positive == 1
+    assert wa.reached == 0
+
+
+@pytest.mark.asyncio
 async def test_campaign_breakdown(db_session, seed_orchestration_run):
     seeded = await seed_orchestration_run(
         workflow_name="Campaign One",
