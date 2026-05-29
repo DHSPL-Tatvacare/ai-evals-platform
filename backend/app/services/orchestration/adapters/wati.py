@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, ClassVar, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -686,13 +686,15 @@ class WatiAdapter:
             for a in actions
         ]
 
+    ACTION_OUTCOME_MAP: ClassVar[dict[str, EngagementBucket]] = {
+        "wa_replied": EngagementBucket.positive,
+        "wa_read": EngagementBucket.reached,
+        "wa_delivered": EngagementBucket.reached,
+        "wa_failed": EngagementBucket.failed,
+    }
+
     def outcome_bucket(self, action_type: str) -> EngagementBucket:
-        return {
-            "wa_replied": EngagementBucket.positive,
-            "wa_read": EngagementBucket.reached,
-            "wa_delivered": EngagementBucket.reached,
-            "wa_failed": EngagementBucket.failed,
-        }.get(action_type, EngagementBucket.in_flight)
+        return self.ACTION_OUTCOME_MAP.get(action_type, EngagementBucket.in_flight)
 
     def funnel_stages(self) -> list[FunnelStage]:
         return [FunnelStage("sent", "Sent"), FunnelStage("delivered", "Delivered"), FunnelStage("read", "Read"), FunnelStage("replied", "Replied")]

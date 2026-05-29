@@ -546,12 +546,14 @@ class BolnaAdapter:
             results.append(await self.cancel_dispatch(connection=connection, action=action))
         return results
 
+    ACTION_OUTCOME_MAP: ClassVar[dict[str, EngagementBucket]] = {
+        "bolna_answered": EngagementBucket.positive,
+        "bolna_rnr": EngagementBucket.no_response,
+        "bolna_failed": EngagementBucket.failed,
+    }
+
     def outcome_bucket(self, action_type: str) -> EngagementBucket:
-        return {
-            "bolna_answered": EngagementBucket.positive,
-            "bolna_rnr": EngagementBucket.no_response,
-            "bolna_failed": EngagementBucket.failed,
-        }.get(action_type, EngagementBucket.failed)
+        return self.ACTION_OUTCOME_MAP.get(action_type, EngagementBucket.failed)
 
     def funnel_stages(self) -> list[FunnelStage]:
         return [FunnelStage("dialed", "Dialed"), FunnelStage("connected", "Connected"), FunnelStage("answered", "Answered"), FunnelStage("positive", "Positive")]

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Mapping
+from typing import Any, ClassVar, Mapping
 
 import httpx
 from fastapi import HTTPException
@@ -128,13 +128,15 @@ class AiSensyAdapter:
             for a in actions
         ]
 
+    ACTION_OUTCOME_MAP: ClassVar[dict[str, EngagementBucket]] = {
+        "wa_replied": EngagementBucket.positive,
+        "wa_read": EngagementBucket.reached,
+        "wa_delivered": EngagementBucket.reached,
+        "wa_failed": EngagementBucket.failed,
+    }
+
     def outcome_bucket(self, action_type: str) -> EngagementBucket:
-        return {
-            "wa_replied": EngagementBucket.positive,
-            "wa_read": EngagementBucket.reached,
-            "wa_delivered": EngagementBucket.reached,
-            "wa_failed": EngagementBucket.failed,
-        }.get(action_type, EngagementBucket.in_flight)
+        return self.ACTION_OUTCOME_MAP.get(action_type, EngagementBucket.in_flight)
 
     def funnel_stages(self) -> list[FunnelStage]:
         return [FunnelStage("sent", "Sent"), FunnelStage("delivered", "Delivered"), FunnelStage("read", "Read"), FunnelStage("replied", "Replied")]

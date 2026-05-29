@@ -48,6 +48,11 @@ def registered_adapters() -> list[tuple[str, str]]:
     return sorted(_REGISTRY.keys())
 
 
+def registered_adapter_instances() -> list[Any]:
+    """Registered adapter instances; consumers introspect them without the registry dict."""
+    return list(_REGISTRY.values())
+
+
 def capability_for_vendor(vendor: str) -> str | None:
     """Reverse lookup — None when no adapter is registered for this vendor."""
     for cap, vnd in _REGISTRY.keys():
@@ -72,6 +77,7 @@ __all__ = [
     "VoiceAdapter",
     "capability_for_vendor",
     "register_adapter",
+    "registered_adapter_instances",
     "registered_adapters",
     "resolve_adapter",
 ]

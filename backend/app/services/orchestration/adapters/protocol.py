@@ -28,6 +28,7 @@ class FunnelStage:
 class MessagingAdapter(Protocol):
     capability: ClassVar[str]
     vendor: ClassVar[str]
+    ACTION_OUTCOME_MAP: ClassVar[dict[str, EngagementBucket]]
 
     async def send_template(
         self, *, connection: Any, request: CanonicalSendRequest,
@@ -88,6 +89,7 @@ class EventSourceAdapter(Protocol):
 class VoiceAdapter(Protocol):
     capability: ClassVar[str]
     vendor: ClassVar[str]
+    ACTION_OUTCOME_MAP: ClassVar[dict[str, EngagementBucket]]
     # None means "vendor never batches"; integer is the cohort size at
     # or above which the node flips from per-recipient ``place_call`` to
     # a single ``place_call_batch`` upload.
