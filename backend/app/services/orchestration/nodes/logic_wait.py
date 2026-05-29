@@ -74,6 +74,18 @@ class _Config(BaseModel):
         if not isinstance(raw, dict):
             return raw
         raw = dict(raw)
+        # Editor mode-switches can leave a blank optional field behind; drop
+        # empty strings so a stray "" never fails the strict datetime / float
+        # parse and blocks publish.
+        for key in (
+            "until_datetime",
+            "duration_value",
+            "duration_hours",
+            "timeout_hours",
+            "event_name",
+        ):
+            if isinstance(raw.get(key), str) and raw[key].strip() == "":
+                raw[key] = None
         # Coerce legacy duration_hours → duration_value + duration_unit.
         if raw.get("duration_hours") is not None and raw.get("duration_value") is None:
             raw["duration_value"] = raw["duration_hours"]

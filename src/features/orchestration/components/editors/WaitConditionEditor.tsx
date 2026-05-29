@@ -68,24 +68,30 @@ export function WaitConditionEditor({ value, onChange }: Props) {
       ? 'event_or_timeout'
       : (value.mode ?? 'duration');
 
-  const setMode = (next: SelectableMode) => {
-    const base: WaitConfig = { mode: next };
-    if (next === 'duration') {
-      base.duration_value = value.duration_value ?? value.duration_hours ?? 1;
-      base.duration_unit = value.duration_unit ?? 'hours';
+  // Emit only the fields valid for `mode`, carrying forward existing values.
+  // Stripping stale keys (e.g. a blank `until_datetime` left by a prior mode)
+  // is what keeps publish unblocked — no orphaned field reaches the backend.
+  const emitForMode = (mode: SelectableMode, overrides: Partial<WaitConfig>) => {
+    const merged = { ...value, ...overrides };
+    const base: WaitConfig = { mode };
+    if (mode === 'duration') {
+      base.duration_value = merged.duration_value ?? merged.duration_hours ?? 1;
+      base.duration_unit = merged.duration_unit ?? 'hours';
     }
-    if (next === 'until_datetime') base.until_datetime = value.until_datetime ?? '';
-    if (next === 'event_or_timeout') {
-      base.event_name = value.event_name ?? '';
+    if (mode === 'until_datetime') base.until_datetime = merged.until_datetime ?? '';
+    if (mode === 'event_or_timeout') {
+      base.event_name = merged.event_name ?? '';
       base.correlation = {
         recipient_id_field: 'recipient_id',
-        ...value.correlation,
+        ...merged.correlation,
       };
-      base.event_match = value.event_match;
-      base.timeout_hours = value.timeout_hours ?? 24;
+      base.event_match = merged.event_match;
+      base.timeout_hours = merged.timeout_hours ?? 24;
     }
     onChange(base);
   };
+
+  const setMode = (next: SelectableMode) => emitForMode(next, {});
 
   // For event modes, ensure a default timeout is visible even on legacy pure-event defs
   // so the author can save without blanking out the field (no silent mutation on open).
@@ -113,8 +119,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
               className="flex-1"
               value={value.duration_value ?? value.duration_hours ?? ''}
               onChange={(e) =>
-                onChange({
-                  ...value,
+                emitForMode('duration', {
                   duration_value: Number(e.target.value),
                   duration_unit: value.duration_unit ?? 'hours',
                 })
@@ -125,8 +130,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
               <Select
                 value={value.duration_unit ?? 'hours'}
                 onChange={(next) =>
-                  onChange({
-                    ...value,
+                  emitForMode('duration', {
                     duration_unit: next as DurationUnit,
                     duration_value: value.duration_value ?? value.duration_hours ?? 1,
                   })
@@ -142,7 +146,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
         <Field label="Wake at (UTC ISO datetime)">
           <DateTimeField
             value={value.until_datetime ?? ''}
-            onChange={(next) => onChange({ ...value, until_datetime: next })}
+            onChange={(next) => emitForMode('until_datetime', { until_datetime: next })}
           />
         </Field>
       ) : null}
@@ -153,7 +157,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
             <Input
               type="text"
               value={value.event_name ?? ''}
-              onChange={(e) => onChange({ ...value, event_name: e.target.value })}
+              onChange={(e) => emitForMode('event_or_timeout', { event_name: e.target.value })}
               placeholder="voice.completed"
             />
             <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
@@ -169,8 +173,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
                   : ''
               }
               onChange={(e) =>
-                onChange({
-                  ...value,
+                emitForMode('event_or_timeout', {
                   correlation: {
                     ...value.correlation,
                     recipient_id_field: e.target.value,
@@ -189,7 +192,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
             </p>
             <PredicateBuilder
               value={value.event_match}
-              onChange={(next) => onChange({ ...value, event_match: next })}
+              onChange={(next) => emitForMode('event_or_timeout', { event_match: next })}
             />
           </Field>
         </>
@@ -204,10 +207,7 @@ export function WaitConditionEditor({ value, onChange }: Props) {
             // so the field isn't blank — without writing back until the author changes it.
             value={value.timeout_hours ?? 24}
             onChange={(e) =>
-              onChange({
-                ...value,
-                timeout_hours: Number(e.target.value),
-              })
+              emitForMode('event_or_timeout', { timeout_hours: Number(e.target.value) })
             }
             placeholder="hours before giving up"
           />

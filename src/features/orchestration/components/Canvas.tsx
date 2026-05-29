@@ -33,6 +33,7 @@ import { resolveColor } from '@/utils/statusColors';
 import {
   deriveOutputEdges,
   deriveOutputEdgeLabels,
+  deriveWaitBodySummary,
 } from '@/features/orchestration/utils/nodeOutputs';
 import { CustomNode, type NodeOverlay } from './CustomNode';
 import { CustomEdge } from './CustomEdge';
@@ -184,7 +185,7 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
             nodeType: n.type,
             category: desc?.category ?? 'logic',
             displayCategory: desc?.displayCategory ?? 'routing',
-            description: desc?.description,
+            description: deriveWaitBodySummary(n) ?? desc?.description,
             outputEdges: deriveOutputEdges(n, desc),
             outputEdgeLabels: deriveOutputEdgeLabels(n, desc),
             overlay: deriveNodeOverlay(activeOverlay[n.id]),

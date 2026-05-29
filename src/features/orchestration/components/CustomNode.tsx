@@ -172,6 +172,11 @@ export function CustomNode({ id, data: rawData, selected }: NodeProps) {
   const overlay = data.overlay;
   const publishErrors = data.publishErrors;
 
+  // logic.wait surfaces a config-derived body summary; Canvas computes it via
+  // ``deriveWaitBodySummary`` (single source of truth) and passes it through
+  // ``description`` — read-only display, mirroring the run canvas body pattern.
+  const cardDescription = data.description;
+
   // Run canvas (overlay present) is read-only; only the builder canvas
   // exposes the per-node delete affordance, which routes through a
   // confirm dialog in the builder page (see WorkflowBuilderPage). The
@@ -294,7 +299,7 @@ export function CustomNode({ id, data: rawData, selected }: NodeProps) {
     <NodeCard
       variant="canvas"
       label={data.label}
-      description={data.description}
+      description={cardDescription}
       fallbackSubtitle={data.nodeType}
       category={data.displayCategory ?? data.category}
       icon={NODE_TYPE_ICONS[data.nodeType]}
