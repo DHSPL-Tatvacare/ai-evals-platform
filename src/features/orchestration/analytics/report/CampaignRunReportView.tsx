@@ -66,7 +66,12 @@ export function CampaignRunReportView({
       </div>
 
       <div className={cn('grid gap-3', printMode ? 'grid-cols-1' : 'lg:grid-cols-2')}>
-        <EngagementFunnel channels={report.channels} />
+        <Card className="flex flex-col p-4">
+          <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">
+            Engagement funnel
+          </h3>
+          <EngagementFunnel channels={report.channels} printMode={printMode} />
+        </Card>
         <OutcomeMix buckets={report.buckets} />
       </div>
 

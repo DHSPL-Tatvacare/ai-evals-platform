@@ -81,4 +81,5 @@ export { GradientText } from './GradientText';
 export { StatCard, type StatCardTone } from './StatCard';
 export { TrendCard } from './TrendCard';
 export { FunnelCard, type FunnelStageDatum } from './FunnelCard';
+export { Funnel, type FunnelStage } from './Funnel';
 export { MetricBreakdownCard, type MetricBreakdownColumn } from './MetricBreakdownCard';

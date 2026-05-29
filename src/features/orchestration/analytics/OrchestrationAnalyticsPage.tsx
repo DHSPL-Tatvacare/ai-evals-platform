@@ -21,7 +21,6 @@ import {
   DataTable,
   DateRangePicker,
   FunnelCard,
-  MetricBreakdownCard,
   PageSurface,
   RightSlideOverShell,
   StatCard,
@@ -29,7 +28,6 @@ import {
   TrendCard,
   type ColumnDef,
   type DateRangePreset,
-  type MetricBreakdownColumn,
 } from '@/components/ui';
 import { useCurrentAppId } from '@/hooks';
 import { cn } from '@/utils/cn';
@@ -496,7 +494,7 @@ function BreakdownsPanel({ params }: { params: AnalyticsParams }) {
   );
 }
 
-const BREAKDOWN_COLUMNS: MetricBreakdownColumn<OrchestrationBreakdownRow>[] = [
+const BREAKDOWN_METRIC_DEFS: ColumnDef<OrchestrationBreakdownRow>[] = [
   { key: 'recipients', header: 'Recipients', render: (r) => formatInt(r.recipients) },
   { key: 'dispatched', header: 'Dispatched', render: (r) => formatInt(r.dispatched) },
   { key: 'positive', header: 'Positive', render: (r) => formatInt(r.positive) },
@@ -504,6 +502,31 @@ const BREAKDOWN_COLUMNS: MetricBreakdownColumn<OrchestrationBreakdownRow>[] = [
   { key: 'avgCost', header: 'Avg cost', render: (r) => formatUsd(r.avgCost) },
   { key: 'cost', header: 'Cost', render: (r) => formatUsd(r.cost) },
 ];
+
+const BREAKDOWN_METRIC_COLUMNS: ColumnDef<OrchestrationBreakdownRow>[] =
+  BREAKDOWN_METRIC_DEFS.map((col) => ({
+    ...col,
+    width: 'w-24',
+    cellClassName: 'text-right tabular-nums text-[var(--text-secondary)]',
+    headerClassName: 'text-right',
+  }));
+
+function breakdownColumns(nameHeader: string): ColumnDef<OrchestrationBreakdownRow>[] {
+  return [
+    {
+      key: 'name',
+      header: nameHeader,
+      textBehavior: 'truncate',
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          {r.provider && <ConnectionProviderLogo provider={r.provider} size={16} />}
+          <span className="truncate">{r.label}</span>
+        </span>
+      ),
+    },
+    ...BREAKDOWN_METRIC_COLUMNS,
+  ];
+}
 
 function BreakdownPanel({
   title,
@@ -518,24 +541,21 @@ function BreakdownPanel({
 }) {
   const { data } = useOrchestrationBreakdown({ ...params, dimension });
   const rows = data?.rows ?? [];
+  const columns = useMemo(() => breakdownColumns(nameHeader), [nameHeader]);
   return (
-    <MetricBreakdownCard
-      title={title}
-      nameHeader={nameHeader}
-      rows={rows}
-      columns={BREAKDOWN_COLUMNS}
-      keyExtractor={(r) => r.key}
-      renderName={(r) => (
-        <span className="flex items-center gap-2">
-          {r.provider && <ConnectionProviderLogo provider={r.provider} size={16} />}
-          <span className="truncate">{r.label}</span>
-        </span>
-      )}
-      searchPlaceholder={`Search ${nameHeader.toLowerCase()}`}
-      searchMatch={(r, q) => r.label.toLowerCase().includes(q)}
-      emptyTitle="No data"
-      emptyDescription="No rows in the selected range."
-    />
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
+      <DataTable
+        columns={columns}
+        data={rows}
+        keyExtractor={(r) => r.key}
+        minWidth="0"
+        stickyHeader={false}
+        emptyIcon={BarChart3}
+        emptyTitle="No data"
+        emptyDescription="No rows in the selected range."
+      />
+    </section>
   );
 }
 
