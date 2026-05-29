@@ -167,9 +167,11 @@ async def resume_waiting_on_inbound_event(
         for state in candidates:
             reason = f"{reason_prefix}:{batch.event_name}:{state.recipient_id}"
             try:
+                # Inject canonical id so default recipient_id_field resolves on raw vendor payloads.
                 if await _resume_state(
                     db, state=state, event_names={batch.event_name},
-                    payload=recipient.payload, reason=reason, match_correlation=True,
+                    payload={**recipient.payload, "recipient_id": recipient.recipient_id},
+                    reason=reason, match_correlation=True,
                 ):
                     resumed += 1
             except Exception:  # one bad recipient must never break the trigger path or other resumes

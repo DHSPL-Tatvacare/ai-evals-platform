@@ -638,3 +638,75 @@ async def test_path_b_tenant_isolation(db_session, seed_full_run):
     assert resumed == 0
     state = await _read_state(db_session, run_id=run.id, recipient_id="L-1")
     assert state.status == "waiting"
+
+
+# ── Real-vendor regression: default correlation field with raw vendor payload ──
+
+
+@pytest.mark.asyncio
+async def test_path_b_default_recipient_id_field_real_vendor_payload_resumes(
+    db_session, seed_full_run
+):
+    """Regression: recipient_id_field='recipient_id' (frontend default) + real-vendor payload
+    that does NOT contain 'recipient_id'. Must resume via canonical recipient.recipient_id."""
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    # Use the frontend default: correlation.recipient_id_field == 'recipient_id'
+    await _set_version_definition(
+        db_session, version.id,
+        _correlated_wait_definition(
+            event_name="crm.lead.stage_changed",
+            recipient_id_field="recipient_id",
+        ),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-100",
+    )
+
+    # Real vendor payload (LSQ-style): no 'recipient_id' key present.
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch(
+            "crm.lead.stage_changed",
+            ("L-100", {"lead_id": "L-100", "stage": "qualified"}),
+        ),
+        reason_prefix="event",
+    )
+    assert resumed == 1
+
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-100")
+    assert state.status == "ready"
+    assert state.wakeup_at is None
+    assert await _resume_job_count(db_session, run_id=run.id, recipient_id="L-100") == 1
+
+
+@pytest.mark.asyncio
+async def test_path_b_custom_field_correlation_still_works(db_session, seed_full_run):
+    """Custom recipient_id_field (e.g. 'lead_id') still matches when present in vendor payload."""
+    run, version, workflow, _step, tenant_id, app_id = seed_full_run
+    await _set_version_definition(
+        db_session, version.id,
+        _correlated_wait_definition(
+            event_name="crm.lead.replied",
+            recipient_id_field="lead_id",
+        ),
+    )
+    await _seed_waiting(
+        db_session, run=run, version=version, workflow=workflow,
+        tenant_id=tenant_id, app_id=app_id, recipient_id="L-200",
+    )
+
+    # Vendor payload carries 'lead_id' == state.recipient_id; no 'recipient_id' key.
+    resumed = await resume_waiting_on_inbound_event(
+        db_session, tenant_id=tenant_id, app_id=app_id, workflow_id=workflow.id,
+        batch=_inbound_batch(
+            "crm.lead.replied",
+            ("L-200", {"lead_id": "L-200", "score": 42}),
+        ),
+        reason_prefix="event",
+    )
+    assert resumed == 1
+
+    state = await _read_state(db_session, run_id=run.id, recipient_id="L-200")
+    assert state.status == "ready"
+    assert bag_read(state.payload, node_id="wait1", key="score") == 42
