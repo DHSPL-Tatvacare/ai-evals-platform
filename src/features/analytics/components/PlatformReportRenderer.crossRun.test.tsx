@@ -117,6 +117,10 @@ describe('PlatformReportView cross-run payload', () => {
     // Summary tab now shows the full narrative, not a single executive-summary block.
     expect(screen.getAllByText('Pattern Alpha').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('Do the thing').length).toBeGreaterThanOrEqual(2);
+    // …and it reuses the single-run Summary shape (top-issues table + Recommendations),
+    // not bespoke stacked boxes.
+    expect(screen.getAllByText('Recurring failure patterns').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Recommendations').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows the Summary tab', () => {

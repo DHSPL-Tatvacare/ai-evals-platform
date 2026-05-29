@@ -38,8 +38,10 @@ import {
   transformCompliance,
   transformExemplars,
   transformNarrative,
+  transformCrossRunNarrative,
 } from '@/features/evalRuns/components/report/sectionTransforms';
 import type { ComplianceTableSection, DistributionChartSection, ExemplarsSection } from '@/types/platformReports';
+import type { NarrativeOutput } from '@/types/reports';
 import { Heatmap, type HeatmapCell, type HeatmapColumn, type HeatmapRow, type HeatmapTier } from '@/components/report/Heatmap';
 import TrendChart from '@/components/report/TrendChart';
 import InsightPanelGrid from '@/components/report/InsightPanelGrid';
@@ -511,6 +513,104 @@ function ReportDocumentPreview({ document, report }: { document: PlatformReportD
   );
 }
 
+/**
+ * Shared "top issues + recommendations" view used by both the single-run
+ * Summary tab and the cross-run narrative. One markup, fed by a normalized
+ * {@link NarrativeOutput}, so the two scopes stay visually consistent.
+ */
+function IssuesRecsSummaryView({
+  narrative,
+  issuesKicker = 'Top issues',
+  issuesTitle = 'Most impactful problems',
+}: {
+  narrative: NarrativeOutput | null;
+  issuesKicker?: string;
+  issuesTitle?: string;
+}) {
+  const topIssues = narrative?.topIssues ?? [];
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <ReportSectionHeader kicker={issuesKicker} title={issuesTitle} />
+        {topIssues.length > 0 ? (
+          <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+            <table className="w-full text-sm">
+              <thead className="bg-[var(--bg-secondary)]">
+                <tr>
+                  <th className="w-3 px-2 py-2" />
+                  <th className="text-left px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Issue</th>
+                  <th className="text-left px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Focus area</th>
+                  <th className="text-right px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Affected</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topIssues.slice(0, 5).map((issue, i) => {
+                  const dotTone: ReportTone = i < 2 ? 'error' : i < 4 ? 'warning' : 'info';
+                  return (
+                    <tr key={issue.rank} className="border-t border-[var(--border-subtle)]">
+                      <td className="px-2 py-2 align-top">
+                        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: toneText(dotTone) }} />
+                      </td>
+                      <td className="px-2 py-2 align-top font-medium text-[var(--text-primary)]">{issue.description}</td>
+                      <td className="px-2 py-2 align-top text-[var(--text-secondary)] whitespace-nowrap">{issue.area}</td>
+                      <td className="px-2 py-2 align-top text-right tabular-nums text-[var(--text-secondary)]">{issue.affectedCount}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <SectionEmpty title="No issue narratives" description="No issue narratives are available for this report." />
+        )}
+      </div>
+      <div className="space-y-2">
+        <ReportSectionHeader kicker="Top recommendations" title="What to do next" />
+        <Recommendations narrative={narrative} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Cross-run narrative: executive summary + trend prose, then the SAME
+ * top-issues table + Recommendations the single-run Summary uses (critical
+ * patterns → issues, strategic recommendations → recommendations). Rendered
+ * identically in both the Summary and Detailed tabs.
+ */
+function CrossRunNarrativeView({ section }: { section: PlatformReportSection }) {
+  const narrative = (section as NarrativeSection).data as PlatformCrossRunNarrative;
+  const transformed = transformCrossRunNarrative(narrative);
+  const hasBody =
+    Boolean(narrative.executiveSummary) ||
+    transformed.topIssues.length > 0 ||
+    transformed.recommendations.length > 0;
+  if (!hasBody) {
+    return <SectionEmpty title="AI narrative was not generated" description="No model was available, or narrative was disabled for this report." />;
+  }
+  return (
+    <div className="space-y-5">
+      {narrative.executiveSummary ? (
+        <SectionShell tone="info">
+          <ReportSectionHeader kicker="Executive summary" title="Headline" />
+          <p className="text-sm leading-relaxed text-[var(--text-primary)]">{narrative.executiveSummary}</p>
+        </SectionShell>
+      ) : null}
+      {narrative.trendAnalysis ? (
+        <SectionShell tone="info">
+          <ReportSectionHeader kicker="Trend" title="Trend analysis" />
+          <p className="text-sm leading-relaxed text-[var(--text-primary)]">{narrative.trendAnalysis}</p>
+        </SectionShell>
+      ) : null}
+      <IssuesRecsSummaryView
+        narrative={transformed}
+        issuesKicker="Critical patterns"
+        issuesTitle="Recurring failure patterns"
+      />
+    </div>
+  );
+}
+
 function SectionContent({
   section,
   presentationSection,
@@ -551,7 +651,11 @@ function SectionContent({
   }
 
   if (componentId === 'narrative') {
-    const narrative = (section as NarrativeSection).data as PlatformRunNarrative | PlatformCrossRunNarrative;
+    const narrativeRaw = (section as NarrativeSection).data;
+    if (narrativeRaw.schemaKey === 'platform_cross_run_narrative_v1') {
+      return <CrossRunNarrativeView section={section} />;
+    }
+    const narrative = narrativeRaw as PlatformRunNarrative;
     return (
       <div className="space-y-4">
         {narrative.executiveSummary ? (
@@ -560,62 +664,20 @@ function SectionContent({
             <p className="text-sm leading-relaxed text-[var(--text-primary)]">{narrative.executiveSummary}</p>
           </SectionShell>
         ) : null}
-        {'trendAnalysis' in narrative && narrative.trendAnalysis ? (
-          <SectionShell tone="info">
-            <ReportSectionHeader kicker="Trend" title="Trend analysis" />
-            <p className="text-sm leading-relaxed text-[var(--text-primary)]">{narrative.trendAnalysis}</p>
-          </SectionShell>
-        ) : null}
-        {'issues' in narrative && narrative.issues.length > 0 ? (
+        {narrative.issues.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-2">
-            {narrative.issues.map((issue) => {
-              const severity = ('severity' in issue ? issue.severity : null) as ReportTone | null;
-              return (
-                <SectionShell key={`${issue.area}-${issue.title}`} tone={severity ?? 'warning'}>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">{issue.area}</div>
-                  <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{issue.title}</div>
-                  <div className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{issue.summary}</div>
-                </SectionShell>
-              );
-            })}
-          </div>
-        ) : null}
-        {'recommendations' in narrative && narrative.recommendations.length > 0 ? (
-          <div className="space-y-2">
-            {narrative.recommendations.map((item, index) => {
-              const rationale = 'rationale' in item && typeof item.rationale === 'string' ? item.rationale : null;
-              const expectedImpact = 'expectedImpact' in item && typeof item.expectedImpact === 'string' ? item.expectedImpact : null;
-              return (
-                <SectionShell key={`${item.priority}-${index}`} tone="info">
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
-                      style={{ backgroundColor: toneSurface('info'), color: toneText('info') }}
-                    >
-                      {item.priority}
-                    </span>
-                    <span className="text-sm font-medium text-[var(--text-primary)]">{item.action}</span>
-                  </div>
-                  {rationale ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{rationale}</div> : null}
-                  {expectedImpact ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{expectedImpact}</div> : null}
-                </SectionShell>
-              );
-            })}
-          </div>
-        ) : null}
-        {'criticalPatterns' in narrative && narrative.criticalPatterns.length > 0 ? (
-          <div className="space-y-2">
-            {narrative.criticalPatterns.map((item, index) => (
-              <SectionShell key={`${item.title}-${index}`} tone="warning">
-                <div className="text-sm font-semibold text-[var(--text-primary)]">{item.title}</div>
-                <div className="mt-1 text-xs text-[var(--text-secondary)]">{item.summary}</div>
+            {narrative.issues.map((issue) => (
+              <SectionShell key={`${issue.area}-${issue.title}`} tone={(issue.severity as ReportTone) ?? 'warning'}>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">{issue.area}</div>
+                <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{issue.title}</div>
+                <div className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{issue.summary}</div>
               </SectionShell>
             ))}
           </div>
         ) : null}
-        {'strategicRecommendations' in narrative && narrative.strategicRecommendations.length > 0 ? (
+        {narrative.recommendations.length > 0 ? (
           <div className="space-y-2">
-            {narrative.strategicRecommendations.map((item, index) => (
+            {narrative.recommendations.map((item, index) => (
               <SectionShell key={`${item.priority}-${index}`} tone="info">
                 <div className="flex items-baseline gap-2">
                   <span
@@ -626,7 +688,7 @@ function SectionContent({
                   </span>
                   <span className="text-sm font-medium text-[var(--text-primary)]">{item.action}</span>
                 </div>
-                {item.expectedImpact ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{item.expectedImpact}</div> : null}
+                {item.rationale ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{item.rationale}</div> : null}
               </SectionShell>
             ))}
           </div>
@@ -967,13 +1029,13 @@ function SummarySectionContent({
   }
 
   if (componentId === 'narrative') {
-    // Cross-run: the AI narrative IS the summary — render it in full (executive
-    // summary, trend, patterns, recommendations), identical to the Detailed tab.
-    // Single-run keeps the condensed headline-only summary.
-    if (report && !isSingleRunPayload(report)) {
-      return <SectionContent section={section} presentationSection={presentationSection} report={report} />;
+    const narrativeRaw = (section as NarrativeSection).data;
+    // Cross-run: the narrative IS the summary — render the same top-issues table
+    // and Recommendations the single-run Summary uses, not stacked text boxes.
+    if (narrativeRaw.schemaKey === 'platform_cross_run_narrative_v1') {
+      return <CrossRunNarrativeView section={section} />;
     }
-    const narrativeData = (section as NarrativeSection).data as PlatformRunNarrative | undefined;
+    const narrativeData = narrativeRaw as PlatformRunNarrative;
     return narrativeData?.executiveSummary ? (
       <SectionShell tone="info" bodyClassName="px-4 py-3">
         <p className="text-sm leading-relaxed text-[var(--text-primary)]">{narrativeData.executiveSummary}</p>
@@ -985,49 +1047,7 @@ function SummarySectionContent({
 
   if (componentId === 'issues_recommendations') {
     const narrative = singleRunReport ? transformNarrative(singleRunReport) : null;
-    const topIssues = narrative?.topIssues ?? [];
-    return (
-      <div className="space-y-5">
-        <div className="space-y-2">
-          <ReportSectionHeader kicker="Top issues" title="Most impactful problems" />
-          {topIssues.length > 0 ? (
-            <div className="overflow-x-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]">
-              <table className="w-full text-sm">
-                <thead className="bg-[var(--bg-secondary)]">
-                  <tr>
-                    <th className="w-3 px-2 py-2" />
-                    <th className="text-left px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Issue</th>
-                    <th className="text-left px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Focus area</th>
-                    <th className="text-right px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Affected</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topIssues.slice(0, 5).map((issue, i) => {
-                    const dotTone: ReportTone = i < 2 ? 'error' : i < 4 ? 'warning' : 'info';
-                    return (
-                      <tr key={issue.rank} className="border-t border-[var(--border-subtle)]">
-                        <td className="px-2 py-2 align-top">
-                          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: toneText(dotTone) }} />
-                        </td>
-                        <td className="px-2 py-2 align-top font-medium text-[var(--text-primary)]">{issue.description}</td>
-                        <td className="px-2 py-2 align-top text-[var(--text-secondary)] whitespace-nowrap">{issue.area}</td>
-                        <td className="px-2 py-2 align-top text-right tabular-nums text-[var(--text-secondary)]">{issue.affectedCount}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <SectionEmpty title="No issue narratives" description="No issue narratives are available for this run." />
-          )}
-        </div>
-        <div className="space-y-2">
-          <ReportSectionHeader kicker="Top recommendations" title="What to do next" />
-          <Recommendations narrative={narrative} />
-        </div>
-      </div>
-    );
+    return <IssuesRecsSummaryView narrative={narrative} />;
   }
 
   if (componentId === 'callout') {

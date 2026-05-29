@@ -9,6 +9,7 @@ import type {
   ExemplarsSection,
   IssuesRecommendationsSection,
   NarrativeSection,
+  PlatformCrossRunNarrative,
   PlatformRunNarrative,
   PlatformRunReportPayload,
   PromptGapAnalysisSection,
@@ -239,6 +240,36 @@ export function transformNarrative(
     recommendations: recommendations.map((item) => ({
       priority: normalizePriority(item.priority),
       area: item.title || item.action,
+      action: item.action,
+      estimatedImpact: item.expectedImpact ?? '',
+    })),
+  };
+}
+
+/**
+ * Cross-run analogue of {@link transformNarrative}: maps the cross-run
+ * narrative's critical patterns and strategic recommendations into the same
+ * {@link NarrativeOutput} shape, so the cross-run report reuses the exact
+ * single-run Summary components (top-issues table + Recommendations) instead
+ * of bespoke stacked blocks.
+ */
+export function transformCrossRunNarrative(
+  narrative: PlatformCrossRunNarrative,
+): NarrativeOutput {
+  return {
+    executiveSummary: narrative.executiveSummary ?? '',
+    topIssues: (narrative.criticalPatterns ?? []).map((item, index) => ({
+      rank: index + 1,
+      area: item.title,
+      description: item.summary,
+      affectedCount: item.affectedRuns ?? 0,
+      exampleThreadId: null,
+    })),
+    exemplarAnalysis: [],
+    promptGaps: [],
+    recommendations: (narrative.strategicRecommendations ?? []).map((item, index) => ({
+      priority: normalizePriority(item.priority, index),
+      area: '',
       action: item.action,
       estimatedImpact: item.expectedImpact ?? '',
     })),
