@@ -7,6 +7,7 @@ import type {
   OrchestrationRunDetail,
   OrchestrationRuns,
   OrchestrationSignals,
+  TrendResponse,
 } from '@/features/orchestration/analytics/types';
 
 const BASE = '/api/orchestration/analytics';
@@ -49,6 +50,10 @@ export function fetchRunDetail(
   return apiRequest<OrchestrationRunDetail>(
     `${BASE}/runs/${encodeURIComponent(runId)}?${q.toString()}`,
   );
+}
+
+export function fetchTrend(params: AnalyticsQueryParams): Promise<TrendResponse> {
+  return apiRequest<TrendResponse>(`${BASE}/trend?${rangeParams(params).toString()}`);
 }
 
 export function fetchSignals(params: {

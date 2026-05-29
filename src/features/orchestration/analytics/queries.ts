@@ -12,6 +12,7 @@ import {
   fetchRunDetail,
   fetchRuns,
   fetchSignals,
+  fetchTrend,
 } from '@/services/api/orchestrationAnalytics';
 import type {
   AnalyticsQueryParams,
@@ -21,6 +22,7 @@ import type {
   OrchestrationRunDetail,
   OrchestrationRuns,
   OrchestrationSignals,
+  TrendResponse,
 } from './types';
 
 const STALE_TIME_MS = 30_000;
@@ -32,8 +34,10 @@ export const analyticsQueryKeys = {
     ['orchestration', 'analytics', 'breakdown', dimension, p.appId, p.scope, p.from ?? null, p.to ?? null] as const,
   runs: (p: AnalyticsQueryParams, page: number, pageSize: number) =>
     ['orchestration', 'analytics', 'runs', p.appId, p.scope, p.from ?? null, p.to ?? null, page, pageSize] as const,
+  trend: (p: AnalyticsQueryParams) =>
+    ['orchestration', 'analytics', 'trend', p.appId, p.scope, p.from ?? null, p.to ?? null] as const,
   runDetail: (runId: string, p: AnalyticsQueryParams, page: number, pageSize: number) =>
-    ['orchestration', 'analytics', 'run', runId, p.scope, page, pageSize] as const,
+    ['orchestration', 'analytics', 'run', runId, p.appId, p.scope, page, pageSize] as const,
   signals: (appId: string, scope: AnalyticsQueryParams['scope']) =>
     ['orchestration', 'analytics', 'signals', appId, scope] as const,
 };
@@ -86,6 +90,16 @@ export function useOrchestrationRunDetail(
       ? analyticsQueryKeys.runDetail(runId as string, params, page, pageSize)
       : (['orchestration', 'analytics', 'run', '__disabled__'] as const),
     queryFn: () => fetchRunDetail(runId as string, { ...params, page, pageSize }),
+    enabled,
+    staleTime: STALE_TIME_MS,
+  });
+}
+
+export function useOrchestrationTrend(params: AnalyticsQueryParams) {
+  const enabled = Boolean(params.appId);
+  return useQuery<TrendResponse>({
+    queryKey: analyticsQueryKeys.trend(params),
+    queryFn: () => fetchTrend(params),
     enabled,
     staleTime: STALE_TIME_MS,
   });

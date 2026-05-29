@@ -106,6 +106,18 @@ export interface OrchestrationRunDetail {
   actionsTotal: number;
 }
 
+export interface TrendPoint {
+  date: string;
+  positive: number;
+  reached: number;
+  noResponse: number;
+  failed: number;
+}
+
+export interface TrendResponse {
+  points: TrendPoint[];
+}
+
 export interface OrchestrationSignal {
   severity: string;
   title: string;
