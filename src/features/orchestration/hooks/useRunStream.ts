@@ -68,6 +68,28 @@ export function useRunStream(runId: string | undefined): void {
       }, delay);
     };
 
+    // Read the token fresh per connect and, on a 401, refresh once and retry
+    // with the new token — mirrors the api client's tryRefreshAndRetry so the
+    // stream never silently degrades to polling on an expired access token.
+    const doFetch = (signal: AbortSignal): Promise<Response> =>
+      fetch(`/api/orchestration/runs/${runId}/stream`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${useAuthStore.getState().accessToken}` },
+        credentials: 'include',
+        signal,
+      });
+
+    const connectWithFreshAuth = async (signal: AbortSignal): Promise<Response | null> => {
+      let resp = await doFetch(signal);
+      if (resp.status === 401) {
+        const refreshed = await useAuthStore.getState().refreshToken();
+        if (cancelled || signal.aborted) return null;
+        if (!refreshed) return resp;
+        resp = await doFetch(signal);
+      }
+      return resp;
+    };
+
     const pump = async () => {
       abort?.abort();
       abort = new AbortController();
@@ -82,13 +104,9 @@ export function useRunStream(runId: string | undefined): void {
         }
         setStreamStatus(reconnectAttempt > 0 ? 'reconnecting' : 'connecting');
 
-        const resp = await fetch(`/api/orchestration/runs/${runId}/stream`, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${token}` },
-          credentials: 'include',
-          signal: abort.signal,
-        });
-        if (!resp.ok || !resp.body) {
+        const resp = await connectWithFreshAuth(abort.signal);
+        if (cancelled || abort.signal.aborted) return;
+        if (!resp || !resp.ok || !resp.body) {
           setStreamStatus('error');
           scheduleReconnect();
           return;
