@@ -116,7 +116,8 @@ describe('WaitConditionEditor', () => {
         onChange={onChange}
       />,
     );
-    expect(screen.getByPlaceholderText('voice.completed')).toBeInTheDocument();
+    // Event name is now a dropdown; the stored value renders on the trigger.
+    expect(screen.getByText('voice.completed')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('recipient_id')).toBeInTheDocument();
     // Timeout now routes through the shared DurationField (amount + unit).
     expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
@@ -134,8 +135,8 @@ describe('WaitConditionEditor', () => {
         onChange={onChange}
       />,
     );
-    // Event fields still render.
-    expect(screen.getByPlaceholderText('voice.completed')).toBeInTheDocument();
+    // Event fields still render; the stored event name shows on the dropdown trigger.
+    expect(screen.getByText('voice.completed')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('recipient_id')).toBeInTheDocument();
     // Timeout field renders via the shared DurationField (defaulted to 24h -> 1 day).
     expect(screen.getByPlaceholderText('amount')).toBeInTheDocument();
@@ -171,7 +172,7 @@ describe('WaitConditionEditor', () => {
     expect('timeout_hours' in next).toBe(false);
   });
 
-  it('editing the event field drops stale duration keys', () => {
+  it('selecting an event drops stale duration keys', () => {
     const onChange = vi.fn();
     render(
       <WaitConditionEditor
@@ -183,12 +184,13 @@ describe('WaitConditionEditor', () => {
           duration_value: 2,
         }}
         onChange={onChange}
+        eventOptions={[{ eventName: 'voice.completed', provider: 'bolna', sourceNodeId: 'v1' }]}
       />,
     );
-    fireEvent.change(screen.getByPlaceholderText('voice.completed'), {
-      target: { value: 'voice.completed' },
-    });
-    const next = onChange.mock.calls[0][0];
+    // Open the dropdown (trigger shows the current 'voice') and pick the option.
+    fireEvent.click(screen.getByText('voice'));
+    fireEvent.click(screen.getByText('voice.completed'));
+    const next = onChange.mock.calls.at(-1)?.[0];
     expect(next.event_name).toBe('voice.completed');
     expect('duration_value' in next).toBe(false);
     expect('until_datetime' in next).toBe(false);
@@ -276,6 +278,41 @@ describe('WaitConditionEditor', () => {
     fireEvent.change(amount, { target: { value: '2' } });
     const next = onChange.mock.calls[0][0];
     expect(next.timeout_hours).toBe(48);
+  });
+
+  it('renders a Combobox of eventOptions (no free-text) for the event name', () => {
+    const onChange = vi.fn();
+    render(
+      <WaitConditionEditor
+        value={{ mode: 'event_or_timeout', event_name: '', timeout_hours: 24 }}
+        onChange={onChange}
+        eventOptions={[
+          { eventName: 'voice.completed', provider: 'bolna', sourceNodeId: 'v1' },
+          { eventName: 'crm.updated', provider: 'lsq', sourceNodeId: 'c1' },
+        ]}
+      />,
+    );
+    // No free-text input for the event name when options are supplied.
+    expect(screen.queryByPlaceholderText('voice.completed')).not.toBeInTheDocument();
+    // The Combobox trigger shows its placeholder; opening it lists the events.
+    fireEvent.click(screen.getByText('Select an event'));
+    expect(screen.getByText('voice.completed')).toBeInTheDocument();
+    expect(screen.getByText('crm.updated')).toBeInTheDocument();
+  });
+
+  it('emits the selected eventName when an event option is chosen', () => {
+    const onChange = vi.fn();
+    render(
+      <WaitConditionEditor
+        value={{ mode: 'event_or_timeout', event_name: '', timeout_hours: 24 }}
+        onChange={onChange}
+        eventOptions={[{ eventName: 'voice.completed', provider: 'bolna', sourceNodeId: 'v1' }]}
+      />,
+    );
+    fireEvent.click(screen.getByText('Select an event'));
+    fireEvent.click(screen.getByText('voice.completed'));
+    const next = onChange.mock.calls.at(-1)?.[0];
+    expect(next.event_name).toBe('voice.completed');
   });
 
   it('shows updated approved copy for event_or_timeout mode', () => {

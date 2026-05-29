@@ -1,7 +1,9 @@
+import { Combobox } from '@/components/ui/Combobox';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { DateTimeField } from '@/components/ui/DateTimeField';
 import { DurationField, type DurationUnit } from '@/components/ui/DurationField';
+import type { UpstreamEvent } from '@/services/api/orchestration';
 import type { PredicateAst, WaitMode } from '@/features/orchestration/types';
 
 import { PredicateBuilder } from './PredicateBuilder';
@@ -25,6 +27,9 @@ interface WaitConfig {
 interface Props {
   value: WaitConfig;
   onChange(next: WaitConfig): void;
+  /** Resumable events surfaced by upstream dispatch producers. When present
+   *  the event-name field is a dropdown (no free-text). */
+  eventOptions?: UpstreamEvent[];
 }
 
 const MODE_OPTIONS: { value: SelectableMode; label: string; help: string }[] = [
@@ -53,7 +58,7 @@ const MODE_OPTIONS: { value: SelectableMode; label: string; help: string }[] = [
  * legacy definitions with `mode==='event'` are steered to `event_or_timeout`
  * in the display layer without silently mutating stored config.
  */
-export function WaitConditionEditor({ value, onChange }: Props) {
+export function WaitConditionEditor({ value, onChange, eventOptions }: Props) {
   // Map legacy pure-event to event_or_timeout for the display layer only.
   const displayMode: SelectableMode =
     value.mode === 'event' || value.mode === 'event_or_timeout'
@@ -88,6 +93,23 @@ export function WaitConditionEditor({ value, onChange }: Props) {
   // For event modes, ensure a default timeout is visible even on legacy pure-event defs
   // so the author can save without blanking out the field (no silent mutation on open).
   const isEventMode = displayMode === 'event_or_timeout';
+
+  // Dedupe events by name (multiple producers may emit the same one); show the
+  // provider as muted context. The stored value is always selectable, so a
+  // legacy hand-set event_name isn't dropped if upstream no longer lists it.
+  const eventNameOptions = (() => {
+    const byName = new Map<string, { value: string; label: string; meta?: string }>();
+    for (const e of eventOptions ?? []) {
+      if (!byName.has(e.eventName)) {
+        byName.set(e.eventName, { value: e.eventName, label: e.eventName, meta: e.provider });
+      }
+    }
+    const current = value.event_name ?? '';
+    if (current && !byName.has(current)) {
+      byName.set(current, { value: current, label: current });
+    }
+    return Array.from(byName.values());
+  })();
 
   return (
     <div className="flex flex-col gap-3">
@@ -131,11 +153,11 @@ export function WaitConditionEditor({ value, onChange }: Props) {
       {isEventMode ? (
         <>
           <Field label="Event to wait for">
-            <Input
-              type="text"
+            <Combobox
               value={value.event_name ?? ''}
-              onChange={(e) => emitForMode('event_or_timeout', { event_name: e.target.value })}
-              placeholder="voice.completed"
+              onChange={(next) => emitForMode('event_or_timeout', { event_name: next })}
+              options={eventNameOptions}
+              placeholder="Select an event"
             />
             <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
               The event that resumes this step — e.g. a call finishing or a CRM update.

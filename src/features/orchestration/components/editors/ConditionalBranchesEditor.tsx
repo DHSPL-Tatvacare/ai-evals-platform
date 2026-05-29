@@ -8,6 +8,7 @@ import {
   InspectorField,
 } from '@/features/orchestration/components/inspector/InspectorPrimitives';
 import { RuleSetBuilder } from '@/features/orchestration/components/editors/RuleSetBuilder';
+import type { UpstreamOutcomeEnum } from '@/services/api/orchestration';
 import type {
   ConditionalBranch,
   PredicateAst,
@@ -22,6 +23,9 @@ interface Props {
   onChange(next: ConditionalConfig): void;
   /** Payload fields available at this node, walked from upstream nodes. */
   fieldOptions?: string[];
+  /** Upstream dispatch outcomes — surfaces the leaf VALUE as a canonical
+   *  outcome dropdown. Stores canonical, shows the provider label as context. */
+  outcomeOptions?: UpstreamOutcomeEnum[];
 }
 
 let _branchIdCounter = 0;
@@ -47,6 +51,7 @@ export function ConditionalBranchesEditor({
   value,
   onChange,
   fieldOptions,
+  outcomeOptions,
 }: Props) {
   const branches = useMemo(() => value.branches ?? [], [value.branches]);
 
@@ -115,6 +120,7 @@ export function ConditionalBranchesEditor({
               value={branch.predicate}
               onChange={(next) => updateBranch(idx, { predicate: next })}
               fieldOptions={fieldOptions}
+              outcomeOptions={outcomeOptions}
             />
           </InspectorField>
         </div>

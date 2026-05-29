@@ -76,6 +76,8 @@ export function NodeConfigPanel() {
     () => (upstreamData?.fields ?? []).map((f) => f.path),
     [upstreamData],
   );
+  const upstreamEvents = upstreamData?.events ?? [];
+  const upstreamOutcomes = upstreamData?.outcomeEnums ?? [];
 
   const editorHints = desc?.editorHints;
   const hiddenFields = useMemo<ReadonlySet<string> | undefined>(() => {
@@ -177,6 +179,7 @@ export function NodeConfigPanel() {
         <WaitConditionEditor
           value={config as Parameters<typeof WaitConditionEditor>[0]['value']}
           onChange={(next) => setConfig({ ...config, ...next })}
+          eventOptions={upstreamEvents}
         />
       ) : (
         <RuleSetBuilder
@@ -193,6 +196,7 @@ export function NodeConfigPanel() {
           value={config as { branches?: ConditionalBranch[] }}
           onChange={(next) => setConfig({ ...config, ...next })}
           fieldOptions={fieldOptions}
+          outcomeOptions={upstreamOutcomes}
         />
       );
       break;
@@ -218,6 +222,7 @@ export function NodeConfigPanel() {
         <WaitConditionEditor
           value={config as Parameters<typeof WaitConditionEditor>[0]['value']}
           onChange={(next) => setConfig({ ...config, ...next })}
+          eventOptions={upstreamEvents}
         />
       );
       break;

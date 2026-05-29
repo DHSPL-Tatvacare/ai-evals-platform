@@ -371,10 +371,30 @@ export interface UpstreamUnresolved {
   reason: string;
 }
 
+/** A resumable event name a downstream `logic.wait` can gate on, tagged with
+ *  the producing node + the wired provider that emits it. */
+export interface UpstreamEvent {
+  eventName: string;
+  sourceNodeId: string;
+  provider: string;
+}
+
+/** One outcome a dispatch producer can yield, carrying BOTH the canonical
+ *  value and the wired provider's raw label (answered/bolna_answered). The
+ *  conditional picker stores `canonical` and shows `providerLabel` as context. */
+export interface UpstreamOutcomeEnum {
+  canonical: string;
+  providerLabel: string;
+  sourceNodeId: string;
+  provider: string;
+}
+
 export interface ResolveUpstreamVariablesResponse {
   fields: UpstreamField[];
   sample: Record<string, unknown>;
   unresolved: UpstreamUnresolved[];
+  events: UpstreamEvent[];
+  outcomeEnums: UpstreamOutcomeEnum[];
 }
 
 export async function resolveUpstreamVariables(body: {

@@ -63,4 +63,43 @@ describe('RuleSetBuilder', () => {
     fireEvent.click(screen.getByText('payload field'));
     expect(screen.getByText('steps.wa.wa_button_id')).toBeInTheDocument();
   });
+
+  it('renders the leaf VALUE as an outcome dropdown (no free-text) when outcomeOptions are provided', () => {
+    const onChange = vi.fn();
+    const value: LeafPredicate = { field: 'outcome', op: 'eq', value: '' };
+    render(
+      <RuleSetBuilder
+        value={value}
+        onChange={onChange}
+        outcomeOptions={[
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+          { canonical: 'no-answer', providerLabel: 'bolna_rnr', sourceNodeId: 'v1', provider: 'bolna' },
+        ]}
+      />,
+    );
+    // The free-text value input is gone in favour of the outcome dropdown.
+    expect(screen.queryByPlaceholderText('value')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Select an outcome'));
+    // Options show "<canonical> · <providerLabel>".
+    expect(screen.getByText('answered · bolna_answered')).toBeInTheDocument();
+    expect(screen.getByText('no-answer · bolna_rnr')).toBeInTheDocument();
+  });
+
+  it('stores the canonical outcome value (not the provider label) when selected', () => {
+    const onChange = vi.fn();
+    const value: LeafPredicate = { field: 'outcome', op: 'eq', value: '' };
+    render(
+      <RuleSetBuilder
+        value={value}
+        onChange={onChange}
+        outcomeOptions={[
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByText('Select an outcome'));
+    fireEvent.click(screen.getByText('answered · bolna_answered'));
+    const next = onChange.mock.calls.at(-1)?.[0] as LeafPredicate;
+    expect(next.value).toBe('answered');
+  });
 });
