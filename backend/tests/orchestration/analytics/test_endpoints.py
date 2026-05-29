@@ -106,6 +106,23 @@ async def test_overview_orchestration_disabled_403(db_session, client):
 
 
 @pytest.mark.asyncio
+async def test_trend_admin_tenant_scope_200(db_session, client):
+    slug = await _seed_app(db_session, enabled=True)
+    _override(db_session, _admin_auth(uuid.uuid4()))
+    r = await client.get(f"/api/orchestration/analytics/trend?appId={slug}&scope=tenant")
+    assert r.status_code == 200, r.text
+    assert "points" in r.json()
+
+
+@pytest.mark.asyncio
+async def test_trend_orchestration_disabled_403(db_session, client):
+    slug = await _seed_app(db_session, enabled=False)
+    _override(db_session, _admin_auth(uuid.uuid4()))
+    r = await client.get(f"/api/orchestration/analytics/trend?appId={slug}&scope=tenant")
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
 async def test_signals_returns_empty_pre_phase3(db_session, client):
     slug = await _seed_app(db_session, enabled=True)
     _override(db_session, _admin_auth(uuid.uuid4()))

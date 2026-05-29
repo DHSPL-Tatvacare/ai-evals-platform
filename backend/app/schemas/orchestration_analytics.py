@@ -21,6 +21,7 @@ class OverviewResponse(CamelModel):
     in_flight: int
     spend: float
     in_flight_runs: int
+    cohort_total: int
 
 
 class BreakdownRowResponse(CamelModel):
@@ -107,6 +108,18 @@ class RunDetailResponse(CamelModel):
     node_steps: list[RunNodeStepResponse]
     actions: list[RunActionResponse]
     actions_total: int
+
+
+class TrendPointResponse(CamelModel):
+    date: datetime
+    positive: int
+    reached: int
+    no_response: int
+    failed: int
+
+
+class TrendResponse(CamelModel):
+    points: list[TrendPointResponse]
 
 
 class SignalResponse(CamelModel):

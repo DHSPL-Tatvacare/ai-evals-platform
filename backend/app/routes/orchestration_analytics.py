@@ -29,6 +29,8 @@ from app.schemas.orchestration_analytics import (
     RunsResponse,
     SignalResponse,
     SignalsResponse,
+    TrendPointResponse,
+    TrendResponse,
 )
 from app.services.orchestration.analytics import read_service
 from app.services.orchestration.analytics.scope import (
@@ -56,11 +58,16 @@ def _parse_window(
             if date_from
             else now - timedelta(days=_DEFAULT_RANGE_DAYS)
         )
-        end = (
-            datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc)
-            if date_to
-            else now
-        )
+        if date_to:
+            parsed_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc)
+            # Date-only "to" parses to midnight; advance to the next midnight so the
+            # exclusive upper bound covers the whole final day (today included).
+            if parsed_to.timetz() == datetime.min.time().replace(tzinfo=timezone.utc):
+                end = parsed_to + timedelta(days=1)
+            else:
+                end = parsed_to
+        else:
+            end = now
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid date range: {exc}")
     if end < start:
@@ -75,8 +82,9 @@ def _resolve_scope(auth: AuthContext, scope: str):
         raise HTTPException(status_code=403, detail=str(exc))
 
 
-def _avg_cost(cost: float, dispatched: int) -> float:
-    return round(cost / dispatched, 6) if dispatched else 0.0
+def _avg_cost(cost: float, cost_rows: int) -> float:
+    """Cost per request divides by cost-bearing rows; cost lives on terminal rows, not dispatch rows."""
+    return round(cost / cost_rows, 6) if cost_rows else 0.0
 
 
 @router.get("/overview", response_model=OverviewResponse)
@@ -100,6 +108,7 @@ async def get_overview(
         unique_contacts=result.unique_contacts, positive=result.positive,
         reached=result.reached, no_response=result.no_response, failed=result.failed,
         in_flight=result.in_flight, spend=result.spend, in_flight_runs=result.in_flight_runs,
+        cohort_total=result.cohort_total,
     )
 
 
@@ -130,9 +139,36 @@ async def get_breakdown(
                 recipients=r.recipients, dispatched=r.dispatched,
                 positive=r.positive, reached=r.reached, no_response=r.no_response,
                 failed=r.failed, in_flight=r.in_flight,
-                avg_cost=_avg_cost(r.cost, r.dispatched), cost=r.cost,
+                avg_cost=_avg_cost(r.cost, r.cost_rows), cost=r.cost,
             )
             for r in rows
+        ],
+    )
+
+
+@router.get("/trend", response_model=TrendResponse)
+async def get_trend(
+    app_id: str = Query(..., alias="appId"),
+    scope: str = Query("mine"),
+    date_from: Optional[str] = Query(None, alias="from"),
+    date_to: Optional[str] = Query(None, alias="to"),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = require_permission("orchestration:manage"),
+) -> TrendResponse:
+    await ensure_orchestration_enabled(db, app_id)
+    scope_clause = _resolve_scope(auth, scope)
+    start, end = _parse_window(date_from, date_to)
+    points = await read_service.trend(
+        db, tenant_id=auth.tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=start, date_to=end,
+    )
+    return TrendResponse(
+        points=[
+            TrendPointResponse(
+                date=p.date, positive=p.positive, reached=p.reached,
+                no_response=p.no_response, failed=p.failed,
+            )
+            for p in points
         ],
     )
 

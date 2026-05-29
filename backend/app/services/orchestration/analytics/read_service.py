@@ -24,6 +24,7 @@ from app.models.orchestration import (
     WorkflowVersion,
 )
 from app.models.provider_connection import ProviderConnection
+from app.services.orchestration.adapters import registered_adapter_instances
 from app.services.orchestration.analytics.outcomes import EngagementBucket
 
 
@@ -52,11 +53,42 @@ _BUCKET_RANK = {
 _RANK_TO_BUCKET = {rank: value for value, rank in _BUCKET_RANK.items()}
 
 
+def _action_type_to_bucket_map() -> dict[str, str]:
+    """Merged action_type -> bucket value, assembled from the adapter registry.
+
+    Recovers pre-column child rows whose outcome_bucket is NULL by re-deriving the
+    bucket from action_type — vendor maps live in the adapters, never inline here.
+    """
+    merged: dict[str, str] = {}
+    for adapter in registered_adapter_instances():
+        for action_type, bucket in getattr(adapter, "ACTION_OUTCOME_MAP", {}).items():
+            merged[action_type] = bucket.value
+    return merged
+
+
+def _derived_bucket_expr():
+    """outcome_bucket, falling back to the action_type-derived bucket when NULL."""
+    mapping = _action_type_to_bucket_map()
+    if not mapping:
+        return WorkflowRunRecipientAction.outcome_bucket
+    return func.coalesce(
+        WorkflowRunRecipientAction.outcome_bucket,
+        case(
+            *[
+                (WorkflowRunRecipientAction.action_type == k, literal(v))
+                for k, v in mapping.items()
+            ],
+            else_=None,
+        ),
+    )
+
+
 def _bucket_rank_expr():
-    """Map a row's outcome_bucket to its rank; null buckets rank 0 (ignored)."""
+    """Map a row's derived bucket to its rank; null buckets rank 0 (ignored)."""
+    derived = _derived_bucket_expr()
     return case(
         *[
-            (WorkflowRunRecipientAction.outcome_bucket == value, literal(rank))
+            (derived == value, literal(rank))
             for value, rank in _BUCKET_RANK.items()
         ],
         else_=literal(0),
@@ -120,7 +152,7 @@ def _scope_filters(stmt, *, tenant_id, app_id, scope_clause, date_from, date_to)
     if date_from is not None:
         stmt = stmt.where(WorkflowRun.started_at >= date_from)
     if date_to is not None:
-        stmt = stmt.where(WorkflowRun.started_at <= date_to)
+        stmt = stmt.where(WorkflowRun.started_at < date_to)
     return stmt
 
 
@@ -137,6 +169,7 @@ class OverviewResult:
     in_flight: int
     spend: float
     in_flight_runs: int
+    cohort_total: int
 
 
 async def overview(
@@ -185,15 +218,33 @@ async def overview(
     ).select_from(collapsed)
     brow = (await db.execute(bucket_stmt)).one()
 
-    in_flight_stmt = select(
-        func.count(distinct(WorkflowRun.id))
+    # In-flight is a status snapshot, not a windowed metric: running/just-started
+    # runs have started_at IS NULL and would drop out of any started_at predicate.
+    in_flight_stmt = select(func.count(distinct(WorkflowRun.id)))
+    in_flight_stmt = _base_join(in_flight_stmt).where(
+        WorkflowRunRecipientAction.tenant_id == tenant_id,
+        WorkflowRunRecipientAction.app_id == app_id,
+        scope_clause,
+        WorkflowRun.status.in_(("running", "waiting", "pending")),
     )
-    in_flight_stmt = _base_join(in_flight_stmt)
-    in_flight_stmt = _scope_filters(
-        in_flight_stmt, tenant_id=tenant_id, app_id=app_id,
-        scope_clause=scope_clause, date_from=date_from, date_to=date_to,
-    ).where(WorkflowRun.status.in_(("running", "waiting", "pending")))
     in_flight_runs = (await db.execute(in_flight_stmt)).scalar() or 0
+
+    # True cohort top of funnel: sum cohort_size_at_entry once per scoped+windowed
+    # run, so opted-out / never-dispatched recipients (no action rows) stay visible.
+    cohort_stmt = select(
+        func.coalesce(func.sum(WorkflowRun.cohort_size_at_entry), 0)
+    ).select_from(WorkflowRun).join(
+        Workflow, WorkflowRun.workflow_id == Workflow.id
+    ).where(
+        WorkflowRun.tenant_id == tenant_id,
+        WorkflowRun.app_id == app_id,
+        scope_clause,
+    )
+    if date_from is not None:
+        cohort_stmt = cohort_stmt.where(WorkflowRun.started_at >= date_from)
+    if date_to is not None:
+        cohort_stmt = cohort_stmt.where(WorkflowRun.started_at < date_to)
+    cohort_total = (await db.execute(cohort_stmt)).scalar() or 0
 
     return OverviewResult(
         campaigns=int(row[0] or 0),
@@ -207,6 +258,7 @@ async def overview(
         in_flight=int(brow[4] or 0),
         spend=float(row[4] or 0),
         in_flight_runs=int(in_flight_runs),
+        cohort_total=int(cohort_total),
     )
 
 
@@ -226,6 +278,7 @@ class BreakdownRow:
     failed: int
     in_flight: int
     cost: float
+    cost_rows: int
 
 
 _DISPATCH_NODE_TYPES = ("voice.place_call", "messaging.send_whatsapp_template", "core.webhook_out")
@@ -247,6 +300,19 @@ def _dispatched_count():
     return func.coalesce(
         func.sum(
             case((WorkflowRunRecipientAction.parent_action_id.is_(None), 1), else_=0)
+        ),
+        0,
+    )
+
+
+def _cost_rows_count():
+    """Rows carrying a cost — the denominator for cost-per-request, since cost lives on terminal rows."""
+    return func.coalesce(
+        func.sum(
+            case(
+                (WorkflowRunRecipientAction.response["total_cost"].astext.isnot(None), 1),
+                else_=0,
+            )
         ),
         0,
     )
@@ -280,7 +346,8 @@ async def breakdown(
 
     # Row-level aggregate: recipients (distinct), dispatched (parent rows), cost.
     stmt = select(
-        group_key, group_label, _recipient_count(), _dispatched_count(), _COST_EXPR
+        group_key, group_label, _recipient_count(), _dispatched_count(),
+        _COST_EXPR, _cost_rows_count(),
     )
     stmt = _base_join(stmt)
     stmt = _scope_filters(
@@ -316,7 +383,7 @@ async def breakdown(
             key=str(r[0]), label=str(r[1]), provider=None,
             recipients=int(r[2] or 0), dispatched=int(r[3] or 0),
             positive=pos, reached=rch, no_response=nr, failed=fail,
-            in_flight=infl, cost=float(r[4] or 0),
+            in_flight=infl, cost=float(r[4] or 0), cost_rows=int(r[5] or 0),
         ))
     return out
 
@@ -343,6 +410,7 @@ async def _connection_breakdown(
         _recipient_count(),
         _dispatched_count(),
         _COST_EXPR,
+        _cost_rows_count(),
     )
     stmt = stmt.select_from(WorkflowRunRecipientAction).join(
         WorkflowRunNodeStep,
@@ -434,7 +502,7 @@ async def _connection_breakdown(
         conn_id = node_to_conn.get((r[0], r[1]))
         key = conn_id or "unmapped"
         pos, rch, nr, fail, infl = node_buckets.get((r[0], r[1]), (0, 0, 0, 0, 0))
-        bucket = acc.setdefault(key, [0, 0, 0, 0, 0, 0, 0.0])
+        bucket = acc.setdefault(key, [0, 0, 0, 0, 0, 0, 0.0, 0])
         bucket[0] += int(r[2] or 0)  # recipients
         bucket[1] += int(r[3] or 0)  # dispatched
         bucket[2] += pos
@@ -442,6 +510,7 @@ async def _connection_breakdown(
         bucket[4] += nr
         bucket[5] += fail
         bucket[6] += float(r[4] or 0)  # cost
+        bucket[7] += int(r[5] or 0)  # cost-bearing rows
 
     out: list[BreakdownRow] = []
     for key, b in acc.items():
@@ -451,7 +520,7 @@ async def _connection_breakdown(
             label=name or ("Unmapped connection" if key == "unmapped" else key),
             provider=provider,
             recipients=b[0], dispatched=b[1], positive=b[2], reached=b[3],
-            no_response=b[4], failed=b[5], in_flight=0, cost=b[6],
+            no_response=b[4], failed=b[5], in_flight=0, cost=b[6], cost_rows=b[7],
         ))
     return out
 
@@ -562,7 +631,7 @@ async def runs(
     if date_from is not None:
         base = base.where(WorkflowRun.started_at >= date_from)
     if date_to is not None:
-        base = base.where(WorkflowRun.started_at <= date_to)
+        base = base.where(WorkflowRun.started_at < date_to)
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -583,6 +652,52 @@ async def runs(
         page=page,
         page_size=page_size,
     )
+
+
+# ── Trend ────────────────────────────────────────────────────────────
+
+
+@dataclass
+class TrendPoint:
+    date: datetime
+    positive: int
+    reached: int
+    no_response: int
+    failed: int
+
+
+async def trend(
+    db: AsyncSession,
+    *,
+    tenant_id,
+    app_id: str,
+    scope_clause,
+    date_from: Optional[datetime],
+    date_to: Optional[datetime],
+) -> list[TrendPoint]:
+    """Per-day bucket counts; each recipient counted once by its most-advanced outcome."""
+    day_col = func.date_trunc("day", WorkflowRun.started_at).label("day")
+    collapsed = _collapsed_recipient_subquery(
+        tenant_id=tenant_id, app_id=app_id, scope_clause=scope_clause,
+        date_from=date_from, date_to=date_to,
+        extra_group_cols=(day_col,),
+    )
+    rep = _rep_bucket_from_rank(collapsed.c.max_rank)
+    stmt = select(
+        collapsed.c.day,
+        _collapsed_bucket_count(rep, EngagementBucket.positive),
+        _collapsed_bucket_count(rep, EngagementBucket.reached),
+        _collapsed_bucket_count(rep, EngagementBucket.no_response),
+        _collapsed_bucket_count(rep, EngagementBucket.failed),
+    ).select_from(collapsed).group_by(collapsed.c.day).order_by(collapsed.c.day)
+    rows = (await db.execute(stmt)).all()
+    return [
+        TrendPoint(
+            date=r[0], positive=int(r[1] or 0), reached=int(r[2] or 0),
+            no_response=int(r[3] or 0), failed=int(r[4] or 0),
+        )
+        for r in rows
+    ]
 
 
 # ── Run detail ───────────────────────────────────────────────────────
@@ -745,6 +860,11 @@ async def run_detail(
         except (TypeError, ValueError):
             return None
 
+    bucket_map = _action_type_to_bucket_map()
+
+    def _derived_bucket(a):
+        return a.outcome_bucket or bucket_map.get(a.action_type)
+
     return RunDetailResult(
         run_id=head[0],
         workflow_id=head[1],
@@ -771,7 +891,7 @@ async def run_detail(
             RunActionRow(
                 action_id=a.id, recipient_id=a.recipient_id, channel=a.channel,
                 action_type=a.action_type, status=a.status,
-                outcome_bucket=a.outcome_bucket, contact=(a.payload or {}).get("contact"),
+                outcome_bucket=_derived_bucket(a), contact=(a.payload or {}).get("contact"),
                 cost=_action_cost(a), created_at=a.created_at,
             )
             for a in action_rows

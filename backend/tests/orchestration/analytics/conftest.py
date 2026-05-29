@@ -35,6 +35,8 @@ async def seed_orchestration_run(db_session):
     that persists one child row per lifecycle event.
     """
 
+    _UNSET = object()
+
     async def _make(
         *,
         tenant_id=SYSTEM_TENANT_ID,
@@ -42,11 +44,12 @@ async def seed_orchestration_run(db_session):
         recipients: list[dict],
         workflow_name: str | None = None,
         run_status: str = "completed",
-        started_at: datetime | None = None,
+        started_at: datetime | None = _UNSET,
         definition: dict | None = None,
     ) -> dict:
         now = datetime.now(timezone.utc)
-        started = started_at or now
+        # _UNSET defaults to now; an explicit None seeds a NULL started_at (in-flight).
+        started = now if started_at is _UNSET else started_at
         workflow = Workflow(
             id=_uuid.uuid4(), tenant_id=tenant_id, app_id=app_id,
             workflow_type="crm",
