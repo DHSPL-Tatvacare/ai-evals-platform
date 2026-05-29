@@ -466,6 +466,144 @@ _CONTRACT_META: dict[str, _ContractMeta] = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Producer vocabulary — the resumable EVENT names and canonical↔provider OUTCOME
+# enums a dispatch node contributes to downstream wait / conditional pickers.
+#
+# Derivation dispatches on the RESOLVED adapter and reads that adapter's own
+# canonical<->raw mapping — it never imports one vendor's table and stamps it on
+# a different vendor. Each capability builder is given the resolved adapter
+# instance; per-vendor truth (outcome action_types, canonical mapping, resume
+# events) is read from that instance / its defining module.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class OutcomeEnum(BaseModel):
+    """One canonical outcome and the producing provider's raw label for it."""
+    canonical: str
+    provider_label: str
+
+
+class ProducerVocabulary(BaseModel):
+    """The event names + outcome enums one producer node contributes downstream."""
+    event_names: list[str] = Field(default_factory=list)
+    outcomes: list[OutcomeEnum] = Field(default_factory=list)
+
+
+# Node type → capability, so the resolver can pick the right adapter family.
+_PRODUCER_CAPABILITY: dict[str, str] = {
+    "voice.place_call": "voice",
+    "messaging.send_whatsapp_template": "messaging",
+}
+
+
+def _adapter_supports_inbound(adapter: Any) -> bool:
+    """A producer surfaces outcomes/events only if it can ingest provider inbound.
+
+    Adapter-local probe — an adapter whose ``normalize_webhook`` is a not-yet-
+    implemented stub (e.g. AiSensy) raises ``NotImplementedError`` and therefore
+    produces NONE of the capability's outcomes/events at runtime; it must not
+    surface a fabricated vocabulary to the downstream picker."""
+    try:
+        # Pragmatic probe: an empty payload exercises only the stub-vs-implemented branch.
+        adapter.normalize_webhook({})
+    except NotImplementedError:
+        return False
+    except Exception:  # noqa: BLE001 — a parse error on {} still means inbound is handled
+        return True
+    return True
+
+
+def _voice_vocabulary(vendor: str) -> ProducerVocabulary:
+    import importlib
+
+    from app.services.orchestration.adapters import resolve_adapter
+
+    adapter = resolve_adapter(capability="voice", vendor=vendor)
+    if not _adapter_supports_inbound(adapter):
+        return ProducerVocabulary()
+    # Read canonical mapping + resume events from the RESOLVED adapter's own
+    # module, never a fixed vendor import — derivation stays adapter-local.
+    module = importlib.import_module(type(adapter).__module__)
+    canonical_outcome = module._canonical_outcome
+    resume_event_names = module.voice_resume_event_names
+
+    outcomes: list[OutcomeEnum] = []
+    events: set[str] = set()
+    for action_type in adapter.ACTION_OUTCOME_MAP:
+        canonical = canonical_outcome(action_type)
+        outcomes.append(OutcomeEnum(canonical=canonical, provider_label=action_type))
+        events.update(resume_event_names(canonical))
+    return ProducerVocabulary(event_names=sorted(events), outcomes=outcomes)
+
+
+def _messaging_vocabulary(vendor: str) -> ProducerVocabulary:
+    import importlib
+
+    from app.services.orchestration.adapters import resolve_adapter
+    from app.services.orchestration.adapters.canonical import messaging_resume_event_names
+
+    adapter = resolve_adapter(capability="messaging", vendor=vendor)
+    if not _adapter_supports_inbound(adapter):
+        return ProducerVocabulary()
+    # Read the canonical<-raw outcome mapping from the RESOLVED adapter's own
+    # module, never a fixed vendor import — mirrors the voice path's reuse of
+    # bolna's _canonical_outcome. The adapter owns the pairs; we don't restate them.
+    module = importlib.import_module(type(adapter).__module__)
+    canonical_by_raw = module.canonical_outcome_by_action_type()
+
+    outcomes: list[OutcomeEnum] = []
+    for action_type in sorted(adapter.ACTION_OUTCOME_MAP):
+        canonical = canonical_by_raw.get(action_type, action_type)
+        outcomes.append(OutcomeEnum(canonical=canonical, provider_label=action_type))
+    events = sorted(messaging_resume_event_names())
+    return ProducerVocabulary(event_names=events, outcomes=outcomes)
+
+
+_VOCABULARY_BY_CAPABILITY: dict[str, Any] = {
+    "voice": _voice_vocabulary,
+    "messaging": _messaging_vocabulary,
+}
+
+
+def producer_capability(node_type: str) -> Optional[str]:
+    """Capability a dispatch producer node belongs to, or None for non-producers."""
+    return _PRODUCER_CAPABILITY.get(node_type)
+
+
+def producer_vocabulary(*, node_type: str, vendor: str) -> Optional[ProducerVocabulary]:
+    """Event names + outcome enums a producer node contributes, resolved per vendor."""
+    capability = _PRODUCER_CAPABILITY.get(node_type)
+    if capability is None:
+        return None
+    builder = _VOCABULARY_BY_CAPABILITY.get(capability)
+    if builder is None:
+        return None
+    return builder(vendor)
+
+
+def produced_event_names_for_capability(capability: str) -> set[str]:
+    """Resumable event names a capability's producers can fire, across its
+    registered vendors. The canonical event names are capability-truth and do
+    not vary by vendor, so this needs no DB lookup — the publish-time wait
+    validator scopes the allow-set to the capabilities of the wait's actual
+    upstream producer nodes."""
+    from app.services.orchestration.adapters import registered_adapters
+
+    builder = _VOCABULARY_BY_CAPABILITY.get(capability)
+    if builder is None:
+        return set()
+    names: set[str] = set()
+    for cap, vendor in registered_adapters():
+        if cap != capability:
+            continue
+        try:
+            names.update(builder(vendor).event_names)
+        except Exception:  # noqa: BLE001 — a misconfigured vendor must not crash validation
+            continue
+    return names
+
+
 def _legacy_descriptor(*, node_type: str, workflow_type: str, handler: Any) -> NodeDescriptor:
     """Permissive descriptor for node types not registered in ``_CONTRACT_META``.
 
@@ -614,7 +752,12 @@ __all__ = [
     "RuntimeContract",
     "EditorHints",
     "NodeDescriptor",
+    "OutcomeEnum",
+    "ProducerVocabulary",
     "build_descriptor",
     "has_finalized_contract",
     "all_finalized_node_types",
+    "producer_capability",
+    "producer_vocabulary",
+    "produced_event_names_for_capability",
 ]

@@ -107,10 +107,31 @@ class UpstreamUnresolved(CamelModel):
     reason: str
 
 
+class UpstreamOutcomeEnum(CamelModel):
+    """One outcome a dispatch producer can yield, carrying BOTH the canonical
+    value and the wired provider's raw label (answered/bolna_answered,
+    delivered/wa_delivered). Tagged with the producing node + resolved provider
+    so the downstream conditional picker stores canonical but shows the label."""
+    canonical: str
+    provider_label: str
+    source_node_id: str
+    provider: str
+
+
+class UpstreamEvent(CamelModel):
+    """One resumable event name a logic.wait downstream of the producer can
+    gate on, tagged with the producing node + resolved provider."""
+    event_name: str
+    source_node_id: str
+    provider: str
+
+
 class ResolveUpstreamVariablesResponse(CamelModel):
     fields: list[UpstreamField] = Field(default_factory=list)
     sample: dict[str, Any] = Field(default_factory=dict)
     unresolved: list[UpstreamUnresolved] = Field(default_factory=list)
+    events: list[UpstreamEvent] = Field(default_factory=list)
+    outcome_enums: list[UpstreamOutcomeEnum] = Field(default_factory=list)
 
 
 class LlmExtractDryRunRequest(CamelModel):
@@ -622,6 +643,8 @@ __all__ = [
     "WorkflowDefinition", "WorkflowDefinitionNode", "WorkflowDefinitionEdge",
     "WorkflowCreateRequest", "WorkflowUpdateRequest", "WorkflowResponse",
     "CloneSystemWorkflowRequest",
+    "UpstreamField", "UpstreamUnresolved", "UpstreamEvent", "UpstreamOutcomeEnum",
+    "ResolveUpstreamVariablesRequest", "ResolveUpstreamVariablesResponse",
     "WorkflowDraftSaveRequest", "WorkflowVersionResponse",
     "WorkflowValidateRequest", "WorkflowValidateResponse", "WorkflowValidateIssue",
     "TriggerCreateRequest", "TriggerUpdateRequest", "TriggerResponse",

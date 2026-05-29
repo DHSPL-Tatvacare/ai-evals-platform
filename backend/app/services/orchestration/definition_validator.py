@@ -532,6 +532,30 @@ def validate_definition(
                         field=f"edges.{o}",
                     )
                 )
+            # Publish rejects a wait gated on an event name no UPSTREAM producer
+            # emits — a magic string would silently never fire. The allow-set is
+            # scoped to the capabilities of the wait's actual upstream producer
+            # nodes (reusing each adapter's canonical<->raw maps), so a voice event
+            # cannot pass in a messaging-only branch and vice versa. Draft/runtime
+            # tolerate legacy names. event_name only applies to event-bearing modes.
+            wait_config = n.get("config") or {}
+            if (
+                not is_draft
+                and wait_config.get("mode") in ("event", "event_or_timeout")
+            ):
+                event_name = wait_config.get("event_name")
+                if event_name:
+                    allowed = _upstream_produced_event_names(nid, edges, nodes_by_id)
+                    if event_name not in allowed:
+                        errors.append(
+                            _err(
+                                f"logic.wait {nid!r}: event_name {event_name!r} is not produced "
+                                f"by any upstream step for this workflow — pick a known event "
+                                f"({sorted(allowed)}).",
+                                node_id=nid,
+                                field="config.event_name",
+                            )
+                        )
             # Pure-event wait (no timeout) parks a recipient forever; steer to event_or_timeout at publish.
             if not is_draft and (n.get("config") or {}).get("mode") == "event":
                 errors.append(
@@ -575,6 +599,57 @@ def validate_definition(
 
     if errors:
         raise DefinitionValidationError(errors)
+
+
+def _wait_upstream_node_types(
+    wait_node_id: str,
+    edges: list[dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+) -> set[str]:
+    """Node types reachable upstream of ``wait_node_id`` via incoming edges."""
+    incoming: dict[str, list[str]] = defaultdict(list)
+    for e in edges:
+        s, t = e.get("source"), e.get("target")
+        if s and t:
+            incoming[t].append(s)
+    seen: set[str] = set()
+    types: set[str] = set()
+    stack = list(incoming.get(wait_node_id, []))
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        node = nodes_by_id.get(current)
+        if node and node.get("type"):
+            types.add(node["type"])
+        stack.extend(incoming.get(current, []))
+    return types
+
+
+def _upstream_produced_event_names(
+    wait_node_id: str,
+    edges: list[dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+) -> set[str]:
+    """Publish-time allow-set for a logic.wait event_name: resumable event names
+    of the capabilities of the wait's ACTUAL upstream producer nodes. Reuses the
+    producer vocabulary so the catalog cannot drift from what producers fire, and
+    scopes to the upstream graph so a voice event cannot pass in a messaging-only
+    branch (or vice versa)."""
+    from app.services.orchestration.node_descriptors import (
+        produced_event_names_for_capability,
+        producer_capability,
+    )
+    capabilities: set[str] = set()
+    for node_type in _wait_upstream_node_types(wait_node_id, edges, nodes_by_id):
+        cap = producer_capability(node_type)
+        if cap is not None:
+            capabilities.add(cap)
+    names: set[str] = set()
+    for cap in capabilities:
+        names.update(produced_event_names_for_capability(cap))
+    return names
 
 
 def _registered_pairs(workflow_type: str) -> set[tuple[str, str]]:

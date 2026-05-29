@@ -56,7 +56,7 @@ def test_duplicate_node_id_fails():
     ]
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(_wf(nodes, []), workflow_type="crm")
-    assert any("duplicate node id" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("duplicate node id" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_edge_references_unknown_node_fails():
@@ -64,14 +64,14 @@ def test_edge_references_unknown_node_fails():
     defn["edges"].append({"id": "e2", "source": "ghost", "target": "done", "output_id": "default"})
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("ghost" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_unknown_node_type_fails():
     nodes = [{"id": "x", "type": "not.a.real.type", "position": {"x": 0, "y": 0}, "data": {}, "config": {}}]
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(_wf(nodes, []), workflow_type="crm")
-    assert any("not.a.real.type" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("not.a.real.type" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_invalid_node_config_fails():
@@ -136,7 +136,7 @@ def test_invalid_filter_predicate_contract_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("does not accept a value" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("does not accept a value" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_split_rejects_stale_random_fields_in_by_field_mode():
@@ -163,7 +163,7 @@ def test_split_rejects_stale_random_fields_in_by_field_mode():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("must not carry random 'weight'" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("must not carry random 'weight'" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_split_rejects_stale_by_field_fields_in_random_mode():
@@ -192,7 +192,7 @@ def test_split_rejects_stale_by_field_fields_in_random_mode():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("'field' is not allowed when mode='random'" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("'field' is not allowed when mode='random'" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_invalid_wait_event_match_predicate_fails():
@@ -217,14 +217,14 @@ def test_invalid_wait_event_match_predicate_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("non-empty list value" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("non-empty list value" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_no_ingress_node_fails():
     defn = _wf([_VALID_SINK_NODE], [])
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ingress" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("ingress" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_source_must_have_exactly_one_default_edge():
@@ -257,7 +257,7 @@ def test_sink_with_outgoing_edges_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("must not have outgoing" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("must not have outgoing" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_split_branch_id_stability_required():
@@ -313,7 +313,7 @@ def test_split_routes_unknown_branch_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("ghost" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def _holdout_split_node():
@@ -345,7 +345,7 @@ def test_holdout_split_without_control_edge_fails_publish():
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
     assert any(
-        it["node_id"] == "split" and "control" in it["message"]
+        it["node_id"] == "split" and "control" in (it["message"] or "")
         for it in exc_info.value.errors
     )
 
@@ -418,7 +418,7 @@ def test_conditional_routes_unknown_branch_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("ghost" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("ghost" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_conditional_default_edge_always_valid():
@@ -477,7 +477,7 @@ def test_wait_duration_mode_with_event_edge_fails():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("event" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("event" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 def test_cycle_detected():
@@ -494,7 +494,7 @@ def test_cycle_detected():
     )
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(defn, workflow_type="crm")
-    assert any("cycle" in e for e in (it["message"] for it in exc_info.value.errors))
+    assert any("cycle" in (it["message"] or "") for it in exc_info.value.errors)
 
 
 # ─── Section 1 / 1b: draft mode validation ─────────────────────────────────
@@ -535,7 +535,7 @@ def test_draft_rejects_fabricated_key():
     }]
     with pytest.raises(DefinitionValidationError) as exc_info:
         validate_definition(_wf(nodes, []), workflow_type="crm", mode="draft")
-    assert any("Extra inputs are not permitted" in e["message"]
+    assert any("Extra inputs are not permitted" in (e["message"] or "")
                for e in exc_info.value.errors)
 
 
@@ -721,6 +721,20 @@ def test_draft_pure_event_wait_does_not_raise_footgun_error():
 
 def test_publish_event_or_timeout_wait_passes():
     """event_or_timeout with a timeout is the sanctioned shape — publish must accept it."""
+    # The wait gates on messaging.replied, so a messaging producer must sit
+    # upstream — the publish allow-set is scoped to the wait's actual upstream
+    # producers (WS3), not a global union of every registered producer.
+    send_node = {
+        "id": "send1",
+        "type": "messaging.send_whatsapp_template",
+        "position": {"x": 0, "y": 50},
+        "data": {},
+        "config": {
+            "connection_id": "11111111-1111-1111-1111-111111111111",
+            "template_name": "welcome",
+            "phone_field": "phone",
+        },
+    }
     wait_node = {
         "id": "wait1",
         "type": "logic.wait",
@@ -728,7 +742,7 @@ def test_publish_event_or_timeout_wait_passes():
         "data": {},
         "config": {
             "mode": "event_or_timeout",
-            "event_name": "contact_replied",
+            "event_name": "messaging.replied",
             "correlation": {"recipient_id_field": "lead_id"},
             "timeout_hours": 48,
         },
@@ -736,9 +750,10 @@ def test_publish_event_or_timeout_wait_passes():
     sink = {**_VALID_SINK_NODE, "id": "done2"}
     sink3 = {**_VALID_SINK_NODE, "id": "done3"}
     defn = _wf(
-        [_VALID_SOURCE_NODE, wait_node, sink, sink3],
+        [_VALID_SOURCE_NODE, send_node, wait_node, sink, sink3],
         [
-            {"id": "e_in",  "source": "src",   "target": "wait1", "output_id": "default"},
+            {"id": "e_in",  "source": "src",   "target": "send1", "output_id": "default"},
+            {"id": "e_snd", "source": "send1", "target": "wait1", "output_id": "success"},
             {"id": "e_evt", "source": "wait1", "target": "done2", "output_id": "event"},
             {"id": "e_to",  "source": "wait1", "target": "done3", "output_id": "timeout"},
         ],

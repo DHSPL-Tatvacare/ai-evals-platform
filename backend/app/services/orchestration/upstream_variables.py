@@ -12,18 +12,25 @@ as ``unresolved``.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.orchestration import CohortDefinitionVersion
+from app.models.provider_connection import ProviderConnection
 from app.schemas.orchestration import (
     ResolveUpstreamVariablesResponse,
+    UpstreamEvent,
     UpstreamField,
+    UpstreamOutcomeEnum,
     UpstreamUnresolved,
     WorkflowDefinitionEdge,
     WorkflowDefinitionNode,
+)
+from app.services.orchestration.node_descriptors import (
+    producer_capability,
+    producer_vocabulary,
 )
 from app.services.orchestration.source_catalog import (
     DatasetSource,
@@ -206,6 +213,84 @@ def _resolve_llm_extract(
         )
 
 
+async def _lookup_connection_provider(
+    db: AsyncSession,
+    *,
+    connection_id_raw: Any,
+    tenant_id: uuid.UUID,
+    app_id: str,
+) -> Optional[tuple[str, bool]]:
+    """Read-only, tenant+app-scoped vendor lookup for a producer's connection_id.
+
+    Mirrors the resolver's cross-tenant 404 contract: a connection that does not
+    exist for this tenant+app raises ``UpstreamSourceNotFound``. A missing/blank
+    id yields ``None`` (the node is unconfigured — surface nothing rather than
+    guess a provider). Returns ``(provider, active)`` for an existing row so a
+    deactivated connection is reported, not silently skipped."""
+    if connection_id_raw in (None, ""):
+        return None
+    try:
+        connection_id = uuid.UUID(str(connection_id_raw))
+    except (ValueError, TypeError):
+        return None
+    row = (
+        await db.execute(
+            select(ProviderConnection.provider, ProviderConnection.active).where(
+                ProviderConnection.id == connection_id,
+                ProviderConnection.tenant_id == tenant_id,
+                ProviderConnection.app_id == app_id,
+            )
+        )
+    ).first()
+    if row is None:
+        raise UpstreamSourceNotFound(
+            f"connection not found or not owned by tenant: {connection_id}"
+        )
+    return row[0], bool(row[1])
+
+
+async def _resolve_producer(
+    db: AsyncSession,
+    node: WorkflowDefinitionNode,
+    *,
+    tenant_id: uuid.UUID,
+    app_id: str,
+    add_event: Callable[[UpstreamEvent], None],
+    add_outcome: Callable[[UpstreamOutcomeEnum], None],
+    add_unresolved: Callable[[UpstreamUnresolved], None],
+) -> None:
+    resolved = await _lookup_connection_provider(
+        db,
+        connection_id_raw=node.config.get("connection_id"),
+        tenant_id=tenant_id,
+        app_id=app_id,
+    )
+    if resolved is None:
+        return
+    provider, active = resolved
+    if not active:
+        add_unresolved(UpstreamUnresolved(
+            node_id=node.id,
+            label=node.data.get("label") or node.type,
+            reason="The connected provider is deactivated — its outcomes and events are unavailable until it is re-enabled.",
+        ))
+        return
+    vocab = producer_vocabulary(node_type=node.type, vendor=provider)
+    if vocab is None:
+        return
+    for event_name in vocab.event_names:
+        add_event(UpstreamEvent(
+            event_name=event_name, source_node_id=node.id, provider=provider,
+        ))
+    for outcome in vocab.outcomes:
+        add_outcome(UpstreamOutcomeEnum(
+            canonical=outcome.canonical,
+            provider_label=outcome.provider_label,
+            source_node_id=node.id,
+            provider=provider,
+        ))
+
+
 async def resolve_upstream_variables(
     db: AsyncSession,
     *,
@@ -216,10 +301,15 @@ async def resolve_upstream_variables(
     edges: list[WorkflowDefinitionEdge],
     target_node_id: str,
 ) -> ResolveUpstreamVariablesResponse:
+    # workflow_type is a stable request-contract field; resume events are
+    # capability-truth (not workflow_type-scoped), so resolution does not branch on it.
+    _ = workflow_type
     node_by_id = {n.id: n for n in nodes}
     fields: list[UpstreamField] = []
     sample: dict[str, Any] = {}
     unresolved: list[UpstreamUnresolved] = []
+    events: list[UpstreamEvent] = []
+    outcome_enums: list[UpstreamOutcomeEnum] = []
     seen_paths: set[str] = set()
 
     def _add(field: UpstreamField, value: Any) -> None:
@@ -256,7 +346,14 @@ async def resolve_upstream_variables(
                     ),
                     None,
                 )
+        if producer_capability(node.type) is not None:
+            await _resolve_producer(
+                db, node, tenant_id=tenant_id, app_id=app_id,
+                add_event=events.append, add_outcome=outcome_enums.append,
+                add_unresolved=unresolved.append,
+            )
 
     return ResolveUpstreamVariablesResponse(
         fields=fields, sample=sample, unresolved=unresolved,
+        events=events, outcome_enums=outcome_enums,
     )
