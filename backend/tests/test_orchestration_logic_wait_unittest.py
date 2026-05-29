@@ -119,9 +119,11 @@ async def test_runtime_past_until_datetime_wakes_immediately(monkeypatch):
 
     monkeypatch.setattr(resume_enqueue, "enqueue_resume_for_recipient", _noop_enqueue)
 
+    # Construct with NO context — exactly how the runtime engine builds it
+    # (traversal.py / event_resume.py / run_handler.py). Must not raise on a
+    # past instant; the publish guard is scoped to context mode='publish' only.
     cfg = _Config.model_validate(
         {"mode": "until_datetime", "until_datetime": _past_iso()},
-        context={"mode": "draft"},
     )
     from app.services.orchestration.nodes.logic_wait import _Handler
 
