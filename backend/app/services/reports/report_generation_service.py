@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +28,7 @@ from app.services.reports.contracts.run_report import PlatformRunReportPayload
 from app.services.reports.data_quality_finalizer import finalize_data_quality
 from app.services.reports.document_composer import compose_document
 from app.services.reports.narrative_executor import execute_narrative_generation
-from app.services.reports.report_composer import compose_cross_run_report, compose_run_report
+from app.services.reports.report_composer import compose_report
 from app.services.reports.report_config_resolver import resolve_report_config
 from app.services.reports.report_run_store import ensure_report_run, persist_report_artifact
 from app.services.reports.analytics_profiles.registry import get_analytics_profile
@@ -226,7 +227,236 @@ async def _create_logging_llm(
     return llm, effective_provider, effective_model
 
 
-async def _compose_single_run_payload(
+@dataclass(frozen=True)
+class ReportScopeSpec:
+    """Declarative record for one report scope (single_run / cross_run).
+
+    Collapses the two orchestration paths onto a single engine
+    (``compose_report_payload``). Captures everything that differs between
+    scopes: how the base payload is built, which configured-section set the
+    finalizer + presentation use, the narrative ``report_kind``, and the
+    export-document title/subtitle/metadata builder.
+    """
+
+    scope: str
+    narrative_kind: str
+    # analytics_config -> the per-scope AnalyticsCompositionConfig (sections/export/theme).
+    composition: Callable[[Any], Any]
+    # (scope_args) -> base canonical payload (live single-run builder OR cross-run aggregate).
+    build_base_payload: Callable[..., Awaitable[Any]]
+    # (metadata, app_id) -> (title, subtitle, doc_metadata) for compose_document.
+    export_meta: Callable[[Any, str], tuple[str, str | None, dict[str, str | None]]]
+
+
+def _single_run_export_meta(
+    metadata, app_id: str,
+) -> tuple[str, str | None, dict[str, str | None]]:
+    return (
+        metadata.run_name or 'Evaluation Report',
+        f'{app_id} single-run report',
+        {
+            'Run ID': metadata.run_id,
+            'Eval Type': metadata.eval_type,
+            'Created': metadata.created_at,
+            'Model': metadata.llm_model,
+        },
+    )
+
+
+def _cross_run_export_meta(
+    metadata, app_id: str,
+) -> tuple[str, str | None, dict[str, str | None]]:
+    return (
+        f'{app_id} cross-run report',
+        'Cross-run report',
+        {
+            'App': app_id,
+            'Computed': metadata.computed_at,
+        },
+    )
+
+
+async def compose_report_payload(
+    scope_spec: ReportScopeSpec,
+    *,
+    db,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    base_payload,
+    analytics_config,
+    report_config,
+    report_run: ReportGenerationRun,
+    llm_provider: str | None,
+    llm_model: str | None,
+    run_provider: str | None = None,
+    run_model: str | None = None,
+):
+    """Scope-agnostic composition engine shared by single-run and cross-run.
+
+    Given a ``base_payload`` (built by the scope's ``build_base_payload``), runs
+    narrative via ``execute_narrative_generation(report_kind=...)``, composes the
+    canonical payload via the unified ``compose_report``, runs
+    ``finalize_data_quality``, and stamps ``narrative_status``. Returns
+    ``(payload, effective_provider, effective_model, narrative_status)``.
+    """
+    composition = scope_spec.composition(analytics_config)
+    metadata = base_payload.metadata
+    section_payloads = _serialize_section_payloads(base_payload.sections)
+    # Phase 2 — services populate data_quality.missing_inputs in _build_payload;
+    # the finalizer below owns section_status + overall. Cross-run base payloads
+    # carry no data_quality field of their own — default to empty.
+    service_missing_inputs = list(getattr(base_payload, 'data_quality', None).missing_inputs) \
+        if getattr(base_payload, 'data_quality', None) is not None else []
+
+    effective_provider = llm_provider
+    effective_model = llm_model
+    # narrative_status default: 'disabled' if config flag is off; updated in the
+    # branches below. The dead service-level try/except blocks at
+    # inside_sales_report_service.py:84 / report_service.py:119 are NOT on this
+    # path — narrative now runs via the generic execute_narrative_generation
+    # call below. See plan G6.
+    narrative_status: str = 'disabled'
+
+    narrative_config = NarrativeConfig.model_validate(report_config.narrative_config or {})
+    if narrative_config.enabled:
+        resolved_assets = await resolve_report_config_assets(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            app_id=app_id,
+            asset_keys=narrative_config.asset_keys,
+        )
+        llm, resolved_provider, resolved_model = await _create_logging_llm(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            app_id=app_id,
+            report_id=report_config.report_id,
+            provider_override=llm_provider,
+            model_override=llm_model,
+            run_provider=run_provider,
+            run_model=run_model,
+        )
+        if llm is not None:
+            narrative_payloads = await execute_narrative_generation(
+                llm=llm,
+                report_id=report_config.report_id,
+                report_kind=scope_spec.narrative_kind,
+                metadata=metadata,
+                sections=base_payload.sections,
+                narrative_config={
+                    **report_config.narrative_config,
+                    'resolvedAssets': {
+                        'promptReferences': resolved_assets.prompt_references,
+                        'systemPrompt': resolved_assets.system_prompt,
+                        'glossary': resolved_assets.glossary,
+                    },
+                },
+            )
+            section_payloads.update(narrative_payloads)
+            effective_provider = resolved_provider
+            effective_model = resolved_model
+            metadata = metadata.model_copy(
+                update={
+                    'narrative_model': resolved_model,
+                }
+            )
+            # Single-run metadata also carries the resolved llm provider/model;
+            # cross-run metadata has no such fields (model_copy ignores unknowns
+            # would error, so only set what the model declares).
+            if 'llm_provider' in type(metadata).model_fields:
+                metadata = metadata.model_copy(
+                    update={'llm_provider': resolved_provider, 'llm_model': resolved_model},
+                )
+            narrative_status = 'completed'
+        else:
+            # _create_logging_llm returned (None, None, None) — no provider/model
+            # resolved. The job still ships an artifact, but narrative is empty.
+            narrative_status = 'skipped_no_model'
+
+    presentation_config = PresentationConfig.model_validate(report_config.presentation_config or {})
+    export_config = ExportConfig.model_validate(report_config.export_config or {})
+    presentation_sections = _effective_presentation_sections(
+        presentation_config,
+        composition.sections,
+    )
+
+    # Single-run ships a full presentation (renderer + layout groups); cross-run
+    # leaves it defaulted to match the prior inline behaviour.
+    presentation = None
+    if scope_spec.scope == 'single_run':
+        layout_groups = _effective_layout_groups(presentation_config, presentation_sections)
+        presentation = PlatformReportPresentation(
+            renderer_id=presentation_config.renderer_id or export_config.document_variant or report_config.report_id,
+            layout_groups=layout_groups,
+            density=presentation_config.density,
+            design_tokens=presentation_config.design_tokens,
+            theme_tokens=presentation_config.theme_tokens,
+            sections=presentation_sections,
+        )
+
+    # Stamp narrative_status now so the composed payload carries it.
+    metadata = metadata.model_copy(update={'narrative_status': narrative_status})
+
+    # Build the export document (single-run always; cross-run only when enabled),
+    # then compose the final payload around it.
+    export_document = None
+    if scope_spec.scope == 'single_run' or export_config.enabled:
+        pre_sections = compose_report(
+            scope_spec.scope,
+            metadata=metadata,
+            section_configs=presentation_sections,
+            section_payloads=section_payloads,
+            export_document=compose_document(
+                title='placeholder',
+                subtitle=None,
+                metadata={},
+                sections=[],
+                export_config=export_config,
+                theme_tokens=presentation_config.theme_tokens,
+                composition_theme=composition.theme,
+            ),
+            presentation=presentation,
+        ).sections
+        title, subtitle, doc_metadata = scope_spec.export_meta(metadata, app_id)
+        export_document = compose_document(
+            title=title,
+            subtitle=subtitle,
+            metadata=doc_metadata,
+            sections=pre_sections,
+            export_config=export_config,
+            theme_tokens=presentation_config.theme_tokens,
+            composition_theme=composition.theme,
+        )
+
+    payload = compose_report(
+        scope_spec.scope,
+        metadata=metadata,
+        section_configs=presentation_sections,
+        section_payloads=section_payloads,
+        export_document=export_document,
+        presentation=presentation,
+    )
+    # Phase 2 finalizer — sees all four section-id sets together and is the
+    # single owner of section_status + overall (services contribute only
+    # missing_inputs). See contracts/data_quality.py docstring. Cross-run now
+    # inherits the same finalization the single-run path always had.
+    data_quality = finalize_data_quality(
+        missing_inputs=service_missing_inputs,
+        configured_section_ids=[s.id for s in composition.sections],
+        produced_section_payload_ids=set(section_payloads.keys()),
+        composed_section_ids={s.id for s in payload.sections},
+        exported_section_ids=list(export_config.section_ids or []),
+    )
+    # PlatformCrossRunPayload has no data_quality field; only stamp it where the
+    # contract declares one.
+    if 'data_quality' in type(payload).model_fields:
+        payload = payload.model_copy(update={'data_quality': data_quality})
+    return payload, effective_provider, effective_model, narrative_status
+
+
+async def _build_single_run_base_payload(
     db,
     *,
     tenant_id: uuid.UUID,
@@ -234,16 +464,10 @@ async def _compose_single_run_payload(
     run: EvaluationRun,
     report_run: ReportGenerationRun,
     report_config,
+    analytics_config,
     llm_provider: str | None,
     llm_model: str | None,
 ):
-    app_row = await db.scalar(
-        select(Application).where(
-            Application.slug == run.app_id,
-            Application.is_active == True,
-        )
-    )
-    analytics_config = AppConfigSchema.model_validate(app_row.config or {}).analytics
     profile = get_analytics_profile(analytics_config.profile)
     builder = profile.report_service_cls(db, tenant_id=tenant_id, user_id=user_id)
     base_payload = await builder.build_payload_for_composer(
@@ -258,139 +482,69 @@ async def _compose_single_run_payload(
         'report_name': report_config.name,
         'report_run_id': str(report_run.id),
     })
-    section_payloads = _serialize_section_payloads(base_payload.sections)
-    # Phase 2 — services populate data_quality.missing_inputs in _build_payload;
-    # the finalizer below owns section_status + overall.
-    service_missing_inputs = list(base_payload.data_quality.missing_inputs)
+    return base_payload.model_copy(update={'metadata': metadata})
 
-    # narrative_status default: 'disabled' if config flag is off; updated in the
-    # branches below. The dead service-level try/except blocks at
-    # inside_sales_report_service.py:84 / report_service.py:119 are NOT on this
-    # path — narrative now runs via the generic execute_narrative_generation
-    # call below. See plan G6.
-    narrative_status: str = 'disabled'
 
-    narrative_config = NarrativeConfig.model_validate(report_config.narrative_config or {})
-    if narrative_config.enabled:
-        resolved_assets = await resolve_report_config_assets(
-            db,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            app_id=run.app_id,
-            asset_keys=narrative_config.asset_keys,
+SINGLE_RUN_SCOPE_SPEC = ReportScopeSpec(
+    scope='single_run',
+    narrative_kind='single_run',
+    composition=lambda analytics_config: analytics_config.single_run,
+    build_base_payload=_build_single_run_base_payload,
+    export_meta=_single_run_export_meta,
+)
+
+
+async def _compose_single_run_payload(
+    db,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    run: EvaluationRun,
+    report_run: ReportGenerationRun,
+    report_config,
+    llm_provider: str | None,
+    llm_model: str | None,
+):
+    """Thin single-run wrapper over the shared composition engine.
+
+    Kept as a stable seam: the Phase 5 end-to-end tests drive this signature
+    directly. Builds the live single-run base payload, then delegates to
+    ``compose_report_payload``.
+    """
+    app_row = await db.scalar(
+        select(Application).where(
+            Application.slug == run.app_id,
+            Application.is_active == True,
         )
-        llm, effective_provider, effective_model = await _create_logging_llm(
-            db=db,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            app_id=run.app_id,
-            report_id=report_config.report_id,
-            provider_override=llm_provider,
-            model_override=llm_model,
-            run_provider=run.llm_provider,
-            run_model=run.llm_model,
-        )
-        if llm is not None:
-            narrative_payloads = await execute_narrative_generation(
-                llm=llm,
-                report_id=report_config.report_id,
-                report_kind='single_run',
-                metadata=metadata,
-                sections=base_payload.sections,
-                narrative_config={
-                    **report_config.narrative_config,
-                    'resolvedAssets': {
-                        'promptReferences': resolved_assets.prompt_references,
-                        'systemPrompt': resolved_assets.system_prompt,
-                        'glossary': resolved_assets.glossary,
-                    },
-                },
-            )
-            section_payloads.update(narrative_payloads)
-            metadata = metadata.model_copy(
-                update={
-                    'llm_provider': effective_provider,
-                    'llm_model': effective_model,
-                    'narrative_model': effective_model,
-                }
-            )
-            narrative_status = 'completed'
-        else:
-            # _create_logging_llm returned (None, None, None) — no provider/model
-            # resolved. The job still ships an artifact, but narrative is empty.
-            narrative_status = 'skipped_no_model'
-
-    presentation_config = PresentationConfig.model_validate(report_config.presentation_config or {})
-    export_config = ExportConfig.model_validate(report_config.export_config or {})
-    presentation_sections = _effective_presentation_sections(
-        presentation_config,
-        analytics_config.single_run.sections,
     )
-    layout_groups = _effective_layout_groups(presentation_config, presentation_sections)
-    pre_sections = compose_run_report(
-        metadata=metadata,
-        presentation=PlatformReportPresentation(
-            renderer_id=presentation_config.renderer_id or export_config.document_variant or report_config.report_id,
-            layout_groups=layout_groups,
-            density=presentation_config.density,
-            design_tokens=presentation_config.design_tokens,
-            theme_tokens=presentation_config.theme_tokens,
-            sections=presentation_sections,
-        ),
-        section_configs=presentation_sections,
-        section_payloads=section_payloads,
-        export_document=compose_document(
-            title='placeholder',
-            subtitle=None,
-            metadata={},
-            sections=[],
-            export_config=export_config,
-            theme_tokens=presentation_config.theme_tokens,
-            composition_theme=analytics_config.single_run.theme,
-        ),
-    ).sections
-    export_document = compose_document(
-        title=metadata.run_name or 'Evaluation Report',
-        subtitle=f'{run.app_id} single-run report',
-        metadata={
-            'Run ID': metadata.run_id,
-            'Eval Type': metadata.eval_type,
-            'Created': metadata.created_at,
-            'Model': metadata.llm_model,
-        },
-        sections=pre_sections,
-        export_config=export_config,
-        theme_tokens=presentation_config.theme_tokens,
-        composition_theme=analytics_config.single_run.theme,
+    analytics_config = AppConfigSchema.model_validate(app_row.config or {}).analytics
+    base_payload = await _build_single_run_base_payload(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        run=run,
+        report_run=report_run,
+        report_config=report_config,
+        analytics_config=analytics_config,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
     )
-    # Stamp narrative_status now so the composed payload carries it.
-    metadata = metadata.model_copy(update={'narrative_status': narrative_status})
-    payload = compose_run_report(
-        metadata=metadata,
-        presentation=PlatformReportPresentation(
-            renderer_id=presentation_config.renderer_id or export_config.document_variant or report_config.report_id,
-            layout_groups=layout_groups,
-            density=presentation_config.density,
-            design_tokens=presentation_config.design_tokens,
-            theme_tokens=presentation_config.theme_tokens,
-            sections=presentation_sections,
-        ),
-        section_configs=presentation_sections,
-        section_payloads=section_payloads,
-        export_document=export_document,
+    payload, effective_provider, effective_model, _narrative_status = await compose_report_payload(
+        SINGLE_RUN_SCOPE_SPEC,
+        db=db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=run.app_id,
+        base_payload=base_payload,
+        analytics_config=analytics_config,
+        report_config=report_config,
+        report_run=report_run,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        run_provider=run.llm_provider,
+        run_model=run.llm_model,
     )
-    # Phase 2 finalizer — sees all four section-id sets together and is the
-    # single owner of section_status + overall (services contribute only
-    # missing_inputs). See contracts/data_quality.py docstring.
-    data_quality = finalize_data_quality(
-        missing_inputs=service_missing_inputs,
-        configured_section_ids=[s.id for s in analytics_config.single_run.sections],
-        produced_section_payload_ids=set(section_payloads.keys()),
-        composed_section_ids={s.id for s in payload.sections},
-        exported_section_ids=list(export_config.section_ids or []),
-    )
-    payload = payload.model_copy(update={'data_quality': data_quality})
-    return payload, metadata.llm_provider, metadata.llm_model
+    return payload, effective_provider, effective_model
 
 
 async def _load_latest_single_run_payloads(
@@ -452,6 +606,63 @@ async def _load_latest_single_run_payloads(
         if len(unique_rows) >= limit:
             break
     return unique_rows
+
+
+async def _build_cross_run_base_payload(
+    db,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    app_id: str,
+    analytics_config,
+    limit: int,
+):
+    """Aggregate the latest cached single-run payloads into a cross-run base
+    payload via the profile's ``cross_run_adapter``. Raises the same domain
+    errors the inline cross-run path used to raise."""
+    profile = get_analytics_profile(analytics_config.profile)
+    if profile is None or profile.cross_run_adapter is None:
+        raise ValueError(f'Cross-run reporting is not enabled for app: {app_id}')
+
+    runs_data = await _load_latest_single_run_payloads(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        limit=limit,
+    )
+    if not runs_data:
+        raise ValueError('No completed runs with generated reports found.')
+
+    valid_rows, invalid_cached_reports = partition_valid_single_run_payloads(
+        runs_data,
+        PlatformRunReportPayload,
+    )
+    if not valid_rows:
+        if invalid_cached_reports:
+            raise ValueError('Cached reports are outdated. Regenerate single-run reports before refreshing cross-run analytics.')
+        raise ValueError('No completed runs with generated reports found.')
+
+    total_runs_available = len(valid_rows)
+    base_payload = profile.cross_run_adapter.aggregate(
+        valid_rows,
+        total_runs_available,
+        analytics_config=analytics_config,
+        app_id=app_id,
+    )
+    metadata = base_payload.metadata.model_copy(
+        update={'computed_at': datetime.now(timezone.utc).isoformat()}
+    )
+    return base_payload.model_copy(update={'metadata': metadata})
+
+
+CROSS_RUN_SCOPE_SPEC = ReportScopeSpec(
+    scope='cross_run',
+    narrative_kind='cross_run',
+    composition=lambda analytics_config: analytics_config.cross_run,
+    build_base_payload=_build_cross_run_base_payload,
+    export_meta=_cross_run_export_meta,
+)
 
 
 async def generate_single_run_report_artifact(
@@ -558,9 +769,6 @@ async def generate_cross_run_report_artifact(
                 raise ValueError(f'App not found: {app_id}')
 
             analytics_config = AppConfigSchema.model_validate(app_row.config or {}).analytics
-            profile = get_analytics_profile(analytics_config.profile)
-            if profile is None or profile.cross_run_adapter is None:
-                raise ValueError(f'Cross-run reporting is not enabled for app: {app_id}')
 
             report_config = await resolve_report_config(
                 db,
@@ -582,102 +790,34 @@ async def generate_cross_run_report_artifact(
                 llm_model=params.get('model'),
             )
 
-            runs_data = await _load_latest_single_run_payloads(
+            base_payload = await _build_cross_run_base_payload(
                 db,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 app_id=app_id,
+                analytics_config=analytics_config,
                 limit=limit,
             )
-            if not runs_data:
-                raise ValueError('No completed runs with generated reports found.')
 
-            valid_rows, invalid_cached_reports = partition_valid_single_run_payloads(
-                runs_data,
-                PlatformRunReportPayload,
-            )
-            if not valid_rows:
-                if invalid_cached_reports:
-                    raise ValueError('Cached reports are outdated. Regenerate single-run reports before refreshing cross-run analytics.')
-                raise ValueError('No completed runs with generated reports found.')
-
-            total_runs_available = len(valid_rows)
-            base_payload = profile.cross_run_adapter.aggregate(
-                valid_rows,
-                total_runs_available,
-                analytics_config=analytics_config,
+            # Shared engine: cross-run now inherits finalize_data_quality +
+            # narrative_status stamping, with no run_provider/run_model fallback.
+            payload, effective_provider, effective_model, _narrative_status = await compose_report_payload(
+                CROSS_RUN_SCOPE_SPEC,
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
                 app_id=app_id,
+                base_payload=base_payload,
+                analytics_config=analytics_config,
+                report_config=report_config,
+                report_run=report_run,
+                llm_provider=params.get('provider'),
+                llm_model=params.get('model'),
+                run_provider=None,
+                run_model=None,
             )
-            metadata = base_payload.metadata.model_copy(update={'computed_at': datetime.now(timezone.utc).isoformat()})
-            section_payloads = _serialize_section_payloads(base_payload.sections)
-            narrative_config = NarrativeConfig.model_validate(report_config.narrative_config or {})
-            if narrative_config.enabled:
-                resolved_assets = await resolve_report_config_assets(
-                    db,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    app_id=app_id,
-                    asset_keys=narrative_config.asset_keys,
-                )
-                llm, effective_provider, effective_model = await _create_logging_llm(
-                    db=db,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    app_id=app_id,
-                    report_id=report_config.report_id,
-                    provider_override=params.get('provider'),
-                    model_override=params.get('model'),
-                )
-                if llm is not None:
-                    section_payloads.update(
-                        await execute_narrative_generation(
-                            llm=llm,
-                            report_id=report_config.report_id,
-                            report_kind='cross_run',
-                            metadata=metadata,
-                            sections=base_payload.sections,
-                            narrative_config={
-                                **report_config.narrative_config,
-                                'resolvedAssets': {
-                                    'promptReferences': resolved_assets.prompt_references,
-                                    'systemPrompt': resolved_assets.system_prompt,
-                                    'glossary': resolved_assets.glossary,
-                                },
-                            },
-                        )
-                    )
-                    metadata = metadata.model_copy(update={'cache_key': metadata.cache_key, 'computed_at': metadata.computed_at})
-                    report_run.llm_provider = effective_provider
-                    report_run.llm_model = effective_model
-
-            presentation_config = PresentationConfig.model_validate(report_config.presentation_config or {})
-            export_config = ExportConfig.model_validate(report_config.export_config or {})
-            export_document = None
-            if export_config.enabled:
-                pre_sections = compose_cross_run_report(
-                    metadata=metadata,
-                    section_configs=_effective_presentation_sections(presentation_config, analytics_config.cross_run.sections),
-                    section_payloads=section_payloads,
-                    export_document=None,
-                ).sections
-                export_document = compose_document(
-                    title=f'{app_id} cross-run report',
-                    subtitle='Cross-run report',
-                    metadata={
-                        'App': app_id,
-                        'Computed': metadata.computed_at,
-                    },
-                    sections=pre_sections,
-                    export_config=export_config,
-                    theme_tokens=presentation_config.theme_tokens,
-                    composition_theme=analytics_config.cross_run.theme,
-                )
-            payload = compose_cross_run_report(
-                metadata=metadata,
-                section_configs=_effective_presentation_sections(presentation_config, analytics_config.cross_run.sections),
-                section_payloads=section_payloads,
-                export_document=export_document,
-            )
+            report_run.llm_provider = effective_provider
+            report_run.llm_model = effective_model
             report_run.status = 'completed'
             report_run.completed_at = datetime.now(timezone.utc)
             artifact = await persist_report_artifact(

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from app.schemas.app_analytics_config import AnalyticsSectionConfig
 from app.services.reports.config_models import PresentationSectionConfig
@@ -84,7 +84,7 @@ def build_section(
 
 
 def compose_sections(
-    section_configs: list[AnalyticsSectionConfig | PresentationSectionConfig],
+    section_configs: Sequence[AnalyticsSectionConfig | PresentationSectionConfig],
     section_payloads: Mapping[str, Any],
 ) -> list[PlatformReportSection]:
     """Compose sections, resolving payloads by section_id first, then falling
@@ -114,31 +114,72 @@ def index_sections(
     return {section.id: section for section in sections}
 
 
+def compose_report(
+    scope: str,
+    metadata: PlatformReportMetadata | PlatformCrossRunMetadata,
+    section_configs: Sequence[AnalyticsSectionConfig | PresentationSectionConfig],
+    section_payloads: Mapping[str, Any],
+    export_document: PlatformReportDocument | None = None,
+    presentation: PlatformReportPresentation | None = None,
+) -> PlatformRunReportPayload | PlatformCrossRunPayload:
+    """Unified composer for both report scopes.
+
+    Binds ``scope`` to its canonical payload model and assembles it from the
+    composed sections. The thin ``compose_run_report`` / ``compose_cross_run_report``
+    wrappers below delegate here so existing callers keep working.
+    """
+    sections = compose_sections(section_configs, section_payloads)
+    presentation = presentation or PlatformReportPresentation()
+    if scope == 'cross_run':
+        return PlatformCrossRunPayload(
+            metadata=cast(PlatformCrossRunMetadata, metadata),
+            presentation=presentation,
+            sections=sections,
+            export_document=export_document,
+        )
+    return PlatformRunReportPayload(
+        metadata=cast(PlatformReportMetadata, metadata),
+        presentation=presentation,
+        sections=sections,
+        export_document=cast(PlatformReportDocument, export_document),
+    )
+
+
 def compose_run_report(
     metadata: PlatformReportMetadata,
-    section_configs: list[AnalyticsSectionConfig | PresentationSectionConfig],
+    section_configs: Sequence[AnalyticsSectionConfig | PresentationSectionConfig],
     section_payloads: Mapping[str, Any],
     export_document: PlatformReportDocument,
     presentation: PlatformReportPresentation | None = None,
 ) -> PlatformRunReportPayload:
-    return PlatformRunReportPayload(
-        metadata=metadata,
-        presentation=presentation or PlatformReportPresentation(),
-        sections=compose_sections(section_configs, section_payloads),
-        export_document=export_document,
+    return cast(
+        PlatformRunReportPayload,
+        compose_report(
+            'single_run',
+            metadata=metadata,
+            section_configs=section_configs,
+            section_payloads=section_payloads,
+            export_document=export_document,
+            presentation=presentation,
+        ),
     )
 
 
 def compose_cross_run_report(
     metadata: PlatformCrossRunMetadata,
-    section_configs: list[AnalyticsSectionConfig | PresentationSectionConfig],
+    section_configs: Sequence[AnalyticsSectionConfig | PresentationSectionConfig],
     section_payloads: Mapping[str, Any],
     export_document: PlatformReportDocument | None = None,
     presentation: PlatformReportPresentation | None = None,
 ) -> PlatformCrossRunPayload:
-    return PlatformCrossRunPayload(
-        metadata=metadata,
-        presentation=presentation or PlatformReportPresentation(),
-        sections=compose_sections(section_configs, section_payloads),
-        export_document=export_document,
+    return cast(
+        PlatformCrossRunPayload,
+        compose_report(
+            'cross_run',
+            metadata=metadata,
+            section_configs=section_configs,
+            section_payloads=section_payloads,
+            export_document=export_document,
+            presentation=presentation,
+        ),
     )

@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 from typing import Any
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Union
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.schemas.base import CamelModel
 from app.services.reports.contracts.cross_run_narrative import PlatformCrossRunNarrative
 from app.services.reports.contracts.run_narrative import PlatformRunNarrative
+
+
+# Discriminated on ``schema_key`` so a single-run vs cross-run narrative dict
+# routes to the correct model (and fails loud on an unknown key) instead of the
+# previous undiscriminated union silently coercing into whichever member matched
+# first. Mirrors the ``PlatformReportSection`` discriminator pattern below.
+PlatformNarrativeUnion = Annotated[
+    Union[PlatformRunNarrative, PlatformCrossRunNarrative],
+    Field(discriminator="schema_key"),
+]
 
 
 class ReportSectionBase(CamelModel):
@@ -34,7 +44,7 @@ class SummaryCardsSection(ReportSectionBase):
 
 class NarrativeSection(ReportSectionBase):
     type: Literal["narrative"] = "narrative"
-    data: PlatformRunNarrative | PlatformCrossRunNarrative
+    data: PlatformNarrativeUnion
 
 
 class MetricBar(CamelModel):
@@ -56,6 +66,14 @@ class DistributionSeries(CamelModel):
     label: str
     values: list[float]
     categories: list[str]
+
+    @field_validator('key', mode='before')
+    @classmethod
+    def none_to_empty_key(cls, v):
+        # Consumers (e.g. the cross-run kaira adapter) call ``series.key.startswith(...)``
+        # directly, so coerce a missing key to '' at the contract boundary instead of
+        # crashing every downstream reader on None.
+        return v if v is not None else ''
 
 
 class DistributionChartSection(ReportSectionBase):

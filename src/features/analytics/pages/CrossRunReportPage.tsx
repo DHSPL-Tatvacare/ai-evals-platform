@@ -10,8 +10,10 @@ import { ActionIconButton } from '@/features/evalRuns/components/RunHeaderAction
 import { invalidateReportRuns, useReportConfigs, useReportRunArtifact, useReportRuns } from '@/features/reports/queries/reportsQueries';
 import { RunReportSurface } from '@/features/analytics/components/RunReportSurface';
 import { ReportZeroState, type SectionPreview } from '@/features/evalRuns/components/report/shared/ReportZeroState';
+import { ReportRunFailureBanner } from '@/features/analytics/components/ReportRunFailureBanner';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import { submitAndPollJob, pollJobUntilComplete } from '@/services/api/jobPolling';
+import { jobsApi } from '@/services/api/jobsApi';
 import { notificationService } from '@/services/notifications';
 import { usePermission } from '@/utils/permissions';
 import { SettingsSlideOver } from '@/features/settings/components/SettingsSlideOver';
@@ -172,6 +174,30 @@ export function CrossRunReportPage() {
   const [genError, setGenError] = useState<string | null>(null);
   const [progressMsg, setProgressMsg] = useState('');
 
+  // Real failure reason for the most recent terminal run. The run summary
+  // itself carries no error text, so we pull it from the run's job. Surfaced in
+  // the failure banner; falls back to a generic line when no reason is found.
+  const [lastFailureReason, setLastFailureReason] = useState<string | null>(null);
+  const failedRunJobId = lastAttemptFailed ? latestRun?.jobId ?? null : null;
+  useEffect(() => {
+    if (!failedRunJobId) {
+      setLastFailureReason(null);
+      return;
+    }
+    let active = true;
+    void jobsApi
+      .get(failedRunJobId)
+      .then((job) => {
+        if (active) setLastFailureReason(job.errorMessage ?? null);
+      })
+      .catch(() => {
+        if (active) setLastFailureReason(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [failedRunJobId]);
+
   const openOverlay = useCallback(() => {
     setOverlayReportId(defaultConfigId);
     setShowOverlay(true);
@@ -321,6 +347,14 @@ export function CrossRunReportPage() {
           subtitle="Covers the evaluation runs you own or that teammates have shared with you."
           back={back}
         >
+          {lastAttemptFailed && !generating ? (
+            <div className="mx-auto mb-4 w-full max-w-lg">
+              <ReportRunFailureBanner
+                status={latestRun?.status === 'cancelled' ? 'cancelled' : 'failed'}
+                errorMessage={lastFailureReason}
+              />
+            </div>
+          ) : null}
           <ReportZeroState
             tone="neutral"
             config={defaultConfig}
@@ -329,12 +363,7 @@ export function CrossRunReportPage() {
             actionLabel={lastAttemptFailed ? 'Regenerate report' : 'Generate report'}
             onGenerate={openOverlay}
             progressContent={progressBanner}
-            errorMessage={
-              genError ??
-              (lastAttemptFailed
-                ? 'The last cross-run report failed. Cross-run reports aggregate your existing single-run reports — generate those first, then try again.'
-                : null)
-            }
+            errorMessage={genError}
             description="Generate an AI-written report across all runs — narrative, trends, and recurring insights."
           />
         </PageSurface>

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 from app.services.reports.contracts.cross_run_narrative import (
-    CrossRunNarrativePattern,
-    CrossRunNarrativeRecommendation,
     PlatformCrossRunNarrative,
 )
 from app.services.reports.contracts.report_sections import PlatformReportSection
@@ -25,57 +24,6 @@ def _select_sections(
         return sections
     allowed = set(section_ids)
     return [section for section in sections if section.id in allowed]
-
-
-def _single_run_narrative_payload(result: dict[str, Any]) -> PlatformRunNarrative:
-    # CamelModel.model_json_schema() emits camelCase property names (because
-    # alias_generator=to_camel is set on the base), and that schema is what
-    # llm.generate_json passes to the model. The LLM therefore returns keys
-    # like `executiveSummary` / `promptGaps`. Earlier the mapper looked up
-    # snake_case keys (`executive_summary`, `top_issues`, `prompt_gaps`) and
-    # silently fell back to defaults, producing artifacts with an empty
-    # executiveSummary and empty promptGaps arrays. `model_validate` uses
-    # Pydantic's alias-aware loader (CamelModel sets populate_by_name=True
-    # so both camelCase aliases and snake_case field names are accepted),
-    # which is the right boundary for "untrusted JSON from an LLM" — no
-    # per-field copy needed, and it works whether the LLM returns
-    # camelCase, snake_case, or a mix.
-    return PlatformRunNarrative.model_validate(result)
-
-
-def _cross_run_narrative_payload(result: dict[str, Any]) -> PlatformCrossRunNarrative:
-    patterns = []
-    for index, item in enumerate(result.get('critical_patterns', [])):
-        if isinstance(item, dict):
-            patterns.append(CrossRunNarrativePattern(**item))
-        else:
-            patterns.append(
-                CrossRunNarrativePattern(
-                    title=f'Pattern {index + 1}',
-                    summary=str(item),
-                    affected_runs=0,
-                )
-            )
-
-    recommendations = []
-    for index, item in enumerate(result.get('strategic_recommendations', [])):
-        if isinstance(item, dict):
-            recommendations.append(CrossRunNarrativeRecommendation(**item))
-        else:
-            recommendations.append(
-                CrossRunNarrativeRecommendation(
-                    priority=f'P{min(index, 2)}',
-                    action=str(item),
-                    expected_impact='',
-                )
-            )
-
-    return PlatformCrossRunNarrative(
-        executive_summary=result.get('executive_summary', ''),
-        trend_analysis=result.get('trend_analysis', ''),
-        critical_patterns=patterns,
-        strategic_recommendations=recommendations,
-    )
 
 
 def _issues_recommendations_from_run_narrative(payload: PlatformRunNarrative) -> dict[str, Any]:
@@ -124,6 +72,74 @@ def _issues_recommendations_from_cross_run_narrative(payload: PlatformCrossRunNa
     }
 
 
+def _prompt_gaps_from_run_narrative(payload: PlatformRunNarrative) -> list[dict[str, Any]]:
+    return [
+        {
+            'gapType': item.gap_type,
+            'promptSection': item.prompt_section,
+            'evaluationRule': item.evaluation_rule,
+            'summary': item.suggested_fix,
+            'suggestedFix': item.suggested_fix,
+        }
+        for item in payload.prompt_gaps
+    ]
+
+
+def _derived_run_narrative_payloads(payload: PlatformRunNarrative) -> dict[str, Any]:
+    return {
+        'prompt_gaps': _prompt_gaps_from_run_narrative(payload),
+        'issues': _issues_recommendations_from_run_narrative(payload),
+        'overview': {
+            'message': payload.executive_summary,
+            'tone': 'info',
+        },
+    }
+
+
+def _derived_cross_run_narrative_payloads(payload: PlatformCrossRunNarrative) -> dict[str, Any]:
+    return {
+        'prompt_gaps': [],
+        'issues': _issues_recommendations_from_cross_run_narrative(payload),
+        'overview': {
+            'message': payload.executive_summary,
+            'tone': 'info',
+        },
+    }
+
+
+@dataclass(frozen=True)
+class NarrativeKind:
+    """Declarative record for one narrative scope.
+
+    Encodes everything that differs between the single-run and cross-run paths:
+    the canonical contract (used both for the JSON schema handed to the LLM and
+    for alias-aware ``model_validate`` parsing), the prompt builder, whether that
+    builder takes the ``prompt_references`` argument, and the scope-specific
+    projections (prompt gaps / issues / overview) derived from the parsed payload.
+    """
+
+    contract: type[PlatformRunNarrative] | type[PlatformCrossRunNarrative]
+    prompt_builder: Callable[..., str]
+    uses_prompt_references: bool
+    derived_payloads: Callable[[Any], dict[str, Any]]
+
+
+NARRATIVE_KINDS: dict[str, NarrativeKind] = {
+    'single_run': NarrativeKind(
+        contract=PlatformRunNarrative,
+        prompt_builder=build_run_narrative_prompt,
+        uses_prompt_references=True,
+        derived_payloads=_derived_run_narrative_payloads,
+    ),
+    'cross_run': NarrativeKind(
+        contract=PlatformCrossRunNarrative,
+        prompt_builder=build_cross_run_narrative_prompt,
+        uses_prompt_references=False,
+        derived_payloads=_derived_cross_run_narrative_payloads,
+    ),
+}
+
+
 async def execute_narrative_generation(
     *,
     llm,
@@ -147,42 +163,31 @@ async def execute_narrative_generation(
     system_prompt = resolved_assets.get('systemPrompt')
     output_insertion_points = list(narrative_config.get('outputInsertionPoints') or [])
 
-    if report_kind == 'single_run':
-        prompt = build_run_narrative_prompt(
-            metadata=metadata,
-            sections=selected_sections,
-            prompt_references=prompt_references,
-        )
-        result = await llm.generate_json(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            json_schema=PlatformRunNarrative.model_json_schema(),
-        )
-        payload = _single_run_narrative_payload(result)
-        prompt_gaps_payload = [
-            {
-                'gapType': item.gap_type,
-                'promptSection': item.prompt_section,
-                'evaluationRule': item.evaluation_rule,
-                'summary': item.suggested_fix,
-                'suggestedFix': item.suggested_fix,
-            }
-            for item in payload.prompt_gaps
-        ]
-        issues_payload = _issues_recommendations_from_run_narrative(payload)
-    else:
-        prompt = build_cross_run_narrative_prompt(
-            metadata=metadata,
-            sections=selected_sections,
-        )
-        result = await llm.generate_json(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            json_schema=PlatformCrossRunNarrative.model_json_schema(),
-        )
-        payload = _cross_run_narrative_payload(result)
-        prompt_gaps_payload = []
-        issues_payload = _issues_recommendations_from_cross_run_narrative(payload)
+    kind = NARRATIVE_KINDS[report_kind]
+
+    prompt_builder_kwargs: dict[str, Any] = {
+        'metadata': metadata,
+        'sections': selected_sections,
+    }
+    if kind.uses_prompt_references:
+        prompt_builder_kwargs['prompt_references'] = prompt_references
+
+    prompt = kind.prompt_builder(**prompt_builder_kwargs)
+    result = await llm.generate_json(
+        prompt=prompt,
+        system_prompt=system_prompt,
+        json_schema=kind.contract.model_json_schema(),
+    )
+    # ``model_validate`` is the single alias-aware parse boundary for both scopes:
+    # CamelModel sets ``populate_by_name=True`` so the camelCase keys the LLM
+    # returns (matching ``model_json_schema()``) are accepted, and so are
+    # snake_case field names. This replaces the divergent snake_case ``.get()``
+    # cross-run mapper that silently produced empty narratives.
+    payload = kind.contract.model_validate(result)
+    derived = kind.derived_payloads(payload)
+    prompt_gaps_payload = derived['prompt_gaps']
+    issues_payload = derived['issues']
+    overview_payload = derived['overview']
 
     inserted_payloads: dict[str, Any] = {}
     payload_data = payload.model_dump(by_alias=True)
@@ -195,9 +200,6 @@ async def execute_narrative_generation(
         elif 'issue' in lowered or 'recommendation' in lowered:
             inserted_payloads[section_id] = issues_payload
         elif 'overview' in lowered or 'callout' in lowered:
-            inserted_payloads[section_id] = {
-                'message': payload.executive_summary,
-                'tone': 'info',
-            }
+            inserted_payloads[section_id] = overview_payload
 
     return inserted_payloads
