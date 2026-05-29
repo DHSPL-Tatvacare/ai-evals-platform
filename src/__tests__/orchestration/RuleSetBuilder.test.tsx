@@ -73,8 +73,8 @@ describe('RuleSetBuilder', () => {
         onChange={onChange}
         fieldOptions={['steps.v1.voice_outcome']}
         outcomeOptions={[
-          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
-          { canonical: 'no_answer', providerLabel: 'bolna_rnr', sourceNodeId: 'v1', provider: 'bolna' },
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna', field: 'steps.v1.voice_outcome' },
+          { canonical: 'no_answer', providerLabel: 'bolna_rnr', sourceNodeId: 'v1', provider: 'bolna', field: 'steps.v1.voice_outcome' },
         ]}
       />,
     );
@@ -104,7 +104,7 @@ describe('RuleSetBuilder', () => {
         onChange={onChange}
         fieldOptions={['steps.v1.voice_outcome', 'steps.wa.wa_button_id']}
         outcomeOptions={[
-          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna', field: 'steps.v1.voice_outcome' },
         ]}
       />,
     );
@@ -127,7 +127,7 @@ describe('RuleSetBuilder', () => {
         onChange={onChange}
         fieldOptions={['steps.v1.voice_outcome']}
         outcomeOptions={[
-          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna', field: 'steps.v1.voice_outcome' },
         ]}
       />,
     );
@@ -135,13 +135,36 @@ describe('RuleSetBuilder', () => {
     expect(screen.getByText('Select an outcome')).toBeInTheDocument();
   });
 
-  it('keeps free text for a messaging producer whose outcome field the engine never writes', () => {
+  it('makes a messaging producer outcome pickable at its own declared field (wa_status)', () => {
     const onChange = vi.fn();
-    // A messaging producer (WhatsApp) emits outcome enums, but the runtime
-    // writes NO canonical outcome payload field for it — its only step fields
-    // are wa_button_id / wa_reply_text. The voice-only field key
-    // (steps.<wa>.voice_outcome) is a phantom path the engine never populates,
-    // so a leaf targeting it must NOT be forced into the outcome dropdown.
+    // Messaging declares its outcome bag field (wa_status), exactly like voice
+    // declares voice_outcome. A leaf targeting that contract path must surface
+    // the same canonical-outcome dropdown — provider-agnostic by contract.
+    const value: LeafPredicate = { field: 'steps.wa1.wa_status', op: 'eq', value: '' };
+    render(
+      <RuleSetBuilder
+        value={value}
+        onChange={onChange}
+        fieldOptions={['steps.wa1.wa_status']}
+        outcomeOptions={[
+          { canonical: 'delivered', providerLabel: 'wa_delivered', sourceNodeId: 'wa1', provider: 'wati', field: 'steps.wa1.wa_status' },
+          { canonical: 'replied', providerLabel: 'wa_replied', sourceNodeId: 'wa1', provider: 'wati', field: 'steps.wa1.wa_status' },
+        ]}
+      />,
+    );
+    expect(screen.queryByPlaceholderText('value')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Select an outcome'));
+    expect(screen.getByText('delivered')).toBeInTheDocument();
+    expect(screen.getByText('wa_delivered')).toBeInTheDocument();
+    expect(screen.getByText('replied')).toBeInTheDocument();
+  });
+
+  it('keeps free text for a leaf targeting a path the producer never declares', () => {
+    const onChange = vi.fn();
+    // The messaging producer declares its outcome at steps.wa1.wa_status. A leaf
+    // targeting a DIFFERENT path (here the voice-shaped steps.wa1.voice_outcome,
+    // which this producer never writes) must NOT be forced into the outcome
+    // dropdown — eligibility binds to the contract-declared field, not a guess.
     const value: LeafPredicate = {
       field: 'steps.wa1.voice_outcome',
       op: 'eq',
@@ -151,11 +174,9 @@ describe('RuleSetBuilder', () => {
       <RuleSetBuilder
         value={value}
         onChange={onChange}
-        // The engine declares only the messaging producer's reply fields — no
-        // canonical outcome field — so the voice_outcome path is never offered.
-        fieldOptions={['steps.wa1.wa_button_id', 'steps.wa1.wa_reply_text']}
+        fieldOptions={['steps.wa1.wa_status', 'steps.wa1.wa_button_id']}
         outcomeOptions={[
-          { canonical: 'replied', providerLabel: 'wati_replied', sourceNodeId: 'wa1', provider: 'wati' },
+          { canonical: 'replied', providerLabel: 'wa_replied', sourceNodeId: 'wa1', provider: 'wati', field: 'steps.wa1.wa_status' },
         ]}
       />,
     );
@@ -172,7 +193,7 @@ describe('RuleSetBuilder', () => {
         onChange={onChange}
         fieldOptions={['steps.v1.voice_outcome']}
         outcomeOptions={[
-          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna' },
+          { canonical: 'answered', providerLabel: 'bolna_answered', sourceNodeId: 'v1', provider: 'bolna', field: 'steps.v1.voice_outcome' },
         ]}
       />,
     );

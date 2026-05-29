@@ -114,6 +114,11 @@ def classify_outcome(status: Optional[str], status_reason: Optional[str]) -> str
     return "bolna_failed"
 
 
+# Bag key the canonical voice outcome lands on (steps.<node_id>.<OUTCOME_BAG_FIELD>);
+# the single source the runtime write AND the downstream picker both read.
+OUTCOME_BAG_FIELD = "voice_outcome"
+
+
 def _canonical_outcome(action_type: str) -> str:
     # Vendor-agnostic outcome that lands in steps.<node_id>.voice_outcome.
     if action_type == "bolna_answered":
@@ -684,7 +689,7 @@ class BolnaAdapter:
         exec_id = str(execution.get("id") or execution.get("execution_id") or "unknown")
         child_idem = f"voice-outcome|{exec_id}|{action_type}"
 
-        recipient_payload_patch: dict[str, Any] = {"voice_outcome": canonical}
+        recipient_payload_patch: dict[str, Any] = {OUTCOME_BAG_FIELD: canonical}
         if capture.get("transcript") is not None:
             recipient_payload_patch["voice_transcript"] = capture["transcript"]
         if capture.get("duration_sec") is not None:

@@ -42,10 +42,12 @@ from app.services.orchestration.source_catalog import (
     resolve_source,
 )
 
-# Server-side dispatch-emit map: keys an action node injects for later steps.
+# Non-outcome step keys an action node injects for later steps. The canonical
+# OUTCOME field is NOT listed here — it is declared by the capability adapter
+# (ProducerVocabulary.outcome_field) and emitted via the producer path so the
+# field and its pickable enums always travel together.
 _DISPATCH_EMITS: dict[str, list[str]] = {
     "messaging.send_whatsapp_template": ["wa_button_id", "wa_reply_text"],
-    "voice.place_call": ["voice_outcome"],
 }
 
 
@@ -278,6 +280,7 @@ async def _resolve_producer(
     *,
     tenant_id: uuid.UUID,
     app_id: str,
+    add_field: Callable[[UpstreamField, Any], None],
     add_event: Callable[[UpstreamEvent], None],
     add_outcome: Callable[[UpstreamOutcomeEnum], None],
     add_unresolved: Callable[[UpstreamUnresolved], None],
@@ -312,12 +315,27 @@ async def _resolve_producer(
         add_event(UpstreamEvent(
             event_name=event_name, source_node_id=node.id, provider=provider,
         ))
+    # The outcome bag path the adapter declares — offered as a pickable field AND
+    # stamped on every outcome so the downstream picker binds by contract.
+    outcome_path = (
+        f"steps.{node.id}.{vocab.outcome_field}"
+        if vocab.outcomes and vocab.outcome_field
+        else ""
+    )
+    if outcome_path:
+        add_field(
+            UpstreamField(
+                path=outcome_path, type="enum", source="step", source_node_id=node.id,
+            ),
+            None,
+        )
     for outcome in vocab.outcomes:
         add_outcome(UpstreamOutcomeEnum(
             canonical=outcome.canonical,
             provider_label=outcome.provider_label,
             source_node_id=node.id,
             provider=provider,
+            field=outcome_path,
         ))
 
 
@@ -379,6 +397,7 @@ async def resolve_upstream_variables(
         if producer_capability(node.type) is not None:
             await _resolve_producer(
                 db, node, tenant_id=tenant_id, app_id=app_id,
+                add_field=_add,
                 add_event=events.append, add_outcome=outcome_enums.append,
                 add_unresolved=unresolved.append,
             )

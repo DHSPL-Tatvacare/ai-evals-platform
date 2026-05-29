@@ -25,14 +25,6 @@ import { cn } from '@/utils';
 
 type Combinator = 'all' | 'any';
 
-// Canonical outcome step-field keys the engine actually writes as a
-// dispatch outcome. Voice writes `voice_outcome`
-// (upstream_variables._DISPATCH_EMITS["voice.place_call"]); messaging writes
-// reply fields (wa_button_id / wa_reply_text), NOT a canonical outcome — so a
-// messaging producer contributes outcome enums but no entry here. A producer's
-// outcome path is dropdown-eligible only if the engine declares it upstream.
-const OUTCOME_FIELD_KEYS = new Set<string>(['voice_outcome']);
-
 /** A rule is either a single leaf condition or a one-level nested group. */
 type Rule = LeafPredicate | AndPredicate | OrPredicate;
 
@@ -205,13 +197,26 @@ function LeafRow({
   outcomeOptions?: UpstreamOutcomeEnum[];
 }) {
   const spotlight = useFieldSpotlight();
-  // Canonical outcome value options: the canonical is the clear label; the
-  // provider's raw label rides in `meta` (muted, right-aligned) so any provider
-  // surfaces the same way without baking the name into the label. Stores
+  // The set of bag paths the contract declares as outcome-bearing — each
+  // outcome carries its own `field` (`steps.<producer>.<outcomeField>`), so a
+  // leaf is dropdown-eligible only when it targets one of those exact paths.
+  // Provider-agnostic by construction: voice's voice_outcome and messaging's
+  // wa_status both arrive the same way, and any future provider inherits this
+  // by declaring its outcome field — no client-side field-name allowlist.
+  const outcomeFieldPaths = useMemo(
+    () => new Set((outcomeOptions ?? []).map((o) => o.field).filter(Boolean)),
+    [outcomeOptions],
+  );
+  const useOutcomeDropdown =
+    !isListOperator(value.op) && outcomeFieldPaths.has(value.field);
+  // Canonical outcome value options, scoped to THIS leaf's producer field so a
+  // second producer's outcomes never bleed in. Canonical is the clear label;
+  // the provider's raw label rides in `meta` (muted, right-aligned). Stores
   // canonical; the current value stays selectable so a hand-set value isn't dropped.
   const valueOptions = useMemo(() => {
     const byCanonical = new Map<string, { value: string; label: string; meta?: string }>();
     for (const o of outcomeOptions ?? []) {
+      if (o.field !== value.field) continue;
       if (!byCanonical.has(o.canonical)) {
         byCanonical.set(o.canonical, {
           value: o.canonical,
@@ -225,32 +230,7 @@ function LeafRow({
       byCanonical.set(current, { value: current, label: current });
     }
     return Array.from(byCanonical.values());
-  }, [outcomeOptions, value.value]);
-  // A leaf is outcome-bearing only when its field is a producer's canonical
-  // outcome path — `steps.<sourceNodeId>.<key>` where the producer is present
-  // in outcomeOptions AND `<key>` is a canonical-outcome field the engine
-  // writes (OUTCOME_FIELD_KEYS). This is producer-general: a messaging producer
-  // surfaces outcome enums but writes no canonical outcome field, so its phantom
-  // `steps.<wa>.voice_outcome` never qualifies. When upstream declares the step
-  // fields (fieldOptions), the path must also be engine-declared, so a producer
-  // can only ever expose the outcome field the runtime actually populates.
-  const outcomeFieldPaths = useMemo(() => {
-    const declared = new Set(fieldOptions ?? []);
-    const paths = new Set<string>();
-    for (const o of outcomeOptions ?? []) {
-      for (const key of OUTCOME_FIELD_KEYS) {
-        const path = `steps.${o.sourceNodeId}.${key}`;
-        if ((fieldOptions?.length ?? 0) === 0 || declared.has(path)) {
-          paths.add(path);
-        }
-      }
-    }
-    return paths;
-  }, [outcomeOptions, fieldOptions]);
-  const useOutcomeDropdown =
-    (outcomeOptions?.length ?? 0) > 0 &&
-    !isListOperator(value.op) &&
-    outcomeFieldPaths.has(value.field);
+  }, [outcomeOptions, value.value, value.field]);
   // Always offer the current field as an option so a hand-typed key isn't
   // dropped when upstream suggestions don't include it.
   const options = useMemo(() => {

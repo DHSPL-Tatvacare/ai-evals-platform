@@ -111,11 +111,16 @@ class UpstreamOutcomeEnum(CamelModel):
     """One outcome a dispatch producer can yield, carrying BOTH the canonical
     value and the wired provider's raw label (answered/bolna_answered,
     delivered/wa_delivered). Tagged with the producing node + resolved provider
-    so the downstream conditional picker stores canonical but shows the label."""
+    so the downstream conditional picker stores canonical but shows the label.
+
+    ``field`` is the exact bag path the engine writes this outcome to
+    (``steps.<source_node_id>.<outcome_field>``), so the downstream picker
+    attaches the dropdown to that leaf by contract — never by a client-side guess."""
     canonical: str
     provider_label: str
     source_node_id: str
     provider: str
+    field: str
 
 
 class UpstreamEvent(CamelModel):

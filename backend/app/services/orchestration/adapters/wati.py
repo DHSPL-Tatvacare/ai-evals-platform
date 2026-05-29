@@ -53,6 +53,11 @@ _EVENT_MAP: dict[str, tuple[str, Optional[str], bool]] = {
     "templateMessageFailed":    ("failed",    "wa_failed",    False),
 }
 
+# Bag key the canonical messaging outcome lands on (steps.<node_id>.<OUTCOME_BAG_FIELD>);
+# the single source the runtime write AND the downstream picker both read.
+OUTCOME_BAG_FIELD = "wa_status"
+
+
 def canonical_outcome_by_action_type() -> dict[str, str]:
     """child_action_type → canonical_status, derived from ``_EVENT_MAP``.
 
@@ -547,7 +552,7 @@ class WatiAdapter:
         )
 
         bag_fields: dict[str, Any] = {
-            "wa_status": child_action_type.removeprefix("wa_"),
+            OUTCOME_BAG_FIELD: child_action_type.removeprefix("wa_"),
             "wa_last_event_at": now.isoformat(),
         }
         canonical = self.normalize_webhook(payload)

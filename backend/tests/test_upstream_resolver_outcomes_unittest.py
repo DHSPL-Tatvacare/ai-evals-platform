@@ -93,6 +93,12 @@ async def test_voice_outcome_enums_and_events_surface(db_session):
     for o in by_canon.values():
         assert o.source_node_id == "call"
         assert o.provider == "bolna"
+        # Each outcome carries the exact bag path the engine writes it to, so the
+        # downstream picker attaches the dropdown by contract — never a guess.
+        assert o.field == "steps.call.voice_outcome"
+
+    # The outcome bag field is offered as a pickable upstream field too.
+    assert any(f.path == "steps.call.voice_outcome" for f in result.fields)
 
     event_names = {e.event_name for e in result.events}
     assert {"voice.answered", "voice.no_answer", "voice.failed", "voice.completed"} <= event_names
@@ -123,6 +129,11 @@ async def test_messaging_outcome_enums_and_reply_event_surface(db_session):
     assert by_canon["replied"].provider_label == "wa_replied"
     for o in by_canon.values():
         assert o.source_node_id == "wa" and o.provider == "wati"
+        # Same contract as voice: messaging declares its own outcome bag path
+        # (wa_status), so the downstream picker is pickable for WhatsApp too.
+        assert o.field == "steps.wa.wa_status"
+
+    assert any(f.path == "steps.wa.wa_status" for f in result.fields)
 
     event_names = {e.event_name for e in result.events}
     assert MESSAGING_REPLY_EVENT in event_names

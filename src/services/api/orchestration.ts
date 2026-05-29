@@ -381,12 +381,16 @@ export interface UpstreamEvent {
 
 /** One outcome a dispatch producer can yield, carrying BOTH the canonical
  *  value and the wired provider's raw label (answered/bolna_answered). The
- *  conditional picker stores `canonical` and shows `providerLabel` as context. */
+ *  conditional picker stores `canonical` and shows `providerLabel` as context.
+ *  `field` is the exact bag path the engine writes this outcome to
+ *  (`steps.<sourceNodeId>.<outcomeField>`), so the picker binds the dropdown to
+ *  that leaf by contract — no client-side guess about which field is an outcome. */
 export interface UpstreamOutcomeEnum {
   canonical: string;
   providerLabel: string;
   sourceNodeId: string;
   provider: string;
+  field: string;
 }
 
 export interface ResolveUpstreamVariablesResponse {

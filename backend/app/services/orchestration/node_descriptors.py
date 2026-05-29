@@ -485,9 +485,14 @@ class OutcomeEnum(BaseModel):
 
 
 class ProducerVocabulary(BaseModel):
-    """The event names + outcome enums one producer node contributes downstream."""
+    """The event names + outcome enums one producer node contributes downstream.
+
+    ``outcome_field`` is the bag key the producer's canonical outcome lands on
+    (``steps.<node_id>.<outcome_field>``), declared once by the capability adapter
+    so the resolver can offer the field AND tag each outcome with its bag path."""
     event_names: list[str] = Field(default_factory=list)
     outcomes: list[OutcomeEnum] = Field(default_factory=list)
+    outcome_field: str = ""
 
 
 # Node type → capability, so the resolver can pick the right adapter family.
@@ -534,7 +539,10 @@ def _voice_vocabulary(vendor: str) -> ProducerVocabulary:
         canonical = canonical_outcome(action_type)
         outcomes.append(OutcomeEnum(canonical=canonical, provider_label=action_type))
         events.update(resume_event_names(canonical))
-    return ProducerVocabulary(event_names=sorted(events), outcomes=outcomes)
+    return ProducerVocabulary(
+        event_names=sorted(events), outcomes=outcomes,
+        outcome_field=module.OUTCOME_BAG_FIELD,
+    )
 
 
 def _messaging_vocabulary(vendor: str) -> ProducerVocabulary:
@@ -557,7 +565,10 @@ def _messaging_vocabulary(vendor: str) -> ProducerVocabulary:
         canonical = canonical_by_raw.get(action_type, action_type)
         outcomes.append(OutcomeEnum(canonical=canonical, provider_label=action_type))
     events = sorted(messaging_resume_event_names())
-    return ProducerVocabulary(event_names=events, outcomes=outcomes)
+    return ProducerVocabulary(
+        event_names=events, outcomes=outcomes,
+        outcome_field=module.OUTCOME_BAG_FIELD,
+    )
 
 
 _VOCABULARY_BY_CAPABILITY: dict[str, Any] = {
