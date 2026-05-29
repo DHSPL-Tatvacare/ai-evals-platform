@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-import { cn } from '@/utils/cn';
 import type { RunReportResponse } from '../types';
 import { formatDuration } from '../format';
 import { distinctChannelNames, joinChannelNames } from './labels';
@@ -10,6 +9,12 @@ interface ReportHeaderProps {
   actions?: ReactNode;
   printMode?: boolean;
 }
+
+/** Brand-gradient report banner, matching the platform eval-report header. White
+ *  text is intentional on the brand gradient (mirrors the Cost AI banner). The
+ *  gradient is kept in printMode so the PDF header matches the on-screen report. */
+const BANNER_GRADIENT =
+  'linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-primary-hover) 55%, var(--color-brand-primary-deep) 100%)';
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -24,12 +29,11 @@ function formatDate(value?: string | null): string {
   });
 }
 
-function HeaderField({ label, value }: { label: string; value: string }) {
+function MetaItem({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
-      <p className="mt-0.5 text-sm font-medium text-[var(--text-primary)]">{value}</p>
-    </div>
+    <span className="whitespace-nowrap">
+      <span className="text-white/60">{label}</span> {value}
+    </span>
   );
 }
 
@@ -48,25 +52,25 @@ export function ReportHeader({ report, actions, printMode = false }: ReportHeade
 
   return (
     <div
-      className={cn(
-        'rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3',
-        printMode && 'bg-transparent shadow-none',
-      )}
+      className="overflow-hidden rounded-lg text-white shadow-[var(--shadow-md)]"
+      style={{ background: BANNER_GRADIENT }}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">
-            {report.workflowName}
-          </h2>
-          <p className="mt-0.5 text-sm text-[var(--text-secondary)]">{subtitle}</p>
+          <h2 className="truncate text-xl font-bold tracking-tight">{report.workflowName}</h2>
+          <p className="mt-1 text-[13px] font-medium text-white/85">{subtitle}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-white/85">
+            <MetaItem label="Started" value={formatDate(report.startedAt)} />
+            <MetaItem label="Duration" value={duration} />
+            <MetaItem label="Talk time" value={formatDuration(totalTalkSec)} />
+          </div>
         </div>
-        {!printMode && actions ? <div className="shrink-0">{actions}</div> : null}
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <HeaderField label="Status" value={report.status} />
-        <HeaderField label="Started" value={formatDate(report.startedAt)} />
-        <HeaderField label="Duration" value={duration} />
-        <HeaderField label="Talk time" value={formatDuration(totalTalkSec)} />
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">
+            {report.status}
+          </span>
+          {!printMode && actions ? <div>{actions}</div> : null}
+        </div>
       </div>
     </div>
   );
