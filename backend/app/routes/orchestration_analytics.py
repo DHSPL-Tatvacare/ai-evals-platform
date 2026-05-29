@@ -143,7 +143,7 @@ async def get_runs(
     date_from: Optional[str] = Query(None, alias="from"),
     date_to: Optional[str] = Query(None, alias="to"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
+    page_size: int = Query(20, ge=1, le=200, alias="pageSize"),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = require_permission("orchestration:manage"),
 ) -> RunsResponse:
@@ -175,7 +175,7 @@ async def get_run_detail(
     app_id: str = Query(..., alias="appId"),
     scope: str = Query("mine"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    page_size: int = Query(50, ge=1, le=500, alias="pageSize"),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = require_permission("orchestration:manage"),
 ) -> RunDetailResponse:
