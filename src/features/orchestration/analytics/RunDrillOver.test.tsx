@@ -24,6 +24,7 @@ vi.mock('@/services/notifications', () => ({
 
 vi.mock('@/features/analytics/components/ChartRenderer', () => ({
   ChartRenderer: () => <div data-testid="chart" />,
+  CHART_PALETTE: ['--a', '--b', '--c', '--d', '--e'],
 }));
 
 import { useOrchestrationRunReport } from './queries';

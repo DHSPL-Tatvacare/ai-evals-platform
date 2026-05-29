@@ -90,7 +90,7 @@ describe('CampaignRunReportView', () => {
   it('renders the data-driven subtitle from distinct capabilities', () => {
     render(<CampaignRunReportView report={baseReport()} />);
     expect(
-      screen.getByText('50 contacts across Voice and WhatsApp'),
+      screen.getByText('50 contacts across Voice and Messaging'),
     ).toBeInTheDocument();
   });
 
@@ -119,7 +119,7 @@ describe('CampaignRunReportView', () => {
     render(<CampaignRunReportView report={report} />);
     expect(screen.getAllByText('Email · Resend').length).toBeGreaterThanOrEqual(1);
     expect(
-      screen.getByText('50 contacts across Voice, WhatsApp and Email'),
+      screen.getByText('50 contacts across Voice, Messaging and Email'),
     ).toBeInTheDocument();
   });
 

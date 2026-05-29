@@ -9,7 +9,7 @@ import {
 import { resolveColor } from '@/utils/statusColors';
 import type { SeriesConfig } from '@/features/chat-widget/types';
 
-const CHART_PALETTE = [
+export const CHART_PALETTE = [
   '--color-brand-primary',
   '--color-verdict-pass',
   '--color-level-easy',

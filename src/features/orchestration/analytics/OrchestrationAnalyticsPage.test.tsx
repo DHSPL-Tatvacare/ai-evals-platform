@@ -21,6 +21,7 @@ vi.mock('./queries', () => ({
 
 vi.mock('@/features/analytics/components/ChartRenderer', () => ({
   ChartRenderer: () => <div data-testid="chart" />,
+  CHART_PALETTE: ['--a', '--b', '--c', '--d', '--e'],
 }));
 
 import {

@@ -21,34 +21,14 @@ export function channelHeaderLabel(channel: RunReportChannel): string {
   return connection ? `${cap} · ${connection}` : cap;
 }
 
-// Generic messaging capability surfaces its provider's product name (e.g.
-// "WhatsApp") in copy; other capabilities read fine as the Title-cased
-// capability. 'messaging' is the platform capability slug, not a vendor name.
-const PROVIDER_NAMED_CAPABILITIES = new Set(['messaging']);
-
-/**
- * The friendly channel name used in the header subtitle. For provider-named
- * capabilities (messaging) prefer the connection/vendor label so the subtitle
- * reads "WhatsApp" rather than "Messaging"; otherwise use the Title-cased
- * capability. Derived from data — no channel-product literal in code.
- */
-export function channelDisplayName(channel: RunReportChannel): string {
-  if (PROVIDER_NAMED_CAPABILITIES.has(channel.capability)) {
-    return (
-      channel.connectionLabel?.trim() ||
-      channel.vendor?.trim() ||
-      capabilityLabel(channel.capability)
-    );
-  }
-  return capabilityLabel(channel.capability);
-}
-
-/** Distinct capability labels, in first-seen order, for the subtitle. */
+/** Distinct capability labels, in first-seen order, for the subtitle —
+ *  consistent Title-cased capabilities (e.g. "Voice and Messaging"), never a
+ *  mix of connection name + capability. Provider detail lives in the strips. */
 export function distinctChannelNames(channels: RunReportChannel[]): string[] {
   const seen = new Set<string>();
   const names: string[] = [];
   for (const channel of channels) {
-    const name = channelDisplayName(channel);
+    const name = capabilityLabel(channel.capability);
     if (name && !seen.has(name)) {
       seen.add(name);
       names.push(name);
