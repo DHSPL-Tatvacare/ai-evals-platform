@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   Bell,
   Gauge,
+  BarChart3,
 } from 'lucide-react';
 import { SherlockIcon } from '@/components/ui';
 import { routes } from './routes';
@@ -93,6 +94,14 @@ const INSIDE_SALES_NAV: SidebarNavItem[] = [
   { to: routes.insideSales.logs, icon: ScrollText, label: 'Logs' },
   { to: routes.insideSales.analytics, icon: ChartArea, label: 'Analytics' },
 ];
+
+// Gated behind `app.config.features.hasOrchestration` so apps without
+// campaigns never surface a dead analytics tab.
+const INSIDE_SALES_ORCHESTRATION_NAV: SidebarNavItem = {
+  to: routes.insideSales.analyticsOrchestration,
+  icon: BarChart3,
+  label: 'Campaign analytics',
+};
 
 const ADMIN_USERS_NAV: SidebarNavItem = {
   to: routes.adminUsers,
@@ -171,8 +180,17 @@ function getVisibleNavItems(items: SidebarNavItem[]): SidebarNavItem[] {
   return items.filter((item) => !item.hidden);
 }
 
-export function getNavItems(appId: AppId): SidebarNavItem[] {
-  return getVisibleNavItems(NAV_BY_APP[appId] ?? VOICE_RX_NAV);
+export interface NavFeatureOptions {
+  hasOrchestration?: boolean;
+}
+
+export function getNavItems(appId: AppId, features: NavFeatureOptions = {}): SidebarNavItem[] {
+  const base = NAV_BY_APP[appId] ?? VOICE_RX_NAV;
+  const items =
+    appId === 'inside-sales' && features.hasOrchestration
+      ? [...base, INSIDE_SALES_ORCHESTRATION_NAV]
+      : base;
+  return getVisibleNavItems(items);
 }
 
 /**

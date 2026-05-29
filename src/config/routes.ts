@@ -79,6 +79,7 @@ export const routes = {
     logs: '/inside-sales/logs',
     settings: '/inside-sales/settings',
     analytics: '/inside-sales/analytics',
+    analyticsOrchestration: '/inside-sales/analytics/orchestration',
     analyticsCrossRunReport: '/inside-sales/analytics/cross-run-report',
     analyticsChart: (chartId: string) => `/inside-sales/analytics/charts/${chartId}`,
     analyticsDashboard: (dashboardId: string) => `/inside-sales/analytics/dashboards/${dashboardId}`,

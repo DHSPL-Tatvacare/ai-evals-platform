@@ -22,7 +22,7 @@ import {
   useAppStore,
 } from "@/stores";
 import { useAuthStore } from "@/stores/authStore";
-import { useCurrentAppMetadata } from "@/hooks";
+import { useCurrentAppConfig, useCurrentAppMetadata } from "@/hooks";
 import { cn } from "@/utils";
 import { userHasAnyPermission, usePermission, USER_MANAGEMENT_PERMISSIONS } from "@/utils/permissions";
 import { isAdminPath, routes, settingsRouteForApp } from "@/config/routes";
@@ -45,6 +45,7 @@ export function Sidebar() {
   const location = useLocation();
   const appId = useAppStore((state) => state.currentApp);
   const appMetadata = useCurrentAppMetadata();
+  const appConfig = useCurrentAppConfig();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
 
   const isGuideActive = location.pathname === routes.guide;
@@ -83,7 +84,9 @@ export function Sidebar() {
   // by the expanded chrome but discards group titles since collapsed nav has
   // no room for them.
   const adminNavItems = adminNavGroups.flatMap((group) => group.items);
-  const navItems = isAdminView ? adminNavItems : getNavItems(appId as AppId);
+  const navItems = isAdminView
+    ? adminNavItems
+    : getNavItems(appId as AppId, { hasOrchestration: appConfig.features.hasOrchestration });
 
   // Entries that drive the collapsed icon strip. Admin view tags each item
   // with its group so the tooltip can carry the section name; other views

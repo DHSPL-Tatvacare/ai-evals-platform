@@ -83,3 +83,7 @@ test('analyticsChartForApp uses app-owned analytics chart paths', () => {
 test('reportWizardForApp generates an app-safe report wizard link with the template query param', () => {
   expect(reportWizardForApp('inside-sales', 'bp-7')).toBe('/inside-sales/reports/generate?template=bp-7');
 });
+
+test('inside-sales exposes the orchestration analytics route under analytics', () => {
+  expect(routes.insideSales.analyticsOrchestration).toBe('/inside-sales/analytics/orchestration');
+});
