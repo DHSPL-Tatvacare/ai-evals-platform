@@ -8,6 +8,7 @@ import {
   type TurnStreamControls,
 } from '@/features/sherlock/sse';
 import { useStreamStore } from '@/features/sherlock/streamStore';
+import { getPageContextSnapshot } from '@/features/orchestration/copilot/usePageContext';
 import type { AppId } from '@/types';
 
 import { cancelChatTurn, getBuilderSession } from './api';
@@ -236,6 +237,7 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
       operation: 'send',
       message: text,
       model: 'server-resolved',
+      pageContext: getPageContextSnapshot(),
       queryClient: appQueryClient,
       onSession: (session) => {
         // Ignore late session frames from a stream we already aborted; otherwise

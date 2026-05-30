@@ -4,6 +4,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { logger } from '@/services/logger';
 import { useAuthStore } from '@/stores/authStore';
+import type { PageContext } from '@/features/orchestration/copilot/usePageContext';
 
 import { validateSherlockPart } from './generated/sherlockContract.validator';
 import {
@@ -36,6 +37,9 @@ export interface StreamTurnOptions {
   provider?: string;
   operation?: 'send' | 'resume';
   resumeFromSeq?: number;
+  /** Orchestration-builder snapshot sent so the backend can register the
+   *  authoring specialist (edit mode only). `{kind:'none'}` when off-canvas. */
+  pageContext?: PageContext | null;
   queryClient: QueryClient;
   /** Fires once with the backend-resolved session metadata (always before any
    *  Part frame). The orchestrator uses it to commit the new sessionId. */
@@ -144,6 +148,7 @@ export function streamTurn(options: StreamTurnOptions): TurnStreamControls {
       model: options.model,
       provider: options.provider ?? null,
       resumeFromSeq: options.resumeFromSeq ?? null,
+      pageContext: options.pageContext ?? null,
     };
 
     let resp: Response;
