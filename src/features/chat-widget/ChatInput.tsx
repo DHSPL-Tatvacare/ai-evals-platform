@@ -6,6 +6,7 @@ import { FlowingBorder } from '@/components/ui/FlowingBorder';
 import { usePageContext } from '@/features/orchestration/copilot/usePageContext';
 import { useChatWidgetStore } from './useChatWidget';
 import { BuilderContextChip } from './components/BuilderContextChip';
+import { ContextRing } from './components/ContextRing';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -89,6 +90,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
             )}
             style={{ maxHeight: `${COMPOSER_MAX_HEIGHT_PX}px` }}
           />
+          <ContextRing />
           {showStop ? (
             <button
               type="button"

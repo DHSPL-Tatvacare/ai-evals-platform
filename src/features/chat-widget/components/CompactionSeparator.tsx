@@ -23,7 +23,8 @@ interface CompactionSeparatorProps {
  */
 export function CompactionSeparator({ part }: CompactionSeparatorProps) {
   const [expanded, setExpanded] = useState(false);
-  const hasSummary = part.summary.trim().length > 0;
+  const running = part.status === 'running';
+  const hasSummary = !running && part.summary.trim().length > 0;
   const tokensLabel =
     typeof part.tokensBefore === 'number'
       ? `${formatTokens(part.tokensBefore)} tok`
@@ -33,8 +34,13 @@ export function CompactionSeparator({ part }: CompactionSeparatorProps) {
     <div className="flex flex-col items-stretch gap-1 py-1">
       <div className="flex items-center gap-3">
         <div className="h-px flex-1 bg-[var(--border-default)]" />
-        <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          Session compacted
+        <span
+          className={cn(
+            'shrink-0 font-mono text-[10.5px] uppercase tracking-[0.08em]',
+            running ? 'text-[var(--text-brand)] animate-pulse' : 'text-[var(--text-muted)]',
+          )}
+        >
+          {running ? 'Compacting…' : 'Session compacted'}
         </span>
         <div className="h-px flex-1 bg-[var(--border-default)]" />
       </div>

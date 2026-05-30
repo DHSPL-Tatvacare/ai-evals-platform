@@ -271,6 +271,7 @@ export function CompactionMarker({ part }: PartOf<CompactionPart>) {
       <CompactionSeparator
         part={{
           type: 'compaction',
+          status: part.status ?? 'done',
           summary: part.summary ?? '',
           tokensBefore: part.tokens_before ?? null,
           occurredAt: new Date(part.created_at).toISOString(),

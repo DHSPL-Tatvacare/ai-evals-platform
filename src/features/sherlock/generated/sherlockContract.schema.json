@@ -970,7 +970,7 @@
     },
     "CompactionPart": {
       "additionalProperties": false,
-      "description": "Responses-API server-side compaction marker.",
+      "description": "Responses-API server-side compaction marker.\n\nLifecycle mirrors ToolPart/SubtaskPart: emitted ``running`` before the\ncompact() call, transitioned to ``done`` (same id, part_updated) after.\n``summary``/``tokens_before`` are populated on ``done``.",
       "properties": {
         "chat_session_id": {
           "title": "Chat Session Id",
@@ -987,6 +987,15 @@
         "seq": {
           "title": "Seq",
           "type": "integer"
+        },
+        "status": {
+          "default": "done",
+          "enum": [
+            "running",
+            "done"
+          ],
+          "title": "Status",
+          "type": "string"
         },
         "summary": {
           "default": "",
@@ -1443,6 +1452,30 @@
         "chat_session_id": {
           "title": "Chat Session Id",
           "type": "string"
+        },
+        "context_token_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Token Threshold"
+        },
+        "context_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Tokens"
         },
         "created_at": {
           "title": "Created At",

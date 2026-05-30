@@ -193,9 +193,15 @@ class ErrorPart(_PartBase):
 
 
 class CompactionPart(_PartBase):
-    """Responses-API server-side compaction marker."""
+    """Responses-API server-side compaction marker.
+
+    Lifecycle mirrors ToolPart/SubtaskPart: emitted ``running`` before the
+    compact() call, transitioned to ``done`` (same id, part_updated) after.
+    ``summary``/``tokens_before`` are populated on ``done``.
+    """
 
     type: Literal['compaction'] = 'compaction'
+    status: Literal['running', 'done'] = 'done'
     summary: str = ''
     tokens_before: int | None = None
 
@@ -212,6 +218,10 @@ class StepFinishPart(_PartBase):
     last_response_id: str | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    # Cumulative supervisor-context size + the compaction threshold, carried so
+    # the FE context ring fills in lockstep with the compaction trigger.
+    context_tokens: int | None = None
+    context_token_threshold: int | None = None
 
 
 SherlockPart = Annotated[

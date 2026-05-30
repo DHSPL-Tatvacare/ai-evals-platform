@@ -276,6 +276,7 @@ export type ChatSessionId10 = string;
 export type CreatedAt10 = number;
 export type Id10 = string;
 export type Seq10 = number;
+export type Status10 = 'running' | 'done';
 export type Summary1 = string;
 export type TokensBefore = number | null;
 export type Type10 = 'compaction';
@@ -286,11 +287,13 @@ export type Seq11 = number;
 export type TurnId = string;
 export type Type11 = 'step_start';
 export type ChatSessionId12 = string;
+export type ContextTokenThreshold = number | null;
+export type ContextTokens = number | null;
 export type CreatedAt12 = number;
 export type Id12 = string;
 export type LastResponseId = string | null;
 export type Seq12 = number;
-export type Status10 = string;
+export type Status11 = string;
 export type TokensIn = number | null;
 export type TokensOut = number | null;
 export type TurnId1 = string;
@@ -688,12 +691,17 @@ export interface ErrorPart {
 }
 /**
  * Responses-API server-side compaction marker.
+ *
+ * Lifecycle mirrors ToolPart/SubtaskPart: emitted ``running`` before the
+ * compact() call, transitioned to ``done`` (same id, part_updated) after.
+ * ``summary``/``tokens_before`` are populated on ``done``.
  */
 export interface CompactionPart {
   chat_session_id: ChatSessionId10;
   created_at: CreatedAt10;
   id: Id10;
   seq: Seq10;
+  status?: Status10;
   summary?: Summary1;
   tokens_before?: TokensBefore;
   type?: Type10;
@@ -708,11 +716,13 @@ export interface StepStartPart {
 }
 export interface StepFinishPart {
   chat_session_id: ChatSessionId12;
+  context_token_threshold?: ContextTokenThreshold;
+  context_tokens?: ContextTokens;
   created_at: CreatedAt12;
   id: Id12;
   last_response_id?: LastResponseId;
   seq: Seq12;
-  status: Status10;
+  status: Status11;
   tokens_in?: TokensIn;
   tokens_out?: TokensOut;
   turn_id: TurnId1;

@@ -241,12 +241,13 @@ async def run_turn(
             ))
             return TurnResult(status='error', usage={}, last_response_id=None, error=str(exc2))
 
-    last_response_id = await _maybe_compact_supervisor(
+    cumulative_tokens = await _session_cumulative_tokens(ctx)
+    last_response_id, context_tokens_after = await _maybe_compact_supervisor(
         ctx=ctx,
         client=client,
         model=supervisor_model,
         last_response_id=last_response_id,
-        cumulative_tokens=await _session_cumulative_tokens(ctx),
+        cumulative_tokens=cumulative_tokens,
     )
 
     await ctx.emitter.emit(StepFinishPart(
@@ -259,6 +260,8 @@ async def run_turn(
         last_response_id=last_response_id,
         tokens_in=usage.get('input_tokens'),
         tokens_out=usage.get('output_tokens'),
+        context_tokens=context_tokens_after,
+        context_token_threshold=CONTEXT_COMPACT_THRESHOLD_TOKENS,
     ))
     return TurnResult(
         status='done',
@@ -312,29 +315,37 @@ async def _maybe_compact_supervisor(
     model: str,
     last_response_id: str | None,
     cumulative_tokens: int,
-) -> str | None:
+) -> tuple[str | None, int]:
     """Compact the supervisor chain once accumulated context crosses the
     threshold, continuing from the compacted response id. Supervisor only —
     it owns the cross-turn previous_response_id chain; specialists are
     stateless per ``as_tool`` call. Trigger is the same
-    ``cumulative_input_tokens`` the FE context pill reads, so UI and
-    compaction stay in lockstep. The Azure v1 client exposes /responses/compact."""
+    ``cumulative_input_tokens`` the FE context ring reads, so UI and
+    compaction stay in lockstep. The Azure v1 client exposes /responses/compact.
+
+    Returns ``(last_response_id, context_tokens_after)``. The latter is 0 once
+    compaction has fired — the cumulative counter is reset post-turn, so the
+    ring drains immediately instead of sitting full until the next message."""
     if not last_response_id:
-        return last_response_id
+        return last_response_id, cumulative_tokens
     if cumulative_tokens < CONTEXT_COMPACT_THRESHOLD_TOKENS:
-        return last_response_id
-    compacted = await client.responses.compact(
-        model=model, previous_response_id=last_response_id,
-    )
+        return last_response_id, cumulative_tokens
     assert ctx.emitter is not None
-    await ctx.emitter.emit(CompactionPart(
+    # Running → done in place (same id), mirroring ToolPart/SubtaskPart, so the
+    # FE shows in-progress feedback during the non-instant compact() call.
+    running = await ctx.emitter.emit(CompactionPart(
         id=new_part_id(),
         chat_session_id='',
         seq=0,
         created_at=0,
+        status='running',
         tokens_before=cumulative_tokens,
     ))
-    return compacted.id
+    compacted = await client.responses.compact(
+        model=model, previous_response_id=last_response_id,
+    )
+    await ctx.emitter.update(running.model_copy(update={'status': 'done'}))
+    return compacted.id, 0
 
 
 async def _emit_part_for_sdk_event(event: Any, ctx: SherlockTurnContext) -> None:

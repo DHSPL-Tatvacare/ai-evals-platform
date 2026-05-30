@@ -108,6 +108,7 @@ export interface SaveToastPart {
 // earlier turns; tokensBefore is the SDK's pre-compaction estimate, nullable.
 export interface CompactionPart {
   type: 'compaction';
+  status: 'running' | 'done';
   summary: string;
   tokensBefore: number | null;
   occurredAt: string;
