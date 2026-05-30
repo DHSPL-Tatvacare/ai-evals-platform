@@ -7,12 +7,15 @@ import remarkGfm from 'remark-gfm';
 
 import { cn } from '@/utils/cn';
 import { ChatChartCard } from '@/features/chat-widget/components/ChatChartCard';
+import { ChatCanvasChangeCard } from '@/features/chat-widget/components/ChatCanvasChangeCard';
 import { CompactionSeparator } from '@/features/chat-widget/components/CompactionSeparator';
 import type { ChartPayload } from '@/features/chat-widget/generated/chartContract';
 
+import { useCanvasPatchLanding } from './useCanvasPatchLanding';
 import { MAX_SPECIALIST_ATTEMPTS } from '../limits';
 import type {
   AssistantTextPart,
+  CanvasPatchPart,
   ChartPart,
   CompactionPart,
   ErrorPart,
@@ -212,6 +215,32 @@ export function ChartCard({ part, appId, sessionId }: PartOf<ChartPart> & ChartC
         appId={appId}
         sessionId={sessionId}
       />
+    </div>
+  );
+}
+
+// ── canvas-change card (lands the patch, delegates to the widget card) ──────
+
+export function CanvasChangeCard({ part }: PartOf<CanvasPatchPart>) {
+  const landing = useCanvasPatchLanding(part);
+  if (landing.view === 'hidden') return null;
+  return (
+    <div data-part-type="canvas_patch" data-part-id={part.id} data-variant={landing.variant}>
+      {landing.view === 'stopped' ? (
+        <p className="text-[12px] italic text-[var(--text-muted)]">{landing.stoppedNote}</p>
+      ) : (
+        <ChatCanvasChangeCard
+          variant={landing.variant}
+          summary={landing.summary}
+          rationale={landing.rationale}
+          chips={landing.chips}
+          nodeName={landing.nodeName}
+          onUndo={landing.onUndo}
+          onShowOnCanvas={landing.onShowOnCanvas}
+          onRedoOnLatest={landing.onRedoOnLatest}
+          onKeepAsIs={landing.onKeepAsIs}
+        />
+      )}
     </div>
   );
 }

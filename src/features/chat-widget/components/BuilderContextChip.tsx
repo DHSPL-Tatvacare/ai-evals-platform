@@ -1,36 +1,33 @@
 /**
- * Phase 2 (sherlock-builder) — context chip rendered inside `ChatInput`.
+ * Persistent canvas-context chip rendered inside `ChatInput`.
  *
- * Visual model: an "attachment-style" pill pinned at the top of the chat
- * input container (think Cursor's file attachment chips). Two visual
- * states:
- *   - Collapsed: dashed-border pill — pulse dot + verb + workflow name +
- *     CRM/Clinical badge + chevron + dismiss.
- *   - Expanded: clicking the pill body slides open a details panel
- *     (framer-motion) showing workflow / selection / canvas stats — every
- *     field derived from `pageContext`, no hardcoded strings.
+ * One card, two visual states driven by `workflowBuilderStore.canvasContextEnabled`:
+ *   - On — bold card (solid surface + gradient hairline): Sherlock icon +
+ *     status dot + "Editing · {workflow}" (verb reflects viewMode), a right
+ *     workflow-type badge, and the Canvas Switch. An info line below derives
+ *     the flow shape, or — when a node is selected — a "Focused on: {label}"
+ *     scope chip with a clear control.
+ *   - Off — muted card, switch left, a single "answering generally" line.
  *
- * View-mode chip is self-actuating: the in-pill "Switch to Edit" button
- * flips `workflowBuilderStore.setViewMode('edit')` so the user can unlock
- * authoring without hunting for the canvas pencil button.
- *
- * Visual tokens are pulled from `globals.css` only — no hex literals.
+ * Every label is derived (workflow type → badge, node type → descriptor
+ * label, node categories → info line). No hardcoded node names, no hex.
  */
-import { useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, Circle, Eye, Pencil, X } from 'lucide-react';
+import { X } from 'lucide-react';
 
 import { cn } from '@/utils/cn';
+import { Badge } from '@/components/ui/Badge';
+import { SherlockIcon } from '@/components/ui/SherlockIcon';
+import { StatusDot } from '@/components/ui/StatusDot';
+import { Switch } from '@/components/ui/Switch';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import type { NodeTypeDescriptor } from '@/features/orchestration/types';
 import type { PageContext } from '@/features/orchestration/copilot/usePageContext';
 
-// Phase 3 — view-mode authoring affordance helpers live in a sibling
-// module (`./viewModeSuggestion`) so this file stays component-only
-// for the react-refresh lint rule.
+import { chatWidgetCopy } from '../copy';
 
 interface BuilderContextChipProps {
   pageContext: Extract<PageContext, { kind: 'orchestration_builder' }>;
-  onDismiss: () => void;
+  working: boolean;
 }
 
 const WORKFLOW_TYPE_LABEL: Record<'crm' | 'clinical', string> = {
@@ -38,23 +35,50 @@ const WORKFLOW_TYPE_LABEL: Record<'crm' | 'clinical', string> = {
   clinical: 'Clinical',
 };
 
-const HASH_PREVIEW_CHARS = 7;
-
-function shortHash(hash: string): string {
-  if (!hash) return '—';
-  return hash.length > HASH_PREVIEW_CHARS ? hash.slice(0, HASH_PREVIEW_CHARS) : hash;
+/** Resolve a palette descriptor label for a node type; fall back to the raw
+ *  type so the chip never goes blank, never hardcodes a node name. */
+function labelFor(nodeType: string, catalog: readonly NodeTypeDescriptor[]): string {
+  const desc = catalog.find((d) => d.nodeType === nodeType);
+  return desc?.displayLabel ?? desc?.label ?? nodeType;
 }
 
-function formatCount(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
+interface InfoLineShape {
+  steps: number;
+  count: number;
+  category: string;
 }
 
-export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChipProps) {
-  const [expanded, setExpanded] = useState(false);
-  const setViewMode = useWorkflowBuilderStore((s) => s.setViewMode);
+/** Derive the flow-shape info line: total steps + the dominant display
+ *  category and its count, resolved through the palette catalog. */
+function deriveInfoLine(
+  nodeTypes: readonly string[],
+  catalog: readonly NodeTypeDescriptor[],
+): InfoLineShape {
+  const steps = nodeTypes.length;
+  const byCategory = new Map<string, number>();
+  for (const nodeType of nodeTypes) {
+    const desc = catalog.find((d) => d.nodeType === nodeType);
+    const category = desc?.displayCategory ?? 'step';
+    byCategory.set(category, (byCategory.get(category) ?? 0) + 1);
+  }
+  let category = 'step';
+  let count = 0;
+  for (const [cat, n] of byCategory) {
+    if (n > count) {
+      category = cat;
+      count = n;
+    }
+  }
+  return { steps, count, category };
+}
+
+export function BuilderContextChip({ pageContext, working }: BuilderContextChipProps) {
+  const canvasOn = useWorkflowBuilderStore((s) => s.canvasContextEnabled);
+  const setCanvasContextEnabled = useWorkflowBuilderStore((s) => s.setCanvasContextEnabled);
+  const clearSelection = useWorkflowBuilderStore((s) => s.clearSelection);
+  const paletteCatalog = useWorkflowBuilderStore((s) => s.paletteCatalog);
+
   const isEdit = pageContext.viewMode === 'edit';
-  const Icon = isEdit ? Pencil : Eye;
-
   const verb = isEdit ? 'Editing' : 'Viewing';
   const workflowName = pageContext.workflowName.trim() || 'Untitled workflow';
   const typeLabel = WORKFLOW_TYPE_LABEL[pageContext.workflowType];
@@ -63,221 +87,103 @@ export function BuilderContextChip({ pageContext, onDismiss }: BuilderContextChi
     ? pageContext.definition.nodes.find((n) => n.id === pageContext.selectedNodeId)
     : null;
 
-  const nodeCount = pageContext.definition.nodes.length;
-  const edgeCount = pageContext.definition.edges.length;
+  const headerLabel = working ? chatWidgetCopy.workingLabel : `${verb} · ${workflowName}`;
 
-  const handleHeaderClick = () => setExpanded((v) => !v);
-  const handleHeaderKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      setExpanded((v) => !v);
-    }
-  };
+  if (!canvasOn) {
+    return (
+      <div
+        className={cn(
+          'flex items-center gap-2 rounded-md border px-2 py-1.5 text-[12px]',
+          'border-[var(--border-default)] bg-[var(--bg-primary)]',
+        )}
+        data-testid="builder-context-chip"
+        data-canvas-on="false"
+      >
+        <Switch
+          size="sm"
+          checked={false}
+          onCheckedChange={() => setCanvasContextEnabled(true)}
+          aria-label={chatWidgetCopy.canvasToggleLabel}
+          data-testid="builder-context-chip-switch"
+        />
+        <span className="truncate text-[var(--text-muted)]">
+          {chatWidgetCopy.canvasOffLine}
+        </span>
+      </div>
+    );
+  }
+
+  const infoLine = deriveInfoLine(
+    pageContext.definition.nodes.map((n) => n.type),
+    paletteCatalog,
+  );
 
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-md border border-dashed',
-        isEdit
-          ? 'border-[var(--border-brand)] bg-[var(--surface-brand-subtle)]'
-          : 'border-[var(--border-default)] bg-[var(--bg-primary)]',
+        'rounded-md border bg-[var(--bg-primary)] p-px',
+        'bg-[var(--gradient-flow-border)]',
       )}
       data-testid="builder-context-chip"
+      data-canvas-on="true"
     >
-      {/* Collapsed header — always visible, click to expand. */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={handleHeaderClick}
-        onKeyDown={handleHeaderKey}
-        aria-expanded={expanded}
-        aria-controls="builder-context-chip-details"
-        aria-label={`${verb} ${workflowName}, ${expanded ? 'hide' : 'show'} details`}
-        className={cn(
-          'flex items-center gap-1.5 px-2 py-1 text-[12px]',
-          'cursor-pointer select-none transition-colors',
-          isEdit
-            ? 'hover:bg-[var(--surface-brand-hover)]'
-            : 'hover:bg-[var(--bg-secondary)]',
-          'focus-visible:outline-none focus-visible:ring-1',
-          'focus-visible:ring-[var(--color-brand-accent)]',
-        )}
-        data-testid="builder-context-chip-header"
-      >
-        <span className="relative flex h-2 w-2 shrink-0 items-center justify-center">
-          {isEdit ? (
-            <>
-              <span
-                className={cn(
-                  'absolute inline-flex h-full w-full rounded-full opacity-75',
-                  'bg-[var(--color-brand-primary)] animate-ping',
-                )}
-              />
-              <Circle
-                className="relative h-2 w-2 fill-[var(--color-brand-primary)] text-[var(--color-brand-primary)]"
-                aria-hidden
-              />
-            </>
-          ) : (
-            <Circle
-              className="relative h-2 w-2 fill-[var(--text-muted)] text-[var(--text-muted)]"
-              aria-hidden
-            />
-          )}
-        </span>
-
-        <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" aria-hidden />
-
-        <span
-          className={cn(
-            'truncate font-medium',
-            isEdit ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]',
-          )}
-        >
-          {`${verb}: ${workflowName}`}
-        </span>
-
-        <span
-          className={cn(
-            'ml-auto flex shrink-0 items-center gap-1 text-[var(--text-muted)]',
-          )}
-        >
-          <span
-            className={cn(
-              'rounded-sm px-1.5 py-px text-[10px] font-medium tracking-wide uppercase',
-              'border border-[var(--border-default)] bg-[var(--bg-primary)]',
-            )}
-          >
-            {typeLabel}
+      <div className="rounded-[5px] bg-[var(--bg-primary)] px-2 py-1.5">
+        <div className="flex items-center gap-1.5 text-[12px]">
+          <SherlockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-brand)]" />
+          <StatusDot status={isEdit ? 'running' : 'neutral'} size="sm" pulse={isEdit} />
+          <span className="truncate font-medium text-[var(--text-primary)]">
+            {headerLabel}
           </span>
-          <ChevronDown
-            className={cn(
-              'h-3.5 w-3.5 transition-transform duration-150',
-              expanded ? 'rotate-180' : 'rotate-0',
-            )}
-            aria-hidden
-          />
-        </span>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <Badge variant="neutral" size="sm">
+              {typeLabel}
+            </Badge>
+            <Switch
+              size="sm"
+              checked
+              onCheckedChange={() => setCanvasContextEnabled(false)}
+              aria-label={chatWidgetCopy.canvasToggleLabel}
+              data-testid="builder-context-chip-switch"
+            />
+          </span>
+        </div>
 
-        {isEdit ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDismiss();
-            }}
-            className={cn(
-              'flex h-5 w-5 shrink-0 items-center justify-center rounded',
-              'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
-              'hover:bg-[var(--bg-tertiary)] focus-visible:outline-none',
-              'focus-visible:ring-1 focus-visible:ring-[var(--color-brand-accent)]',
-            )}
-            aria-label="Skip canvas context for next message"
-            title="Skip canvas context for next message"
-            data-testid="builder-context-chip-dismiss"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        ) : null}
-      </div>
-
-      {/* Expanded details — derived from pageContext, never hardcoded. */}
-      <AnimatePresence initial={false}>
-        {expanded ? (
-          <motion.div
-            id="builder-context-chip-details"
-            key="details"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-            className="overflow-hidden border-t border-dashed border-[var(--border-default)]"
-            data-testid="builder-context-chip-details"
-          >
-            <dl
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+          {selectedNode ? (
+            <span
               className={cn(
-                'grid grid-cols-[64px_1fr] gap-x-3 gap-y-1.5',
-                'px-3 py-2 text-[11px]',
+                'inline-flex items-center gap-1 rounded-sm px-1.5 py-px',
+                'border border-[var(--border-brand)] bg-[var(--surface-brand-subtle)]',
+                'text-[var(--text-brand)]',
               )}
+              data-testid="builder-context-chip-scope"
             >
-              <DetailRow label="Workflow">
-                <span className="font-medium text-[var(--text-primary)]">{workflowName}</span>
-              </DetailRow>
-
-              <DetailRow label="Selection">
-                {selectedNode ? (
-                  <span className="flex flex-wrap items-center gap-1">
-                    <span className="font-mono text-[var(--text-primary)]">
-                      {selectedNode.type}
-                    </span>
-                    <span className="text-[var(--text-muted)]">·</span>
-                    <span className="font-mono text-[var(--text-secondary)]">
-                      {selectedNode.id}
-                    </span>
-                  </span>
-                ) : (
-                  <span className="italic text-[var(--text-muted)]">no selection</span>
+              <span className="text-[var(--text-muted)]">
+                {chatWidgetCopy.scopeFocusedPrefix}
+              </span>
+              <span className="font-medium">{labelFor(selectedNode.type, paletteCatalog)}</span>
+              <button
+                type="button"
+                onClick={() => clearSelection()}
+                className={cn(
+                  'flex h-3.5 w-3.5 items-center justify-center rounded-sm',
+                  'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                  'focus-visible:outline-none focus-visible:ring-1',
+                  'focus-visible:ring-[var(--color-brand-accent)]',
                 )}
-              </DetailRow>
-
-              <DetailRow label="Canvas">
-                <span className="flex flex-wrap items-center gap-1.5 text-[var(--text-secondary)]">
-                  <span>{formatCount(nodeCount, 'node', 'nodes')}</span>
-                  <span className="text-[var(--text-muted)]">·</span>
-                  <span>{formatCount(edgeCount, 'edge', 'edges')}</span>
-                  <span className="text-[var(--text-muted)]">·</span>
-                  <span
-                    className="font-mono text-[var(--text-muted)]"
-                    title={`Data hash: ${pageContext.dataHash}`}
-                  >
-                    {shortHash(pageContext.dataHash)}
-                  </span>
-                </span>
-              </DetailRow>
-
-              {!isEdit ? (
-                <DetailRow label="Mode">
-                  <span className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
-                    <span>Read-only — Sherlock can't change the canvas.</span>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('edit')}
-                      className={cn(
-                        'inline-flex items-center gap-1 rounded',
-                        'border border-[var(--border-brand)] bg-[var(--surface-brand-subtle)]',
-                        'px-2 py-0.5 text-[11px] font-medium text-[var(--text-brand)]',
-                        'hover:bg-[var(--surface-brand-hover)]',
-                        'focus-visible:outline-none focus-visible:ring-1',
-                        'focus-visible:ring-[var(--color-brand-accent)]',
-                      )}
-                      data-testid="builder-context-chip-switch-to-edit"
-                    >
-                      <Pencil className="h-3 w-3" aria-hidden />
-                      Switch to Edit
-                    </button>
-                  </span>
-                </DetailRow>
-              ) : null}
-            </dl>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+                aria-label="Clear focus"
+                data-testid="builder-context-chip-clear-scope"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ) : (
+            <span className="truncate text-[var(--text-muted)]">
+              {chatWidgetCopy.infoLineTemplate(infoLine)}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
-  );
-}
-
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <>
-      <dt
-        className={cn(
-          'text-[10px] font-medium uppercase tracking-wide',
-          'text-[var(--text-muted)] self-center',
-        )}
-      >
-        {label}
-      </dt>
-      <dd className="text-[var(--text-secondary)] min-w-0">{children}</dd>
-    </>
   );
 }

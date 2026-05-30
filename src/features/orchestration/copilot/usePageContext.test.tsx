@@ -1,15 +1,13 @@
 /**
- * Phase 2 (sherlock-builder) — page-context detector tests.
+ * Page-context detector tests.
  *
- * Three load-bearing cases per the implementation plan:
+ * Cases:
  *   1. Route doesn't match builder → 'none'
  *   2. Route matches + edit mode → full snapshot
- *   3. Route matches + view mode → snapshot with viewMode='view' (backend
- *      Phase 1 refuses to attach the authoring tool — chip narration changes
- *      but context still travels so the supervisor can read the canvas).
- *
- * Plus the dismiss flag is exercised because every other consumer (`send`)
- * relies on it being a one-shot.
+ *   3. Route matches + view mode → snapshot with viewMode='view'
+ *   4. The `canvasContextEnabled` toggle gates the non-hook snapshot: when
+ *      off, `getPageContextSnapshot` returns 'none' so the supervisor never
+ *      reads the canvas.
  */
 import { renderHook, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -17,12 +15,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
-import {
-  __resetDismissForTests,
-  dismissNextPageContext,
-  getPageContextSnapshot,
-  usePageContext,
-} from './usePageContext';
+import { getPageContextSnapshot, usePageContext } from './usePageContext';
 
 function wrap(initialEntries: string[]) {
   const Wrapper = ({ children }: { children: ReactNode }) => (
@@ -46,7 +39,6 @@ function seedStore({ viewMode }: { viewMode: 'view' | 'edit' }) {
 describe('usePageContext', () => {
   beforeEach(() => {
     useWorkflowBuilderStore.getState().reset();
-    __resetDismissForTests();
   });
 
   it("returns 'none' when the route doesn't match a builder", () => {
@@ -116,7 +108,6 @@ describe('usePageContext', () => {
 describe('getPageContextSnapshot', () => {
   beforeEach(() => {
     useWorkflowBuilderStore.getState().reset();
-    __resetDismissForTests();
     window.history.replaceState({}, '', '/');
   });
 
@@ -133,12 +124,19 @@ describe('getPageContextSnapshot', () => {
     expect(getPageContextSnapshot().kind).toBe('none');
   });
 
-  it("returns 'none' once after dismissNextPageContext, then returns context again", () => {
+  it("returns 'none' when the canvas context toggle is off", () => {
+    seedStore({ viewMode: 'edit' });
+    useWorkflowBuilderStore.getState().setCanvasContextEnabled(false);
+    window.history.replaceState({}, '', '/inside-sales/orchestration/workflows/wf_demo');
+    expect(getPageContextSnapshot().kind).toBe('none');
+  });
+
+  it('returns context again once the toggle is flipped back on', () => {
     seedStore({ viewMode: 'edit' });
     window.history.replaceState({}, '', '/inside-sales/orchestration/workflows/wf_demo');
-
-    dismissNextPageContext();
+    useWorkflowBuilderStore.getState().setCanvasContextEnabled(false);
     expect(getPageContextSnapshot().kind).toBe('none');
+    useWorkflowBuilderStore.getState().setCanvasContextEnabled(true);
     expect(getPageContextSnapshot().kind).toBe('orchestration_builder');
   });
 });

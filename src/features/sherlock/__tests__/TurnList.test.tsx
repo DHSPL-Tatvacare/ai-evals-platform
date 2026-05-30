@@ -1,9 +1,12 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { create } from 'zustand';
 
 import { TurnList } from '@/features/sherlock/TurnList';
+import type { ApplyCanvasPatchResult } from '@/features/orchestration/copilot/canvasPatchApplier';
 import type {
   AssistantTextPart,
+  CanvasPatchPart,
   ChartPart,
   SherlockPart,
   StepFinishPart,
@@ -12,6 +15,31 @@ import type {
   SubtaskResult,
   UserMessagePart,
 } from '@/features/sherlock/generated/sherlockContract';
+
+const landCanvasPatch = vi.fn<
+  (partId: string, patch: unknown) => Promise<ApplyCanvasPatchResult | undefined>
+>();
+
+interface MockStoreState {
+  landCanvasPatch: typeof landCanvasPatch;
+  applyInverse: () => void;
+  markChanged: (ids: readonly string[]) => void;
+  paletteCatalog: unknown[];
+  canvasEdits: Record<string, { result: ApplyCanvasPatchResult; changedNodeIds: string[] }>;
+}
+
+const useMockBuilderStore = create<MockStoreState>(() => ({
+  landCanvasPatch,
+  applyInverse: () => {},
+  markChanged: () => {},
+  paletteCatalog: [],
+  canvasEdits: {},
+}));
+
+vi.mock('@/features/orchestration/store/workflowBuilderStore', () => ({
+  useWorkflowBuilderStore: (selector: (s: MockStoreState) => unknown) =>
+    useMockBuilderStore(selector),
+}));
 
 const BASE = { chat_session_id: 'sess-1', created_at: 0 } as const;
 
@@ -124,5 +152,111 @@ describe('TurnList', () => {
     render(<TurnList parts={settled} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />);
     expect(screen.queryByText(/Consulting/i)).toBeNull();
     expect(screen.getByText(/Consulted 2 specialists/i)).toBeTruthy();
+  });
+});
+
+function canvasPart(id: string): CanvasPatchPart {
+  return {
+    ...BASE,
+    id,
+    seq: 5,
+    type: 'canvas_patch',
+    patch: {
+      workflow_id: 'wf-1',
+      version_id: null,
+      base_data_hash: 'h0',
+      rationale: 'wire the flow',
+      ops: [
+        { op: 'add_node', node_id: 'n1', payload: { node_type: 'voice.place_call', config: {} } },
+      ],
+    },
+  };
+}
+
+describe('TurnList canvas_patch bridge', () => {
+  beforeEach(() => {
+    landCanvasPatch.mockReset();
+    useMockBuilderStore.setState({
+      landCanvasPatch,
+      applyInverse: () => {},
+      markChanged: () => {},
+      paletteCatalog: [],
+      canvasEdits: {},
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function partsWith(part: CanvasPatchPart): SherlockPart[] {
+    return [stepStart, userMsg, part, answer, stepFinish];
+  }
+
+  it('renders the canvas-change card and lands the patch exactly once across a re-render', () => {
+    const applied: ApplyCanvasPatchResult = {
+      kind: 'applied',
+      opsApplied: 1,
+      addedNodeIds: ['n1'],
+      editedNodeIds: [],
+      removedNodeIds: [],
+      connectEdgeIds: [],
+      rationale: 'wire the flow',
+      inverse: [],
+    };
+    landCanvasPatch.mockImplementation(async (partId) => {
+      useMockBuilderStore.setState((s) => ({
+        canvasEdits: { ...s.canvasEdits, [partId]: { result: applied, changedNodeIds: ['n1'] } },
+      }));
+      return applied;
+    });
+
+    const part = canvasPart('cp-1');
+    const { container, rerender } = render(
+      <TurnList parts={partsWith(part)} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />,
+    );
+    rerender(
+      <TurnList parts={partsWith(part)} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />,
+    );
+
+    expect(container.querySelector('[data-part-type="canvas_patch"]')).not.toBeNull();
+    expect(landCanvasPatch).toHaveBeenCalledTimes(1);
+    expect(landCanvasPatch).toHaveBeenCalledWith('cp-1', part.patch);
+  });
+
+  it('maps an applied result to the applied variant', async () => {
+    const applied: ApplyCanvasPatchResult = {
+      kind: 'applied',
+      opsApplied: 1,
+      addedNodeIds: ['n1'],
+      editedNodeIds: [],
+      removedNodeIds: [],
+      connectEdgeIds: [],
+      rationale: 'wire the flow',
+      inverse: [],
+    };
+    landCanvasPatch.mockImplementation(async (partId) => {
+      useMockBuilderStore.setState((s) => ({
+        canvasEdits: { ...s.canvasEdits, [partId]: { result: applied, changedNodeIds: ['n1'] } },
+      }));
+      return applied;
+    });
+    const { container } = render(
+      <TurnList parts={partsWith(canvasPart('cp-2'))} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />,
+    );
+    await act(async () => {});
+    expect(container.querySelector('[data-variant="applied"]')).not.toBeNull();
+  });
+
+  // Non-applied kinds: the real store returns the result but records NO
+  // canvasEdits entry, so the bridge must derive the variant from the RETURN
+  // value. Drive the mock purely through the resolved value here.
+  it('maps a hash_mismatch result to the conflict variant', async () => {
+    landCanvasPatch.mockResolvedValue({ kind: 'hash_mismatch', rationale: 'drift' });
+    const { container } = render(
+      <TurnList parts={partsWith(canvasPart('cp-3'))} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />,
+    );
+    await act(async () => {});
+    expect(container.querySelector('[data-variant="conflict"]')).not.toBeNull();
   });
 });

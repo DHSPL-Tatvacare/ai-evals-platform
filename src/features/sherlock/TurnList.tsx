@@ -14,6 +14,7 @@ import { getUserInitials } from './initials';
 import { SpecialistGroup, type SpecialistPart } from './components/SpecialistGroup';
 import {
   AssistantMarkdown,
+  CanvasChangeCard,
   ChartCard,
   CompactionMarker,
   ErrorBanner,
@@ -79,6 +80,9 @@ function renderAssistantBody(turn: Turn, appId: string, sessionId: string | null
         break;
       case 'chart':
         blocks.push(<ChartCard key={part.id} part={part} appId={appId} sessionId={sessionId} />);
+        break;
+      case 'canvas_patch':
+        blocks.push(<CanvasChangeCard key={part.id} part={part} />);
         break;
       case 'error':
         blocks.push(<ErrorBanner key={part.id} part={part} />);

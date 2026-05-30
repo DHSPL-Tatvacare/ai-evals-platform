@@ -1,9 +1,9 @@
 /**
- * Phase 2 (sherlock-builder) — page-context selector for the chat widget.
+ * Page-context selector for the chat widget.
  *
- * Self-contained per the design doc: NO new context provider, NO prop
- * drilling, NO new global store. Reads the existing `workflowBuilderStore`
- * and the current router location.
+ * Self-contained: NO new context provider, NO prop drilling, NO new global
+ * store. Reads the existing `workflowBuilderStore` and the current router
+ * location.
  *
  * Two consumers, two entry points:
  *   - `usePageContext()` — React hook (re-renders on relevant changes).
@@ -12,10 +12,9 @@
  *     Zustand `send` action which can't call hooks. Reads via
  *     `useWorkflowBuilderStore.getState()` + `window.location.pathname`.
  *
- * Per-message dismiss is a module-scoped one-shot flag (`dismissNextPageContext`
- * sets it; `getPageContextSnapshot` consumes it once and returns 'none' for
- * that single read). The chip's [×] flips a local component state for the
- * visual hide, then calls `dismissNextPageContext` on submit.
+ * The persistent `canvasContextEnabled` toggle (workflowBuilderStore) gates
+ * the snapshot: when off, `getPageContextSnapshot` returns 'none' so the
+ * supervisor answers generally and never reads the canvas.
  */
 import { useMemo } from 'react';
 import { useLocation, matchPath } from 'react-router-dom';
@@ -60,20 +59,11 @@ function matchBuilderRoute(pathname: string): { appId: string } | null {
   return null;
 }
 
-let dismissPending = false;
-
-/** One-shot dismiss flag consumed by the next `getPageContextSnapshot` call.
- *  ChatInput calls this when the user clicks [×] on the chip; the chip's
- *  local visible-state is reset on the next submit so the chip reappears
- *  for the following turn (per the design — chip is derived, not stored). */
-export function dismissNextPageContext(): void {
-  dismissPending = true;
-}
-
 function buildContext(
   pathname: string,
   state: WorkflowBuilderStoreState,
 ): PageContext {
+  if (!state.canvasContextEnabled) return { kind: 'none' };
   const route = matchBuilderRoute(pathname);
   if (!route) return { kind: 'none' };
   if (!state.workflowId || !state.workflowType) return { kind: 'none' };
@@ -101,7 +91,11 @@ function buildContext(
 }
 
 /** Hook variant — re-renders when the pathname or relevant store fields
- *  change. Used inside ChatInput / chip / tests. */
+ *  change. Returns the builder context whenever the user is on the canvas,
+ *  independent of the `canvasContextEnabled` toggle, so the persistent chip
+ *  stays mounted and can render its own on/off visuals. The toggle gates only
+ *  the wire payload (`getPageContextSnapshot`). Used inside ChatInput / chip /
+ *  tests. */
 export function usePageContext(): PageContext {
   const { pathname } = useLocation();
   const workflowId = useWorkflowBuilderStore((s) => s.workflowId);
@@ -114,6 +108,8 @@ export function usePageContext(): PageContext {
   const nodes = useWorkflowBuilderStore((s) => s.nodes);
   const edges = useWorkflowBuilderStore((s) => s.edges);
   const viewport = useWorkflowBuilderStore((s) => s.viewport);
+  // Subscribe so consumers re-render when the canvas toggle flips.
+  useWorkflowBuilderStore((s) => s.canvasContextEnabled);
 
   return useMemo<PageContext>(() => {
     const route = matchBuilderRoute(pathname);
@@ -152,21 +148,11 @@ export function usePageContext(): PageContext {
   ]);
 }
 
-/** Non-hook one-shot snapshot for store actions / event callbacks.
- *  Honours the dismiss flag exactly once: if the chip's [×] was clicked
- *  before send, the next call returns `{ kind: 'none' }` and clears the
- *  flag, regardless of whether the user is actually on the builder. */
+/** Non-hook one-shot snapshot for store actions / event callbacks. Returns
+ *  `{ kind: 'none' }` when the user disabled canvas context (toggle off) so
+ *  the supervisor answers generally and never reads the canvas. */
 export function getPageContextSnapshot(): PageContext {
-  if (dismissPending) {
-    dismissPending = false;
-    return { kind: 'none' };
-  }
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
   const state = useWorkflowBuilderStore.getState();
   return buildContext(pathname, state);
-}
-
-/** Test-only: clear the dismiss flag between cases. */
-export function __resetDismissForTests(): void {
-  dismissPending = false;
 }

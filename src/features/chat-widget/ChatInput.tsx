@@ -2,10 +2,9 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 
 import { cn } from '@/utils/cn';
-import {
-  dismissNextPageContext,
-  usePageContext,
-} from '@/features/orchestration/copilot/usePageContext';
+import { FlowingBorder } from '@/components/ui/FlowingBorder';
+import { usePageContext } from '@/features/orchestration/copilot/usePageContext';
+import { useChatWidgetStore } from './useChatWidget';
 import { BuilderContextChip } from './components/BuilderContextChip';
 
 interface ChatInputProps {
@@ -24,20 +23,16 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const pageContext = usePageContext();
-  const [dismissed, setDismissed] = useState(false);
-  const showChip = pageContext.kind === 'orchestration_builder' && !dismissed;
+  const working = useChatWidgetStore((s) => s.status) === 'sending';
+  const showChip = pageContext.kind === 'orchestration_builder';
 
   const handleSend = useCallback(() => {
     const text = value.trim();
     if (!text || disabled) return;
-    if (dismissed) {
-      dismissNextPageContext();
-      setDismissed(false);
-    }
     setValue('');
     onSend(text);
     if (ref.current) ref.current.style.height = 'auto';
-  }, [value, disabled, onSend, dismissed]);
+  }, [value, disabled, onSend]);
 
   useEffect(() => {
     const el = ref.current;
@@ -50,7 +45,8 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
 
   return (
     <div className="p-2 border-t border-[var(--border-default)]">
-      <div
+      <FlowingBorder
+        active={working}
         className={cn(
           'rounded-lg border bg-[var(--bg-secondary)]',
           'border-[var(--border-default)] transition-colors',
@@ -61,10 +57,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
       >
         {showChip ? (
           <div className="px-1.5 pt-1.5 pb-0.5">
-            <BuilderContextChip
-              pageContext={pageContext}
-              onDismiss={() => setDismissed(true)}
-            />
+            <BuilderContextChip pageContext={pageContext} working={working} />
           </div>
         ) : null}
 
@@ -128,7 +121,7 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
             </button>
           )}
         </div>
-      </div>
+      </FlowingBorder>
     </div>
   );
 }
