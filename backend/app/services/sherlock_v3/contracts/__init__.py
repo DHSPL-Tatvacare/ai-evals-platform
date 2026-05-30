@@ -27,6 +27,7 @@ from app.services.sherlock_v3.contracts.parts import (
     SHERLOCK_PART_ADAPTER,
     AssistantTextPart,
     CallID,
+    CanvasPatchPart,
     ChartPart,
     CompactionPart,
     ErrorPart,
@@ -84,7 +85,8 @@ __all__ = [
     'SYNTHESIS_BRIEF_JSON_SCHEMA', 'SubQuestion', 'SynthesisBrief',
     'SynthesisClassification', 'SynthesisTarget',
     # parts
-    'AssistantTextPart', 'CallID', 'ChartPart', 'CompactionPart',
+    'AssistantTextPart', 'CallID', 'CanvasPatchPart', 'ChartPart',
+    'CompactionPart',
     'ErrorPart', 'EvidencePart', 'PartID', 'ReasoningPart', 'RetryPart',
     'SHERLOCK_PART_ADAPTER', 'SherlockPart', 'StepFinishPart',
     'StepStartPart', 'SubtaskPart', 'SubtaskResult', 'SubtaskState',

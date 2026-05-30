@@ -12,10 +12,15 @@ from agents import Runner
 
 from app.auth.context import AuthContext
 from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
+from app.services.orchestration_authoring.canvas_patch import (
+    CANVAS_PATCH_CONTRACT_ID,
+    CanvasPatch,
+)
 from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
 from app.services.sherlock_v3.contracts import (
     AssistantTextPart,
     Attempt,
+    CanvasPatchPart,
     CompactionPart,
     ErrorPart,
     ReasoningPart,
@@ -432,8 +437,10 @@ async def _close_subtask_on_output(output_item: Any, ctx: SherlockTurnContext) -
     subtask = ctx.scratch.get('_subtask_parts_by_call_id', {}).get(call_id)
     if subtask is None:
         return
+    output_text = _tool_output_text(output_item)
+    await _emit_canvas_patch_artifacts(output_text, ctx)
     result, is_error = project_specialist_output(
-        subtask.specialist, _tool_output_text(output_item),
+        subtask.specialist, output_text,
     )
     started_at = subtask.state.started_at if isinstance(subtask.state, SubtaskStateRunning) else 0
     ended_at = int(time.monotonic() * 1000)
@@ -443,6 +450,49 @@ async def _close_subtask_on_output(output_item: Any, ctx: SherlockTurnContext) -
         else SubtaskStateCompleted(started_at=started_at, ended_at=ended_at, result=result)
     )
     await emitter.update(subtask.model_copy(update={'state': new_state}))
+
+
+async def _emit_canvas_patch_artifacts(output_text: str, ctx: SherlockTurnContext) -> None:
+    """Emit one CanvasPatchPart per canvas_patch artifact in a specialist's output.
+
+    Mirrors the data_specialist's ChartPart emit, but the authoring patch is
+    produced inside the pack's apply_patch handler (off the v3 emitter), so the
+    runtime projects it here. Gated STRICTLY on CANVAS_PATCH_CONTRACT_ID — never
+    promotes an arbitrary artifact kind. Runs once per tool output (keyed by
+    call_id upstream), so a retried apply_patch yields its own output + part.
+    """
+    emitter = ctx.emitter
+    if emitter is None or not output_text.strip():
+        return
+    try:
+        decoded = json.loads(output_text)
+    except (ValueError, TypeError):
+        return
+    if not isinstance(decoded, dict):
+        return
+    artifacts = decoded.get('artifacts')
+    if not isinstance(artifacts, list):
+        return
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        if artifact.get('kind') != CANVAS_PATCH_CONTRACT_ID:
+            continue
+        payload = artifact.get('payload')
+        if not isinstance(payload, dict):
+            continue
+        try:
+            patch = CanvasPatch.model_validate(payload)
+        except Exception as exc:  # noqa: BLE001 — tolerant projection boundary
+            logger.warning('sherlock_v3 canvas_patch artifact failed validation: %s', exc)
+            continue
+        await emitter.emit(CanvasPatchPart(
+            id=new_part_id(),
+            chat_session_id='',
+            seq=0,
+            created_at=0,
+            patch=patch,
+        ))
 
 
 async def _accrete_text_part(
