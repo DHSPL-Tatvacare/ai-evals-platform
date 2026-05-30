@@ -35,6 +35,21 @@ import {
 } from "@/features/orchestration/contracts/nodeConfig";
 import type { FieldErrorItem } from "@/features/orchestration/contracts/errorDecoder";
 import { logger } from "@/services/logger";
+import {
+  applyCanvasPatch,
+  type ApplyCanvasPatchOptions,
+  type ApplyCanvasPatchResult,
+  type CanvasPatchInverseOp,
+} from "@/features/orchestration/copilot/canvasPatchApplier";
+
+/** One landed canvas patch keyed by the chat part that produced it. Holds the
+ *  enriched applier result, the captured inverse (for undo), and the union of
+ *  added/edited/removed node ids the canvas highlights. */
+export interface CanvasEditRecord {
+  result: ApplyCanvasPatchResult;
+  inverse: CanvasPatchInverseOp[];
+  changedNodeIds: string[];
+}
 
 interface ViewportState {
   x: number;
@@ -82,6 +97,17 @@ interface WorkflowBuilderState {
   spotlightNodeId: string | null;
   /** Persisted React Flow viewport — null until first load/move-end. */
   viewport: ViewportState | null;
+
+  /** Whether the copilot may read the live canvas as grounding context.
+   *  Default `true`; the operator can opt out via the chat surface. */
+  canvasContextEnabled: boolean;
+  /** Landed canvas patches keyed by the chat part id that produced them.
+   *  Idempotent: a re-rendered / replayed part never re-applies. */
+  canvasEdits: Record<string, CanvasEditRecord>;
+  /** Nodes flagged as touched by the last applied patch — reused by the
+   *  canvas to drive the existing spotlight 'on' ring (no new tokens).
+   *  Presentation-only, like `spotlightNodeId`; never hashed. */
+  highlightedNodeIds: Set<string>;
 
   /** Hash of the most recently committed data snapshot (set on `reset()`,
    *  hydrate, and successful save). Seeded with the empty-snapshot hash so a
@@ -162,6 +188,27 @@ interface WorkflowBuilderState {
    *  inputs. View hides those affordances and renders the inspector
    *  read-only. */
   setViewMode(mode: "view" | "edit"): void;
+
+  /** Toggle whether the copilot grounds on the live canvas. */
+  setCanvasContextEnabled(enabled: boolean): void;
+  /** Apply a copilot canvas patch and record it under `partId`. Idempotent on
+   *  `partId` — a part already landed is a no-op so a re-render / SSE replay
+   *  never double-applies. Delegates the forward ops to the committed
+   *  `applyCanvasPatch`, then records the result + inverse and flags the
+   *  changed nodes via `markChanged`. */
+  landCanvasPatch(
+    partId: string,
+    patch: unknown,
+    options?: ApplyCanvasPatchOptions,
+  ): Promise<ApplyCanvasPatchResult | undefined>;
+  /** Undo a landed patch by replaying its captured inverse in REVERSE order,
+   *  mapping each inverse op back to the matching store mutation. No-op for an
+   *  unknown `partId`. */
+  applyInverse(partId: string): void;
+  /** Merge `ids` into `highlightedNodeIds` (the spotlight 'on' set). */
+  markChanged(ids: readonly string[]): void;
+  /** Clear every highlighted node. */
+  clearChanged(): void;
 
   addNode(node: WorkflowDefinitionNode): void;
   updateNodePosition(nodeId: string, position: { x: number; y: number }): void;
@@ -326,6 +373,10 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     spotlightNodeId: null,
     viewport: null,
 
+    canvasContextEnabled: true,
+    canvasEdits: {},
+    highlightedNodeIds: new Set<string>(),
+
     committedDataHash: EMPTY_DATA_HASH,
     currentDataHash: EMPTY_DATA_HASH,
     publishedDataHash: EMPTY_DATA_HASH,
@@ -355,6 +406,9 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
         selectedNodeId: null,
         spotlightNodeId: null,
         viewport: null,
+        canvasContextEnabled: true,
+        canvasEdits: {},
+        highlightedNodeIds: new Set<string>(),
         committedDataHash: EMPTY_DATA_HASH,
         currentDataHash: EMPTY_DATA_HASH,
         publishedDataHash: EMPTY_DATA_HASH,
@@ -452,6 +506,69 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>(
     cancelDeleteNode: () => set({ pendingDeleteNodeId: null }),
 
     setViewMode: (mode) => set({ viewMode: mode }),
+
+    setCanvasContextEnabled: (enabled) =>
+      set({ canvasContextEnabled: enabled }),
+
+    markChanged: (ids) =>
+      set((s) => {
+        if (ids.length === 0) return {};
+        const next = new Set(s.highlightedNodeIds);
+        for (const id of ids) next.add(id);
+        return { highlightedNodeIds: next };
+      }),
+
+    clearChanged: () => set({ highlightedNodeIds: new Set<string>() }),
+
+    landCanvasPatch: async (partId, patch, options) => {
+      // Idempotent on partId — a re-render / SSE replay of the same chat part
+      // must not re-apply. Return the already-recorded result.
+      const existing = get().canvasEdits[partId];
+      if (existing) return existing.result;
+
+      const result = await applyCanvasPatch(patch, options);
+      if (result.kind !== "applied") return result;
+
+      const changedNodeIds = [
+        ...result.addedNodeIds,
+        ...result.editedNodeIds,
+        ...result.removedNodeIds,
+      ];
+      set((s) => ({
+        canvasEdits: {
+          ...s.canvasEdits,
+          [partId]: { result, inverse: result.inverse, changedNodeIds },
+        },
+      }));
+      get().markChanged(changedNodeIds);
+      return result;
+    },
+
+    applyInverse: (partId) => {
+      const record = get().canvasEdits[partId];
+      if (!record) return;
+      const s = get();
+      // Replay the captured inverse in REVERSE order so dependent ops undo
+      // before the ops they depended on.
+      for (let i = record.inverse.length - 1; i >= 0; i--) {
+        const op = record.inverse[i];
+        switch (op.kind) {
+          case "remove_node":
+            s.removeNode(op.nodeId);
+            break;
+          case "remove_edge":
+            s.removeEdge(op.edgeId);
+            break;
+          case "update_node_config":
+            s.updateNodeConfig(op.nodeId, op.config);
+            break;
+          case "add_node":
+            s.addNodes([op.node]);
+            s.addEdges(op.edges);
+            break;
+        }
+      }
+    },
 
     addNode: (node) =>
       set((s) => {
