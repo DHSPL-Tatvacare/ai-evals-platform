@@ -189,6 +189,26 @@ def test_chart_part_round_trip():
     assert parsed.artifact.kind == 'chart'
 
 
+def test_canvas_patch_part_round_trip():
+    from app.services.orchestration_authoring.canvas_patch import (
+        CanvasPatch,
+        CanvasPatchOp,
+    )
+    from app.services.sherlock_v3.contracts.parts import CanvasPatchPart
+
+    patch = CanvasPatch(
+        workflow_id='wf_1',
+        base_data_hash='h0',
+        ops=[CanvasPatchOp(op='add_node', node_id='n1', payload={'node_type': 'logic.wait', 'config': {}})],
+        rationale='add a wait',
+    )
+    p = CanvasPatchPart(**_common_part_fields(seq=7), patch=patch)
+    parsed = PART_ADAPTER.validate_json(p.model_dump_json())
+    assert parsed.type == 'canvas_patch'
+    assert parsed.patch.workflow_id == 'wf_1'
+    assert parsed.patch.ops[0].op == 'add_node'
+
+
 def test_diagnostic_to_telemetry_strips_defaults():
     diag = Diagnostic(
         rule_id='R2.allowed_tables', rule_number=2, rule_name='Allowed tables',

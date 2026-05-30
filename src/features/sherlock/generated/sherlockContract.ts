@@ -12,6 +12,7 @@ export type SherlockPart =
   | RetryPart
   | ToolPart
   | ChartPart
+  | CanvasPatchPart
   | EvidencePart
   | ErrorPart
   | CompactionPart
@@ -245,43 +246,55 @@ export type Type6 = 'chart';
 export type ChatSessionId7 = string;
 export type CreatedAt7 = number;
 export type Id7 = string;
+export type BaseDataHash = string;
+export type NodeId = string;
+export type Op = 'add_node' | 'update_node_config' | 'connect' | 'remove_node';
+export type Ops = CanvasPatchOp[];
+export type Rationale = string;
+export type VersionId = string | null;
+export type WorkflowId = string;
+export type Seq7 = number;
+export type Type7 = 'canvas_patch';
+export type ChatSessionId8 = string;
+export type CreatedAt8 = number;
+export type Id8 = string;
 export type RefId = string;
 export type Snippet = string | null;
 export type Source = 'sql_row' | 'vector_chunk' | 'kg_triple' | 'action_receipt' | 'doc_excerpt';
 export type Refs = EvidenceRef[];
-export type Seq7 = number;
-export type Type7 = 'evidence';
-export type ChatSessionId8 = string;
-export type CreatedAt8 = number;
-export type Id8 = string;
-export type Message1 = string;
-export type Recoverable = boolean;
 export type Seq8 = number;
-export type Source1 = string;
-export type Type8 = 'error';
+export type Type8 = 'evidence';
 export type ChatSessionId9 = string;
 export type CreatedAt9 = number;
 export type Id9 = string;
+export type Message1 = string;
+export type Recoverable = boolean;
 export type Seq9 = number;
-export type Summary1 = string;
-export type TokensBefore = number | null;
-export type Type9 = 'compaction';
+export type Source1 = string;
+export type Type9 = 'error';
 export type ChatSessionId10 = string;
 export type CreatedAt10 = number;
 export type Id10 = string;
 export type Seq10 = number;
-export type TurnId = string;
-export type Type10 = 'step_start';
+export type Summary1 = string;
+export type TokensBefore = number | null;
+export type Type10 = 'compaction';
 export type ChatSessionId11 = string;
 export type CreatedAt11 = number;
 export type Id11 = string;
-export type LastResponseId = string | null;
 export type Seq11 = number;
+export type TurnId = string;
+export type Type11 = 'step_start';
+export type ChatSessionId12 = string;
+export type CreatedAt12 = number;
+export type Id12 = string;
+export type LastResponseId = string | null;
+export type Seq12 = number;
 export type Status10 = string;
 export type TokensIn = number | null;
 export type TokensOut = number | null;
 export type TurnId1 = string;
-export type Type11 = 'step_finish';
+export type Type12 = 'step_finish';
 
 export interface UserMessagePart {
   chat_session_id: ChatSessionId;
@@ -601,13 +614,58 @@ export interface ChartPayloadEmpty {
   tsType?: 'unknown';
   warning?: Warning4;
 }
-export interface EvidencePart {
+/**
+ * Typed canvas-patch artifact consumed by the orchestration builder.
+ */
+export interface CanvasPatchPart {
   chat_session_id: ChatSessionId7;
   created_at: CreatedAt7;
   id: Id7;
-  refs?: Refs;
+  patch: CanvasPatch;
   seq: Seq7;
   type?: Type7;
+}
+/**
+ * The artifact emitted by `apply_patch` and consumed by the frontend.
+ *
+ * `base_data_hash` is the load-bearing optimistic-concurrency anchor:
+ * the frontend rejects the patch on mismatch and prompts the user to
+ * rebase rather than clobbering.
+ */
+export interface CanvasPatch {
+  base_data_hash: BaseDataHash;
+  ops?: Ops;
+  rationale?: Rationale;
+  version_id?: VersionId;
+  workflow_id: WorkflowId;
+}
+/**
+ * One mutation in a CanvasPatch.
+ *
+ * `op` discriminates the shape of `payload`:
+ *   - add_node: payload = {node_type: str, position?: {x,y}, config: dict}
+ *   - update_node_config: payload = {config_patch: dict}  (shallow merge)
+ *   - connect: payload = {source_node_id, output_id, target_node_id, edge_id}
+ *   - remove_node: payload = {}  (cascades edges)
+ *
+ * `node_id` is the node the op operates on. For `connect`, it is the
+ * source node id (the edge id is in the payload).
+ */
+export interface CanvasPatchOp {
+  node_id: NodeId;
+  op: Op;
+  payload?: Payload1;
+}
+export interface Payload1 {
+  [k: string]: unknown | undefined;
+}
+export interface EvidencePart {
+  chat_session_id: ChatSessionId8;
+  created_at: CreatedAt8;
+  id: Id8;
+  refs?: Refs;
+  seq: Seq8;
+  type?: Type8;
 }
 export interface EvidenceRef {
   locator: Locator;
@@ -619,44 +677,44 @@ export interface Locator {
   [k: string]: unknown | undefined;
 }
 export interface ErrorPart {
-  chat_session_id: ChatSessionId8;
-  created_at: CreatedAt8;
-  id: Id8;
+  chat_session_id: ChatSessionId9;
+  created_at: CreatedAt9;
+  id: Id9;
   message: Message1;
   recoverable?: Recoverable;
-  seq: Seq8;
+  seq: Seq9;
   source: Source1;
-  type?: Type8;
+  type?: Type9;
 }
 /**
  * Responses-API server-side compaction marker.
  */
 export interface CompactionPart {
-  chat_session_id: ChatSessionId9;
-  created_at: CreatedAt9;
-  id: Id9;
-  seq: Seq9;
-  summary?: Summary1;
-  tokens_before?: TokensBefore;
-  type?: Type9;
-}
-export interface StepStartPart {
   chat_session_id: ChatSessionId10;
   created_at: CreatedAt10;
   id: Id10;
   seq: Seq10;
-  turn_id: TurnId;
+  summary?: Summary1;
+  tokens_before?: TokensBefore;
   type?: Type10;
 }
-export interface StepFinishPart {
+export interface StepStartPart {
   chat_session_id: ChatSessionId11;
   created_at: CreatedAt11;
   id: Id11;
-  last_response_id?: LastResponseId;
   seq: Seq11;
+  turn_id: TurnId;
+  type?: Type11;
+}
+export interface StepFinishPart {
+  chat_session_id: ChatSessionId12;
+  created_at: CreatedAt12;
+  id: Id12;
+  last_response_id?: LastResponseId;
+  seq: Seq12;
   status: Status10;
   tokens_in?: TokensIn;
   tokens_out?: TokensOut;
   turn_id: TurnId1;
-  type?: Type11;
+  type?: Type12;
 }

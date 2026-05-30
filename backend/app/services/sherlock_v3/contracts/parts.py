@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from app.services.orchestration_authoring.canvas_patch import CanvasPatch
 from app.services.sherlock_v3.contracts.artifact import Artifact
 from app.services.sherlock_v3.contracts.brief import Attempt, SpecialistBrief
 from app.services.sherlock_v3.contracts.evidence import EvidenceRef
@@ -172,6 +173,13 @@ class ChartPart(_PartBase):
     artifact: Artifact
 
 
+class CanvasPatchPart(_PartBase):
+    """Typed canvas-patch artifact consumed by the orchestration builder."""
+
+    type: Literal['canvas_patch'] = 'canvas_patch'
+    patch: CanvasPatch
+
+
 class EvidencePart(_PartBase):
     type: Literal['evidence'] = 'evidence'
     refs: list[EvidenceRef] = Field(default_factory=list)
@@ -215,6 +223,7 @@ SherlockPart = Annotated[
         RetryPart,
         ToolPart,
         ChartPart,
+        CanvasPatchPart,
         EvidencePart,
         ErrorPart,
         CompactionPart,

@@ -181,6 +181,121 @@
       "title": "AvailableJoin",
       "type": "object"
     },
+    "CanvasPatch": {
+      "additionalProperties": false,
+      "description": "The artifact emitted by `apply_patch` and consumed by the frontend.\n\n`base_data_hash` is the load-bearing optimistic-concurrency anchor:\nthe frontend rejects the patch on mismatch and prompts the user to\nrebase rather than clobbering.",
+      "properties": {
+        "base_data_hash": {
+          "title": "Base Data Hash",
+          "type": "string"
+        },
+        "ops": {
+          "items": {
+            "$ref": "#/$defs/CanvasPatchOp"
+          },
+          "title": "Ops",
+          "type": "array"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "version_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Id"
+        },
+        "workflow_id": {
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "base_data_hash"
+      ],
+      "title": "CanvasPatch",
+      "type": "object"
+    },
+    "CanvasPatchOp": {
+      "additionalProperties": false,
+      "description": "One mutation in a CanvasPatch.\n\n`op` discriminates the shape of `payload`:\n  - add_node: payload = {node_type: str, position?: {x,y}, config: dict}\n  - update_node_config: payload = {config_patch: dict}  (shallow merge)\n  - connect: payload = {source_node_id, output_id, target_node_id, edge_id}\n  - remove_node: payload = {}  (cascades edges)\n\n`node_id` is the node the op operates on. For `connect`, it is the\nsource node id (the edge id is in the payload).",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "add_node",
+            "update_node_config",
+            "connect",
+            "remove_node"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "op",
+        "node_id"
+      ],
+      "title": "CanvasPatchOp",
+      "type": "object"
+    },
+    "CanvasPatchPart": {
+      "additionalProperties": false,
+      "description": "Typed canvas-patch artifact consumed by the orchestration builder.",
+      "properties": {
+        "chat_session_id": {
+          "title": "Chat Session Id",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "patch": {
+          "$ref": "#/$defs/CanvasPatch"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "type": {
+          "const": "canvas_patch",
+          "default": "canvas_patch",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "chat_session_id",
+        "seq",
+        "created_at",
+        "patch"
+      ],
+      "title": "CanvasPatchPart",
+      "type": "object"
+    },
     "ChartPart": {
       "additionalProperties": false,
       "description": "Typed chart payload artifact.",
@@ -2035,6 +2150,7 @@
   "discriminator": {
     "mapping": {
       "assistant_text": "#/$defs/AssistantTextPart",
+      "canvas_patch": "#/$defs/CanvasPatchPart",
       "chart": "#/$defs/ChartPart",
       "compaction": "#/$defs/CompactionPart",
       "error": "#/$defs/ErrorPart",
@@ -2070,6 +2186,9 @@
     },
     {
       "$ref": "#/$defs/ChartPart"
+    },
+    {
+      "$ref": "#/$defs/CanvasPatchPart"
     },
     {
       "$ref": "#/$defs/EvidencePart"
