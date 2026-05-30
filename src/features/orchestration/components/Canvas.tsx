@@ -68,6 +68,25 @@ function descriptorEdgeLabel(
   return labels[outputId] ?? outputId;
 }
 
+/** Resolve one node's spotlight ring. Hover spotlight wins: the focused
+ *  node is 'on' and every other node 'dim'. With no active hover, nodes in
+ *  ``highlightedNodeIds`` (the changed-node set) ring 'on' WITHOUT dimming
+ *  the rest — siblings resolve to ``undefined``. Reuses the existing 'on' /
+ *  'dim' visual; no new tokens or props. */
+export function deriveSpotlightState(
+  nodeId: string,
+  spotlightNodeId: string | null,
+  highlightedNodeIds: ReadonlySet<string>,
+): 'on' | 'dim' | undefined {
+  if (spotlightNodeId != null) {
+    return nodeId === spotlightNodeId ? 'on' : 'dim';
+  }
+  if (highlightedNodeIds.size > 0) {
+    return highlightedNodeIds.has(nodeId) ? 'on' : undefined;
+  }
+  return undefined;
+}
+
 /** Map a per-node run-step record onto the ``CustomNode``-friendly
  *  overlay shape. Keeps the run store decoupled from the canvas card —
  *  the card only knows ``status`` + ``cohortSize``. */
@@ -136,6 +155,10 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
   // Hover-driven canvas spotlight. When set, the focused node renders crisp
   // and every other node + edge dims (see NodeCard + globals.css).
   const spotlightNodeId = useWorkflowBuilderStore((s) => s.spotlightNodeId);
+  // Changed-node highlight (B-Step 3). When non-empty and no hover spotlight
+  // is active, these ids ring the existing spotlight 'on' visual without
+  // dimming the rest. Hover spotlight always wins.
+  const highlightedNodeIds = useWorkflowBuilderStore((s) => s.highlightedNodeIds);
   // Phase-14 follow-up — view mode disables every write affordance on
   // the canvas (drop, connect, edge-remove, per-node delete). Click-to-
   // select still works so the inspector can render the node read-only.
@@ -194,15 +217,10 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
             // Empty for nodes without errors; CustomNode treats `[]` and
             // `undefined` the same.
             publishErrors: publishErrorsByNode[n.id],
-            // Spotlight state mirrored per node (like `selected`): 'on' for
-            // the focused node, 'dim' for the rest while a spotlight is
-            // active, undefined when no spotlight.
-            spotlight:
-              spotlightNodeId == null
-                ? undefined
-                : n.id === spotlightNodeId
-                  ? 'on'
-                  : 'dim',
+            // Spotlight state mirrored per node (like `selected`). Hover
+            // spotlight wins ('on' focused, 'dim' rest); otherwise the
+            // changed-node highlight rings 'on' without dimming siblings.
+            spotlight: deriveSpotlightState(n.id, spotlightNodeId, highlightedNodeIds),
             // Phase-14 follow-up — when false, the per-node delete affordance
             // hides and the card stays read-only. Click-to-select still
             // works so the inspector can show the config.
@@ -210,7 +228,7 @@ function CanvasInner({ activeRunId }: { activeRunId?: string }) {
           },
         };
       }),
-    [nodes, palette, selectedNodeId, spotlightNodeId, activeOverlay, publishErrorsByNode, isEdit],
+    [nodes, palette, selectedNodeId, spotlightNodeId, highlightedNodeIds, activeOverlay, publishErrorsByNode, isEdit],
   );
 
   const rfEdges: Edge[] = useMemo(
