@@ -50,17 +50,6 @@ CG_DEGENERATE_MEASURE = 'CG_DEGENERATE_MEASURE'
 CG_HIGH_CARD = 'CG_HIGH_CARD'
 CG_EMIT_FAILED = 'CG_EMIT_FAILED'
 
-ANALYTICS_CHART_REASON_CODES: frozenset[str] = frozenset({
-    CG_EMPTY,
-    CG_SINGLE_VALUE,
-    CG_FIELD_CARD,
-    CG_NO_MEASURE,
-    CG_ALL_IDS,
-    CG_DEGENERATE_MEASURE,
-    CG_HIGH_CARD,
-    CG_EMIT_FAILED,
-})
-
 # ---------------------------------------------------------------------------
 # Analytics pack — inner SQL-agent outcomes (Phase 2 NEW; replace prose)
 # ---------------------------------------------------------------------------
@@ -81,17 +70,6 @@ SQL_EXPLICIT_ONLY_UNGROUNDED = 'SQL_EXPLICIT_ONLY_UNGROUNDED'
 # input produces a typed error envelope instead of an ``AttributeError``.
 SQL_INVALID_FILTERS_SHAPE = 'SQL_INVALID_FILTERS_SHAPE'
 
-ANALYTICS_SQL_REASON_CODES: frozenset[str] = frozenset({
-    SQL_UNKNOWN_COLUMN,
-    SQL_UNKNOWN_TABLE,
-    SQL_SECURITY_REJECTED,
-    SQL_VALIDATION_FAILED,
-    SQL_INVALID_OUTPUT_ALIAS_CONTRACT,
-    SQL_EXECUTION_ERROR,
-    SQL_EXPLICIT_ONLY_UNGROUNDED,
-    SQL_INVALID_FILTERS_SHAPE,
-})
-
 # ---------------------------------------------------------------------------
 # Analytics pack — entity-resolution / discovery outcomes
 # ---------------------------------------------------------------------------
@@ -100,21 +78,6 @@ ENTITY_AMBIGUOUS = 'ENTITY_AMBIGUOUS'
 ENTITY_NOT_FOUND = 'ENTITY_NOT_FOUND'
 ENTITY_OUT_OF_SCOPE = 'ENTITY_OUT_OF_SCOPE'
 DISCOVER_CACHE_STALE = 'DISCOVER_CACHE_STALE'
-
-ANALYTICS_ENTITY_REASON_CODES: frozenset[str] = frozenset({
-    ENTITY_AMBIGUOUS,
-    ENTITY_NOT_FOUND,
-    ENTITY_OUT_OF_SCOPE,
-    DISCOVER_CACHE_STALE,
-})
-
-# Aggregate: the full analytics-pack reason code set (plan §6.4)
-ANALYTICS_REASON_CODES: frozenset[str] = (
-    ANALYTICS_CHART_REASON_CODES
-    | ANALYTICS_SQL_REASON_CODES
-    | ANALYTICS_ENTITY_REASON_CODES
-    | HARNESS_SHARED_REASON_CODES
-)
 
 # ---------------------------------------------------------------------------
 # Report-builder pack
@@ -125,27 +88,15 @@ BLUEPRINT_MISSING_REQUIRED_BLOCK = 'BLUEPRINT_MISSING_REQUIRED_BLOCK'
 BLUEPRINT_UNKNOWN_BLOCK_TYPE = 'BLUEPRINT_UNKNOWN_BLOCK_TYPE'
 BLUEPRINT_SAVE_CONFLICT = 'BLUEPRINT_SAVE_CONFLICT'
 
-REPORT_BUILDER_BLUEPRINT_REASON_CODES: frozenset[str] = frozenset({
-    BLUEPRINT_INVALID_SCHEMA,
-    BLUEPRINT_MISSING_REQUIRED_BLOCK,
-    BLUEPRINT_UNKNOWN_BLOCK_TYPE,
-    BLUEPRINT_SAVE_CONFLICT,
-})
-
-REPORT_BUILDER_REASON_CODES: frozenset[str] = (
-    REPORT_BUILDER_BLUEPRINT_REASON_CODES
-    | HARNESS_SHARED_REASON_CODES
-)
-
 # ---------------------------------------------------------------------------
 # Pack id -> pack-owned reason code set (registry for closure test)
 # ---------------------------------------------------------------------------
 
-
-PACK_REASON_CODES: dict[str, frozenset[str]] = {
-    'analytics': ANALYTICS_REASON_CODES,
-    'report_builder': REPORT_BUILDER_REASON_CODES,
-}
+# Empty until a concrete pack self-registers via ``register_pack_reason_codes``.
+# The only registered pack today (orchestration.authoring) keeps its own
+# frozenset and never injects here; the prior 'analytics' / 'report_builder'
+# entries referenced packs that were never launched.
+PACK_REASON_CODES: dict[str, frozenset[str]] = {}
 
 
 def _assert_disjoint_pack_ownership() -> None:

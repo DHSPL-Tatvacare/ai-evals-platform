@@ -3,7 +3,7 @@ app_id: kaira-bot
 description: |
   Kaira chatbot analytics — batch thread evaluations and adversarial tests.
   Use analytics_*_facts fact tables for aggregates; evaluation_runs for run-level
-  identity; data_surfaces for raw-evidence lookups.
+  identity.
 
 catalog_tables:
   agg_evaluation_run:
@@ -363,40 +363,3 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
-data_surfaces:
-  - key: runs
-    description: 'Raw evaluation run records with status, timing, and run metadata.'
-    backed_by: evaluation_runs
-    entity_types: [run_id, run_name]
-    entity_field_map:
-      run_id: run_id
-      run_name: run_name
-    fields: [run_id, run_name, eval_type, status, created_at, error_message]
-    default_limit: 10
-  - key: logs
-    description: 'Provider/API logs captured for thread and adversarial evaluations.'
-    backed_by: evaluation_run_api_call_logs
-    entity_types: [run_id, thread_id]
-    entity_field_map:
-      run_id: run_id
-      thread_id: thread_id
-    fields: [run_id, thread_id, provider, model, method, prompt, response, error, created_at]
-    default_limit: 12
-  - key: thread_evaluations
-    description: 'Thread-level evaluation artifacts, verdicts, and per-thread result payloads.'
-    backed_by: evaluation_run_thread_results
-    entity_types: [run_id, item_id, thread_id]
-    entity_field_map:
-      run_id: run_id
-      item_id: thread_id
-      thread_id: thread_id
-    fields: [run_id, thread_id, worst_correctness, efficiency_verdict, intent_accuracy, success_status, result, created_at]
-    default_limit: 10
-  - key: adversarial_evaluations
-    description: 'Adversarial case verdicts and nested evidence, including cancelled or partial runs.'
-    backed_by: evaluation_run_adversarial_results
-    entity_types: [run_id]
-    entity_field_map:
-      run_id: run_id
-    fields: [run_id, difficulty, verdict, goal_achieved, goal_flow, active_traits, total_turns, result, created_at]
-    default_limit: 10

@@ -2,8 +2,7 @@
 app_id: voice-rx
 description: |
   Voice-Rx analytics — medical voice-call transcription, critique, and call quality.
-  Uses analytics_*_facts for run/eval/criterion aggregates; evaluation_runs for run identity;
-  data_surfaces for raw run + log evidence.
+  Uses analytics_*_facts for run/eval/criterion aggregates; evaluation_runs for run identity.
 
 catalog_tables:
   agg_evaluation_run:
@@ -291,21 +290,3 @@ catalog_tables:
         role: temporal
         type: timestamptz
         data_type: temporal
-data_surfaces:
-  - key: runs
-    description: 'Raw evaluation run records with status, timing, and run metadata.'
-    backed_by: evaluation_runs
-    entity_types: [run_id, run_name]
-    entity_field_map:
-      run_id: run_id
-      run_name: run_name
-    fields: [run_id, run_name, eval_type, status, created_at, error_message]
-    default_limit: 10
-  - key: logs
-    description: 'Provider/API logs captured while a run was executing.'
-    backed_by: evaluation_run_api_call_logs
-    entity_types: [run_id]
-    entity_field_map:
-      run_id: run_id
-    fields: [run_id, provider, model, method, prompt, response, error, created_at]
-    default_limit: 10

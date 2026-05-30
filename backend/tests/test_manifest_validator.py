@@ -57,9 +57,7 @@ async def test_validator_rejects_missing_column(db):
                     "does_not_exist_column": ManifestColumn(role="measure"),
                 },
             ),
-        },
-        data_surfaces=[],
-    )
+        },    )
     with pytest.raises(ManifestDriftError, match="does_not_exist_column"):
         await validate_manifest_against_postgres(bogus, db)
 
@@ -73,9 +71,7 @@ async def test_validator_rejects_missing_table(db):
                 orm="NonExistent",
                 columns={"id": ManifestColumn(role="key")},
             ),
-        },
-        data_surfaces=[],
-    )
+        },    )
     with pytest.raises(ManifestDriftError, match="table_that_never_existed"):
         await validate_manifest_against_postgres(bogus, db)
 

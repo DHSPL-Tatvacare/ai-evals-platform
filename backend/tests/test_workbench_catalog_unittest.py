@@ -67,7 +67,6 @@ def _minimal_manifest() -> AppManifest:
                 },
             ),
         },
-        data_surfaces=[],
     )
 
 

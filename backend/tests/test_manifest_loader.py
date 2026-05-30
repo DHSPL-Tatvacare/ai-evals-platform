@@ -19,9 +19,6 @@ catalog_tables:
         measure_kind: percent
       created_at:
         role: temporal
-data_surfaces:
-  - key: runs
-    backed_by: agg_evaluation_run
 """.lstrip()
     )
     manifest = load_manifest_from_path(path)
@@ -29,7 +26,6 @@ data_surfaces:
     assert manifest.app_id == "test-app"
     assert "agg_evaluation_run" in manifest.catalog_tables
     assert manifest.catalog_tables["agg_evaluation_run"].columns["pass_rate"].role == "measure"
-    assert manifest.data_surfaces[0].key == "runs"
 
 
 def test_reject_unknown_role(tmp_path: Path):
@@ -42,26 +38,9 @@ catalog_tables:
     orm: Foo
     columns:
       c:
-        role: not-a-role
-data_surfaces: []
-""".lstrip()
+        role: not-a-role""".lstrip()
     )
     with pytest.raises(ManifestValidationError):
-        load_manifest_from_path(path)
-
-
-def test_surface_backed_by_must_reference_catalog_table(tmp_path: Path):
-    path = tmp_path / "orphan-surface.yaml"
-    path.write_text(
-        """
-app_id: orphan-surface
-catalog_tables: {}
-data_surfaces:
-  - key: runs
-    backed_by: some_missing_table
-""".lstrip()
-    )
-    with pytest.raises(ManifestValidationError, match="orphan-surface.*some_missing_table"):
         load_manifest_from_path(path)
 
 
@@ -77,9 +56,7 @@ catalog_tables:
     columns:
       c:
         role: dimension
-        measure_kind: count
-data_surfaces: []
-""".lstrip()
+        measure_kind: count""".lstrip()
     )
     with pytest.raises(ManifestValidationError, match="measure_kind.*role.*measure"):
         load_manifest_from_path(path)
@@ -90,9 +67,7 @@ def test_reject_invalid_app_id_pattern(tmp_path: Path):
     path.write_text(
         """
 app_id: "BadAppID"
-catalog_tables: {}
-data_surfaces: []
-""".lstrip()
+catalog_tables: {}""".lstrip()
     )
     with pytest.raises(ManifestValidationError):
         load_manifest_from_path(path)
@@ -109,9 +84,7 @@ catalog_tables:
     orm: Foo
     columns:
       c:
-        role: dimension
-data_surfaces: []
-""".lstrip()
+        role: dimension""".lstrip()
     )
     manifest = load_manifest_from_path(path)
 

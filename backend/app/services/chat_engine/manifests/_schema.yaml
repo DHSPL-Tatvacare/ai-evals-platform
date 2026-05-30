@@ -2,7 +2,7 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 title: AppManifest
 type: object
-required: [app_id, catalog_tables, data_surfaces]
+required: [app_id, catalog_tables]
 additionalProperties: false
 properties:
   app_id:
@@ -112,23 +112,3 @@ properties:
         right_column: { type: string }
         relationship_type:
           enum: [many_to_one, one_to_one, one_to_many]
-  data_surfaces:
-    type: array
-    items:
-      type: object
-      required: [key, backed_by]
-      additionalProperties: false
-      properties:
-        key: { type: string, pattern: "^[a-z_][a-z0-9_]*$" }
-        label: { type: string }
-        backed_by:
-          type: string
-          description: "Must reference a key in catalog_tables or another known ORM source."
-        entity_types:
-          type: array
-          items: { type: string }
-  tool_vocabulary:
-    type: object
-    description: "Optional manifest-level overrides used by tool_description_generator."
-    additionalProperties:
-      type: string

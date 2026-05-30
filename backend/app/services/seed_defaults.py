@@ -1934,11 +1934,6 @@ Determine whether ALL critical red-flag symptoms mentioned in the audio are capt
 COMMON_SHERLOCK_CAPABILITIES: list[str] = []
 ORCHESTRATION_AUTHORING_CAPABILITIES: list[str] = ["orchestration.authoring"]
 
-# M2: the legacy meaning-layer constants (``COMMON_SHERLOCK_ENTITY_TYPES``,
-# ``COMMON_RUN_SURFACE``, ``COMMON_RUN_RESOLVERS``) were deleted. Platform
-# ontology rows + pack projections are the authoritative entity/resolver
-# source now; ``seed_sherlock_ontology`` (below) seeds them.
-
 APP_SEEDS = [
     {
         "slug": "voice-rx",
@@ -2070,10 +2065,6 @@ APP_SEEDS = [
             "chat": {
                 "enabled": True,
                 "capabilities": COMMON_SHERLOCK_CAPABILITIES,
-                # M2: meaning-layer seeds (entity types / resolvers) live in
-                # ``sherlock_ontology_*`` tables now; ``seed_sherlock_ontology``
-                # populates them at boot. Runtime reads from the bundle, not
-                # app config, so these keys are intentionally absent here.
                 "promptTemplates": [
                     {"label": "Analyze latest run", "prompt": "Analyze the most recent evaluation run and summarize key findings"},
                     {"label": "Compare accuracy trends", "prompt": "Compare accuracy trends across recent evaluation runs"},
@@ -2240,8 +2231,6 @@ APP_SEEDS = [
             "chat": {
                 "enabled": True,
                 "capabilities": COMMON_SHERLOCK_CAPABILITIES,
-                # M2: meaning-layer seeds live in ``sherlock_ontology_*``
-                # tables; runtime reads from the bundle, not app config.
                 "promptTemplates": [
                     {"label": "Summarize evaluations", "prompt": "Summarize the latest evaluation results and highlight any failures"},
                     {"label": "Build a report", "prompt": "Build a detailed report from the most recent evaluation run"},
@@ -3133,244 +3122,6 @@ async def seed_bootstrap_admin() -> None:
         logger.info("Bootstrapped tenant '%s' with admin user '%s'", tenant_name, email)
 
 
-async def seed_sherlock_ontology(session: AsyncSession) -> None:
-    """Seed the platform-baseline Sherlock ontology rows (Phase 1 / M1).
-
-    Idempotent upserts against ``sherlock_ontology_classes``,
-    ``sherlock_ontology_entity_types``, and ``sherlock_entity_resolvers``. Runs inside
-    ``seed_all_defaults`` after apps / tenants exist — the rows
-    themselves are tenant-agnostic (``tenant_id IS NULL``) and so do
-    not require any specific tenant/user to be present, but keeping the
-    ordering consistent makes bootstraps predictable.
-
-    Safety flags (plan §5.1):
-    - ``safe_first_pass`` — model may recognize from message directly.
-    - ``explicit_only`` — MUST be confirmed via a resolver tool.
-    - ``unsafe`` — do not expose to classifier (e.g. app aliases).
-    """
-    from app.services.sherlock.platform_ontology import PLATFORM_ONTOLOGY_CLASSES
-    from app.models.sherlock_ontology import (
-        SherlockOntologyEntityType,
-        SherlockOntologyClass,
-        SherlockEntityResolver,
-    )
-
-    logger.info("Seeding Sherlock platform ontology baseline rows...")
-
-    # --- Ontology classes ---------------------------------------------
-    existing_classes = (
-        await session.execute(select(SherlockOntologyClass))
-    ).scalars().all()
-    by_name: dict[str, SherlockOntologyClass] = {row.name: row for row in existing_classes}
-
-    def _ensure_class(name: str, description: str | None) -> SherlockOntologyClass:
-        row = by_name.get(name)
-        if row is None:
-            row = SherlockOntologyClass(name=name, description=description)
-            session.add(row)
-            by_name[name] = row
-        else:
-            if row.description != description and description:
-                row.description = description
-        return row
-
-    # Two-pass: create all parents first so parent_id links resolve.
-    for spec in PLATFORM_ONTOLOGY_CLASSES:
-        _ensure_class(spec['name'], spec.get('description'))
-    await session.flush()
-    for spec in PLATFORM_ONTOLOGY_CLASSES:
-        parent = spec.get('parent')
-        row = by_name[spec['name']]
-        if parent:
-            parent_row = by_name.get(parent)
-            if parent_row is not None and row.parent_id != parent_row.id:
-                row.parent_id = parent_row.id
-
-    # --- Entity types -------------------------------------------------
-    entity_specs: list[dict[str, Any]] = [
-        {
-            'name': 'run_id',
-            'class': 'evaluation.run',
-            'role': 'identifier',
-            'safety': 'safe_first_pass',
-            'description': 'Stable identifier for an evaluation run.',
-            'examples': ['ca540908', 'full uuid'],
-        },
-        {
-            'name': 'run_name',
-            'class': 'evaluation.run',
-            'role': 'dimension',
-            'safety': 'explicit_only',
-            'description': 'Free-text label on a run. MUST resolve via resolver before filtering.',
-            'examples': ['nightly batch', 'Kaira A/B'],
-        },
-        {
-            'name': 'run_reference',
-            'class': 'evaluation.run',
-            'role': 'identifier',
-            'safety': 'explicit_only',
-            'description': 'Short id, name, or recency reference to a run.',
-            'examples': ['last run', 'ca540908', 'nightly batch'],
-        },
-        {
-            'name': 'eval_type',
-            'class': 'evaluation',
-            'role': 'dimension',
-            'safety': 'safe_first_pass',
-            'description': 'Evaluation type / shape (batch_thread, call_quality, ...).',
-            'examples': ['batch_thread', 'call_quality', 'batch_adversarial'],
-        },
-        {
-            'name': 'status',
-            'class': 'evaluation',
-            'role': 'dimension',
-            'safety': 'safe_first_pass',
-            'description': 'Run / evaluation lifecycle status.',
-            'examples': ['failed', 'passing', 'critical'],
-        },
-        {
-            'name': 'evaluator',
-            'class': 'evaluation',
-            'role': 'dimension',
-            'safety': 'safe_first_pass',
-            'description': 'Evaluator / checker name used in analytics.',
-            'examples': ['correctness', 'efficiency', 'safety'],
-        },
-        {
-            'name': 'rule',
-            'class': 'evaluation',
-            'role': 'dimension',
-            'safety': 'safe_first_pass',
-            'description': 'Rule, criterion, or compliance check name.',
-            'examples': ['greeting rule', 'medication check'],
-        },
-        {
-            'name': 'metric',
-            'class': 'evaluation',
-            'role': 'measure',
-            'safety': 'safe_first_pass',
-            'description': 'Measured quantity or KPI.',
-            'examples': ['pass rate', 'block rate', 'accuracy'],
-        },
-        {
-            'name': 'time_range',
-            'class': 'scope',
-            'role': 'temporal',
-            'safety': 'safe_first_pass',
-            'description': 'Relative or absolute time window.',
-            'examples': ['last week', 'past month'],
-        },
-        {
-            'name': 'item_id',
-            'class': 'evaluation.judgment',
-            'role': 'identifier',
-            'safety': 'safe_first_pass',
-            'description': 'Identifier of one per-item verdict inside a run.',
-            'examples': ['thread-42', 'criterion-7'],
-        },
-        {
-            'name': 'app_alias',
-            'class': 'scope',
-            'role': 'dimension',
-            'safety': 'unsafe',
-            'description': 'App display name or slug. Platform ontology treats this as scope metadata; must NOT leak into the first-pass classifier as a free-text entity.',
-            'examples': ['kaira-bot', 'Kaira Bot', 'Voice Rx'],
-        },
-    ]
-
-    existing_entities = (
-        await session.execute(select(SherlockOntologyEntityType))
-    ).scalars().all()
-    existing_entity_index: dict[tuple[uuid.UUID | None, str | None, str], SherlockOntologyEntityType] = {
-        (row.tenant_id, row.app_id, row.name): row
-        for row in existing_entities
-    }
-    for spec in entity_specs:
-        class_row = by_name.get(spec['class'])
-        if class_row is None:
-            logger.warning(
-                'seed_sherlock_ontology: ontology class %r missing for entity %r',
-                spec['class'], spec['name'],
-            )
-            continue
-        key = (None, None, spec['name'])
-        row = existing_entity_index.get(key)
-        if row is None:
-            row = SherlockOntologyEntityType(
-                tenant_id=None,
-                app_id=None,
-                name=spec['name'],
-                ontology_class_id=class_row.id,
-                role=spec.get('role'),
-                safety=spec.get('safety', 'safe_first_pass'),
-                description=spec.get('description'),
-                examples=spec.get('examples', []),
-                is_active=True,
-            )
-            session.add(row)
-            existing_entity_index[key] = row
-        else:
-            row.ontology_class_id = class_row.id
-            row.role = spec.get('role')
-            row.safety = spec.get('safety', 'safe_first_pass')
-            row.description = spec.get('description')
-            row.examples = list(spec.get('examples', []))
-            row.is_active = True
-
-    # --- Resolvers ----------------------------------------------------
-    resolver_specs: list[dict[str, Any]] = [
-        {
-            'key': 'run-id',
-            'entity_type': 'run_id',
-            'description': 'Resolve full run IDs or short run ID prefixes.',
-            'source': 'evaluation_runs',
-            'config': {'field': 'run_id', 'match': 'prefix', 'limit': 10},
-            'safety': 'safe_first_pass',
-        },
-        {
-            'key': 'run-name',
-            'entity_type': 'run_name',
-            'description': 'Resolve run names via the pack-local semantic dimension.',
-            'source': 'semantic_dimension',
-            'config': {'dimension': 'run_name', 'match': 'contains', 'limit': 10},
-            'safety': 'explicit_only',
-        },
-    ]
-    existing_resolvers = (
-        await session.execute(select(SherlockEntityResolver))
-    ).scalars().all()
-    resolver_index: dict[tuple[uuid.UUID | None, str | None, str], SherlockEntityResolver] = {
-        (r.tenant_id, r.app_id, r.key): r for r in existing_resolvers
-    }
-    for spec in resolver_specs:
-        key = (None, None, spec['key'])
-        row = resolver_index.get(key)
-        if row is None:
-            row = SherlockEntityResolver(
-                tenant_id=None,
-                app_id=None,
-                key=spec['key'],
-                entity_type=spec['entity_type'],
-                description=spec.get('description'),
-                source=spec['source'],
-                config=spec.get('config', {}),
-                safety=spec.get('safety', 'safe_first_pass'),
-                is_active=True,
-            )
-            session.add(row)
-            resolver_index[key] = row
-        else:
-            row.entity_type = spec['entity_type']
-            row.description = spec.get('description')
-            row.source = spec['source']
-            row.config = dict(spec.get('config', {}))
-            row.safety = spec.get('safety', 'safe_first_pass')
-            row.is_active = True
-
-    await session.flush()
-    logger.info("Sherlock platform ontology seeding complete")
-
-
 async def seed_all_defaults(session: AsyncSession) -> None:
     """Idempotent entry point: seed all default data."""
     from app.services.evaluator_seed_catalog import reconcile_evaluator_seed_catalog
@@ -3401,7 +3152,6 @@ async def seed_all_defaults(session: AsyncSession) -> None:
     await _seed_report_configs(session)
     await _seed_platform_dashboards(session)
     await _seed_eval_templates(session)
-    await seed_sherlock_ontology(session)
     from app.services.orchestration_seed import seed_orchestration_defaults
     await seed_orchestration_defaults(session)
     await seed_model_pricing(session)

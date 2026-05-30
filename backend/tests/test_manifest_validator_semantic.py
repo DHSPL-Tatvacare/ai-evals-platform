@@ -11,7 +11,6 @@ def _mk(columns: dict[str, ManifestColumn]) -> AppManifest:
     return AppManifest(
         app_id="test",
         catalog_tables={"t": CatalogTable(orm="X", columns=columns)},
-        data_surfaces=[],
     )
 
 

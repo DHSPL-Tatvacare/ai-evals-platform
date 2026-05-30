@@ -105,17 +105,6 @@ class CapabilityPack(Protocol):
         """
         ...
 
-    # ---- Phase 1 / M1 (scoped-bundle rewrite): optional projection hook ----
-    #
-    # Packs MAY implement ``contribute_projection(scope)`` returning a
-    # :class:`app.services.sherlock.bundle_types.PackProjection`. The
-    # bundle layer looks it up via ``getattr`` (see
-    # :func:`collect_pack_projections`) so packs that do not opt in stay
-    # Protocol-compatible without edits. The method is intentionally
-    # **not** declared on the Protocol in Phase 1 — making it mandatory
-    # would force every shipped pack to add boilerplate that buys nothing
-    # until M2 wires the bundle into the turn loop.
-
 
 # ---------------------------------------------------------------------------
 # Registry — the ONE place new packs plug in.
@@ -333,10 +322,9 @@ def collect_pack_projections(
 ) -> list[Any]:
     """Collect optional per-pack projections contributed to the bundle.
 
-    Phase 1 / M1 assembly hook. Each pack that implements
-    ``contribute_projection(scope)`` returns a :class:`PackProjection`;
-    packs without the hook return ``None`` here and are filtered out so
-    the bundle builder can assume a homogenous list. Mirrors the shape of
+    Each pack that implements ``contribute_projection(scope)`` returns a
+    projection; packs without the hook return ``None`` here and are filtered
+    out so the consumer can assume a homogenous list. Mirrors the shape of
     :func:`collect_question_hints` / :func:`collect_tool_schema_enums`
     so harness-core never special-cases a pack id.
     """

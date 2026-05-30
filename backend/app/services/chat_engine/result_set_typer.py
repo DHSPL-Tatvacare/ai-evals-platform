@@ -14,16 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from numbers import Real
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
-ColumnRole = Literal[
-    "dimension", "measure", "temporal", "ordered_categorical", "key", "identifier"
-]
-DataType = Literal["quantitative", "temporal", "ordinal", "nominal", "boolean", "geo"]
-SemanticType = Literal[
-    "pk", "fk", "category", "id_hash", "currency", "percent",
-    "lat", "lon", "count", "ratio", "score", "duration", "none",
-]
+from app.services.chat_engine.manifest import ColumnRole, DataType, SemanticType
 
 
 @dataclass(frozen=True)

@@ -53,11 +53,6 @@ from app.models.sherlock_runtime import (
     SherlockEvidence,
     SherlockPart,
 )
-from app.models.sherlock_ontology import (
-    SherlockOntologyClass,
-    SherlockOntologyEntityType,
-    SherlockEntityResolver,
-)
 from app.models.sherlock_verified_query import SherlockVerifiedQuery
 from app.models.cost import (
     FactLlmGeneration,
@@ -113,7 +108,6 @@ __all__ = [
     "AnalyticsChart", "AnalyticsDashboard",
     "SherlockAgentSession", "SherlockPart", "SherlockConversationTurn",
     "SherlockEvidence",
-    "SherlockOntologyClass", "SherlockOntologyEntityType", "SherlockEntityResolver",
     "FactLlmGeneration", "RefLlmModelPricing", "RefLlmModelAlias", "AggLlmUsageDaily",
     "RefLlmModelsCatalog", "SnapshotLlmModelsCatalog",
     "OrchestrationSignalSnapshot",
