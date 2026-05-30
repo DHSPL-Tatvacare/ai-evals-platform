@@ -43,9 +43,6 @@ from typing import Any
 
 import openai
 from agents import Agent
-from agents.model_settings import ModelSettings
-from agents.models.openai_responses import OpenAIResponsesModel
-from openai.types.shared import Reasoning
 
 from app.auth.context import AuthContext
 from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
@@ -62,9 +59,14 @@ from app.services.sherlock_v3.data_specialist import (
     build_data_specialist,
     extract_data_specialist_output,
 )
+from app.services.sherlock_v3.limits import MAX_SPECIALIST_ATTEMPTS
 from app.services.sherlock_v3.query_synthesis_specialist import (
     build_query_synthesis_specialist,
     make_synthesis_output_extractor,
+)
+from app.services.sherlock_v3.specialist_factory import (
+    as_specialist_tool,
+    make_specialist_agent,
 )
 
 
@@ -315,7 +317,8 @@ def build_supervisor(
     # the SDK's ``Tool`` union; conditionally appending the authoring
     # sub-agent here keeps the wiring readable without invariance hacks.
     tools: list[Any] = [
-        synthesis_spec.as_tool(
+        as_specialist_tool(
+            synthesis_spec,
             tool_name='query_synthesis_specialist',
             tool_description=(
                 'Rewrite, classify, and decompose the user\'s question into a '
@@ -325,7 +328,8 @@ def build_supervisor(
             ),
             custom_output_extractor=make_synthesis_output_extractor(available_targets),
         ),
-        data_spec.as_tool(
+        as_specialist_tool(
+            data_spec,
             tool_name='data_specialist',
             tool_description=(
                 'Answers analytics questions over evaluation facts. '
@@ -339,12 +343,16 @@ def build_supervisor(
             # LLM prose. See ``data_specialist.extract_data_specialist_output``
             # for full background (2026-05-10 investigation).
             custom_output_extractor=extract_data_specialist_output,
+            # Single retry cap: the specialist loops on submit_sql across
+            # bounded internal turns instead of the supervisor re-dispatching.
+            max_turns=MAX_SPECIALIST_ATTEMPTS,
         ),
     ]
 
     if authoring_agent is not None:
         tools.append(
-            authoring_agent.as_tool(
+            as_specialist_tool(
+                authoring_agent,
                 tool_name='authoring_specialist',
                 tool_description=(
                     'Propose canvas edits to the active orchestration '
@@ -356,20 +364,17 @@ def build_supervisor(
             )
         )
 
-    return Agent(
-        name=f'sherlock-supervisor-{app_id}',
+    return make_specialist_agent(
+        role='supervisor',
+        app_id=app_id,
+        client=client,
+        model=supervisor_model,
         instructions=_SUPERVISOR_PROMPT.format(
             app_id=app_id,
             available_tools_block=_format_available_tools(available_targets),
         ),
-        model=OpenAIResponsesModel(supervisor_model, client),
-        # gpt-5.4 reasoning models reject ``temperature`` and ``top_p``.
-        # Control behavior via reasoning effort instead.
-        model_settings=ModelSettings(
-            parallel_tool_calls=False,
-            reasoning=Reasoning(effort='medium'),
-        ),
         tools=tools,
+        reasoning_effort='medium',
     )
 
 

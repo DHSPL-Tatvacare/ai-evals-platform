@@ -69,7 +69,7 @@ def _patched_supervisor():
         agent.as_tool = MagicMock(return_value='query_synthesis_specialist_tool')
         return agent
 
-    def _fake_agent(*args, **kwargs):
+    def _fake_make_specialist_agent(*args, **kwargs):
         captured['tools'] = kwargs.get('tools')
         return MagicMock()
 
@@ -77,15 +77,14 @@ def _patched_supervisor():
         patch.object(sup_mod, 'build_data_specialist', side_effect=_fake_build_data_specialist),
         patch.object(sup_mod, 'build_authoring_specialist', side_effect=_fake_build_authoring_specialist),
         patch.object(sup_mod, 'build_query_synthesis_specialist', side_effect=_fake_build_query_synthesis_specialist),
-        patch.object(sup_mod, 'Agent', side_effect=_fake_agent),
-        patch.object(sup_mod, 'OpenAIResponsesModel', MagicMock()),
+        patch.object(sup_mod, 'make_specialist_agent', side_effect=_fake_make_specialist_agent),
     ]
 
 
 class SupervisorAuthoringInclusionTests(unittest.TestCase):
     def test_excludes_authoring_when_builder_context_none(self) -> None:
         sup_mod, fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',
@@ -99,7 +98,7 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
 
     def test_excludes_authoring_when_permission_missing(self) -> None:
         sup_mod, fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',
@@ -113,7 +112,7 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
 
     def test_excludes_authoring_when_auth_is_none(self) -> None:
         sup_mod, fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',
@@ -127,7 +126,7 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
 
     def test_includes_authoring_when_both_present(self) -> None:
         sup_mod, fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',
@@ -141,7 +140,7 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
 
     def test_excludes_authoring_when_builder_is_view_mode(self) -> None:
         sup_mod, fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',
@@ -172,7 +171,7 @@ class SupervisorAuthoringInclusionTests(unittest.TestCase):
             app_access=frozenset({'inside-sales'}),
         )
         sup_mod, fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',

@@ -362,11 +362,7 @@ async def _bump_and_read_context_window(
                     SherlockAgentSession.chat_session_id
                     == uuid.UUID(runtime_session.chat_session_id)
                 )
-                .values(
-                    cumulative_input_tokens=(
-                        SherlockAgentSession.cumulative_input_tokens + increment
-                    )
-                )
+                .values(cumulative_input_tokens=increment)
                 .returning(SherlockAgentSession.cumulative_input_tokens),
             )
             row = result.first()

@@ -64,7 +64,7 @@ class WorkbenchFullRolloutTests(unittest.TestCase):
                 from agents.models.interface import Model
                 model_stub = MagicMock(spec=Model)
                 with patch(
-                    'app.services.sherlock_v3.data_specialist.OpenAIResponsesModel',
+                    'app.services.sherlock_v3.specialist_factory.OpenAIResponsesModel',
                     return_value=model_stub,
                 ):
                     agent = build_data_specialist(client, app_id, model='gpt-5.4', grounding=None)

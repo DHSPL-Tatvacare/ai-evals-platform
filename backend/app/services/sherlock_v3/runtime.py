@@ -19,12 +19,10 @@ from app.services.orchestration_authoring.canvas_patch import (
 from app.services.sherlock_v3.azure_client import get_sherlock_azure_client
 from app.services.sherlock_v3.contracts import (
     AssistantTextPart,
-    Attempt,
     CanvasPatchPart,
     CompactionPart,
     ErrorPart,
     ReasoningPart,
-    RetryPart,
     SpecialistBrief,
     SpecialistScope,
     StepFinishPart,
@@ -397,21 +395,10 @@ async def _emit_part_for_sdk_event(event: Any, ctx: SherlockTurnContext) -> None
             tool_call = getattr(event, 'item', None)
             specialist = _tool_call_name(tool_call)
             call_id = _tool_call_call_id(tool_call) or f'call_{uuid.uuid4().hex[:12]}'
-            counts = ctx.scratch.setdefault('_specialist_dispatch_counts', {})
-            counts[specialist] = counts.get(specialist, 0) + 1
-            attempt_number = counts[specialist]
-            if attempt_number > 1:
-                prior = ctx.scratch.get('_last_data_specialist_attempt') if specialist == 'data_specialist' else None
-                if isinstance(prior, Attempt):
-                    await emitter.emit(RetryPart(
-                        id=new_part_id(),
-                        chat_session_id='',
-                        seq=0,
-                        created_at=0,
-                        specialist=specialist,
-                        attempt_number=attempt_number,
-                        failed_attempt=prior,
-                    ))
+            # Retries now live inside the specialist (bounded submit_sql loop,
+            # S1-8); the supervisor no longer re-dispatches for a retry, so the
+            # RetryPart is emitted off the in-handler attempt_no, not here. A
+            # repeat dispatch here is composition (a different sub-question).
             brief = await _tool_call_brief(tool_call, ctx=ctx)
             emitted = await emitter.emit(SubtaskPart(
                 id=new_part_id(),
@@ -428,6 +415,8 @@ async def _emit_part_for_sdk_event(event: Any, ctx: SherlockTurnContext) -> None
         if item_name == 'tool_output':
             await _close_subtask_on_output(getattr(event, 'item', None), ctx)
         return
+
+    logger.debug('sherlock_v3 unhandled SDK stream event type: %s', event_type)
 
 
 def _tool_output_text(item: Any) -> str:

@@ -32,9 +32,6 @@ from typing import Any
 
 import openai
 from agents import Agent, FunctionTool
-from agents.model_settings import ModelSettings
-from agents.models.openai_responses import OpenAIResponsesModel
-from openai.types.shared import Reasoning
 
 from app.auth.context import AuthContext
 from app.services.orchestration.node_registry import NODE_REGISTRY
@@ -43,11 +40,35 @@ from app.services.orchestration_authoring.orchestration_authoring_pack import (
     OrchestrationAuthoringPack,
     node_type_enum,
 )
+from app.services.sherlock_v3.contracts import SpecialistResult
+from app.services.sherlock_v3.specialist_factory import make_specialist_agent
+from app.services.sherlock_v3.tool_output import (
+    build_call_name_index,
+    is_tool_output_for,
+)
 
 logger = logging.getLogger(__name__)
 
 
 _AUTHORING_TOOL_TERMINAL = 'apply_patch'
+
+_AUTHORING_REFUSAL_SUMMARY = (
+    'The authoring specialist could not produce a canvas edit for this request.'
+)
+
+
+def _authoring_refusal_json() -> str:
+    """Deterministic refusal SpecialistResult JSON when no usable output exists.
+
+    Mirrors query_synthesis_specialist._refusal_brief: a non-empty human
+    reason instead of a silent empty string, so the supervisor never
+    projects a blank error/empty card.
+    """
+    return SpecialistResult(
+        kind='error',
+        status='error',
+        summary=_AUTHORING_REFUSAL_SUMMARY,
+    ).model_dump_json()
 
 
 # Phase 3 — hard cap on nodes inlined into the specialist's system
@@ -347,14 +368,13 @@ def build_authoring_specialist(
         app_id=app_id, builder_context=builder_context,
     )
 
-    return Agent(
-        name='sherlock-authoring-specialist',
+    return make_specialist_agent(
+        role='authoring',
+        app_id=app_id,
+        client=client,
+        model=model,
         instructions=system_prompt,
-        model=OpenAIResponsesModel(model, client),
-        model_settings=ModelSettings(
-            parallel_tool_calls=False,
-            reasoning=Reasoning(effort='medium'),
-        ),
+        reasoning_effort='medium',
         tools=function_tools,
     )
 
@@ -376,9 +396,9 @@ async def extract_authoring_specialist_output(run_result: Any) -> str:
     clarifying-question turns.
     """
     new_items = list(getattr(run_result, 'new_items', []) or [])
-    call_name_index = _build_call_name_index(new_items)
+    call_name_index = build_call_name_index(new_items)
     for item in reversed(new_items):
-        if not _is_tool_output_for(
+        if not is_tool_output_for(
             item, _AUTHORING_TOOL_TERMINAL, call_name_index=call_name_index,
         ):
             continue
@@ -388,46 +408,11 @@ async def extract_authoring_specialist_output(run_result: Any) -> str:
         if isinstance(output, dict):
             return json.dumps(output, default=str)
     final_output = getattr(run_result, 'final_output', None)
-    return final_output if isinstance(final_output, str) else ''
-
-
-def _build_call_name_index(new_items: list[Any]) -> dict[str, str]:
-    """call_id -> tool_name, harvested from every tool_call_item in the run."""
-    index: dict[str, str] = {}
-    for item in new_items:
-        if getattr(item, 'type', None) != 'tool_call_item':
-            continue
-        raw = getattr(item, 'raw_item', None)
-        call_id = (
-            raw.get('call_id') if isinstance(raw, dict)
-            else getattr(raw, 'call_id', None)
-        )
-        name = (
-            raw.get('name') if isinstance(raw, dict)
-            else getattr(raw, 'name', None)
-        )
-        if isinstance(call_id, str) and isinstance(name, str):
-            index[call_id] = name
-    return index
-
-
-def _is_tool_output_for(
-    item: Any,
-    tool_name: str,
-    *,
-    call_name_index: dict[str, str],
-) -> bool:
-    """True iff `item` is a tool_call_output_item whose call_id maps to `tool_name`."""
-    if getattr(item, 'type', None) != 'tool_call_output_item':
-        return False
-    raw = getattr(item, 'raw_item', None)
-    call_id = (
-        raw.get('call_id') if isinstance(raw, dict)
-        else getattr(raw, 'call_id', None)
-    )
-    if not isinstance(call_id, str):
-        return False
-    return call_name_index.get(call_id) == tool_name
+    if isinstance(final_output, str) and final_output.strip():
+        return final_output
+    # No apply_patch output and no usable text — emit a refusal
+    # SpecialistResult so the supervisor never projects a blank card.
+    return _authoring_refusal_json()
 
 
 __all__ = [

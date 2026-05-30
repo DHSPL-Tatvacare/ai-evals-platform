@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 
 DATA_SPECIALIST = 'data_specialist'
 
+# Invariant (S1-3): no SubtaskResult with status in {error, empty} carries
+# an empty summary — the FE error card must always show a human reason.
+_UNPARSEABLE_DATA_SUMMARY = 'The data specialist did not return a readable result.'
+_EMPTY_TEXT_SUMMARY = 'The specialist returned no content.'
+# On status='ok' the supervisor reads the specialist's text directly, so the
+# consultation row carries no summary — the invariant binds error|empty only.
+_OK_NO_SUMMARY = ''
+
 
 def _parse_specialist_result(output: str) -> SpecialistResult | None:
     if not output or not output.strip():
@@ -38,7 +46,7 @@ def project_specialist_output(specialist: str, output: str) -> tuple[SubtaskResu
     if specialist == DATA_SPECIALIST:
         parsed = _parse_specialist_result(output)
         if parsed is None:
-            return SubtaskResult(status='error', summary=''), True
+            return SubtaskResult(status='error', summary=_UNPARSEABLE_DATA_SUMMARY), True
         resolved = _resolved_attempt(parsed.attempts)
         is_error = parsed.status == 'error' or parsed.kind == 'error'
         return (
@@ -53,5 +61,9 @@ def project_specialist_output(specialist: str, output: str) -> tuple[SubtaskResu
 
     # query_synthesis / authoring return text used by the supervisor; the
     # consultation row needs only that the specialist ran, not the raw text.
+    # On empty the invariant binds: carry a human reason. On ok the
+    # supervisor reads the text directly, so an empty summary is fine.
     text = (output or '').strip()
-    return SubtaskResult(status='ok' if text else 'empty', summary=''), False
+    if not text:
+        return SubtaskResult(status='empty', summary=_EMPTY_TEXT_SUMMARY), False
+    return SubtaskResult(status='ok', summary=_OK_NO_SUMMARY), False

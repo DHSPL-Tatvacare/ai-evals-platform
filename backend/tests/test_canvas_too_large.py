@@ -101,8 +101,7 @@ class CanvasTooLargeBuildTests(unittest.TestCase):
         # Patch every external dep so the build doesn't touch Azure
         # or registries.
         from app.services.sherlock_v3 import authoring_specialist as as_mod
-        with patch.object(as_mod, 'OpenAIResponsesModel', MagicMock()), \
-             patch.object(as_mod, 'Agent', MagicMock(return_value='ok-agent')):
+        with patch.object(as_mod, 'make_specialist_agent', MagicMock(return_value='ok-agent')):
             agent = build_authoring_specialist(
                 MagicMock(), 'inside-sales',
                 model='gpt-4o-mini',
@@ -124,8 +123,7 @@ class CanvasTooLargeBuildTests(unittest.TestCase):
     def test_empty_canvas_builds_normally(self) -> None:
         snap = _snapshot_with_n_nodes(0)
         from app.services.sherlock_v3 import authoring_specialist as as_mod
-        with patch.object(as_mod, 'OpenAIResponsesModel', MagicMock()), \
-             patch.object(as_mod, 'Agent', MagicMock(return_value='ok-agent')):
+        with patch.object(as_mod, 'make_specialist_agent', MagicMock(return_value='ok-agent')):
             agent = build_authoring_specialist(
                 MagicMock(), 'inside-sales',
                 model='gpt-4o-mini',
@@ -161,7 +159,7 @@ def _patched_supervisor_canvas_too_large():
         agent.as_tool = MagicMock(return_value='query_synthesis_specialist_tool')
         return agent
 
-    def _fake_agent(*args, **kwargs):
+    def _fake_make_specialist_agent(*args, **kwargs):
         captured['tools'] = kwargs.get('tools')
         return MagicMock()
 
@@ -169,15 +167,14 @@ def _patched_supervisor_canvas_too_large():
         patch.object(sup_mod, 'build_data_specialist', side_effect=_fake_build_data_specialist),
         patch.object(sup_mod, 'build_authoring_specialist', side_effect=_fake_build_authoring_specialist),
         patch.object(sup_mod, 'build_query_synthesis_specialist', side_effect=_fake_build_query_synthesis_specialist),
-        patch.object(sup_mod, 'Agent', side_effect=_fake_agent),
-        patch.object(sup_mod, 'OpenAIResponsesModel', MagicMock()),
+        patch.object(sup_mod, 'make_specialist_agent', side_effect=_fake_make_specialist_agent),
     ]
 
 
 class SupervisorSkipsAuthoringWhenCanvasTooLarge(unittest.TestCase):
     def test_supervisor_skips_authoring_tool_inclusion(self) -> None:
         fake_client, captured, patchers = _patched_supervisor_canvas_too_large()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',

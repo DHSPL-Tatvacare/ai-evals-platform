@@ -10,16 +10,22 @@ supervisor sees only the LLM's prose. Downstream the wire event for
 
 This test pins the extractor that fixes the boundary loss:
 ``extract_data_specialist_output`` walks ``RunResult.new_items``
-backward, finds the most recent ``submit_sql`` ToolCallOutputItem, and
-returns its raw JSON string. Falls back to ``final_output`` text when
-no submit_sql output exists.
+backward, finds the most recent ``submit_sql`` ToolCallOutputItem (joined
+to its call via the shared call_id -> name index), and returns its raw
+JSON string. Falls back to ``final_output`` text when no submit_sql output
+exists, then to a refusal SpecialistResult JSON when there is no usable
+text either (S1-3 invariant: no blank error card).
+
+Fixtures model the real SDK shape: tool_call_item carries `name` +
+`call_id`; tool_call_output_item carries `call_id` only.
 """
 from __future__ import annotations
 
 import json
 import unittest
-from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
+
 
 from app.services.sherlock_v3.data_specialist import (
     extract_data_specialist_output,
@@ -29,28 +35,29 @@ from app.services.sherlock_v3.data_specialist import (
 # ── stubs that mimic the SDK shapes the extractor reads ────────────
 
 
-@dataclass
-class _RawToolOutput:
-    name: str = 'submit_sql'
-    type: str = 'function_call_output'
+def _tool_call(name: str, call_id: str) -> SimpleNamespace:
+    """Mirror SDK ToolCallItem: raw_item carries `name` + `call_id`."""
+    return SimpleNamespace(
+        type='tool_call_item',
+        raw_item={'name': name, 'call_id': call_id},
+    )
 
 
-@dataclass
-class _ToolOutputItem:
-    output: Any
-    raw_item: Any = field(default_factory=_RawToolOutput)
-    type: str = 'tool_call_output_item'
+def _tool_output(call_id: str, output: Any) -> SimpleNamespace:
+    """Mirror SDK ToolCallOutputItem: raw_item carries ONLY `call_id`."""
+    return SimpleNamespace(
+        type='tool_call_output_item',
+        raw_item={'call_id': call_id},
+        output=output,
+    )
 
 
-@dataclass
-class _MessageItem:
-    type: str = 'message_output_item'
+def _message() -> SimpleNamespace:
+    return SimpleNamespace(type='message_output_item')
 
 
-@dataclass
-class _RunResultStub:
-    new_items: list[Any]
-    final_output: str = 'fallback message'
+def _run(new_items: list[Any], final_output: Any = 'fallback message') -> SimpleNamespace:
+    return SimpleNamespace(new_items=new_items, final_output=final_output)
 
 
 # ── tests ──────────────────────────────────────────────────────────
@@ -68,12 +75,14 @@ class ExtractorPullsLastSubmitSqlOutputTests(unittest.IsolatedAsyncioTestCase):
             'artifacts': [{'kind': 'chart', 'payload': {'kind': 'chart'}}],
             'meta': {'latency_ms': 56},
         })
-        run = _RunResultStub(new_items=[
-            _MessageItem(),
-            _ToolOutputItem(output=first_payload),
-            _MessageItem(),
-            _ToolOutputItem(output=second_payload),
-            _MessageItem(),  # data_specialist's final answer message
+        run = _run(new_items=[
+            _message(),
+            _tool_call('submit_sql', 'c1'),
+            _tool_output('c1', first_payload),
+            _message(),
+            _tool_call('submit_sql', 'c2'),
+            _tool_output('c2', second_payload),
+            _message(),  # data_specialist's final answer message
         ])
 
         result = await extract_data_specialist_output(run)
@@ -92,8 +101,8 @@ class ExtractorFallbackTests(unittest.IsolatedAsyncioTestCase):
         # Clarifying-question turn: the LLM answered without calling
         # submit_sql. The extractor returns the final-answer text so
         # the SDK's default behaviour is preserved.
-        run = _RunResultStub(
-            new_items=[_MessageItem(), _MessageItem()],
+        run = _run(
+            new_items=[_message(), _message()],
             final_output='Could you clarify which app you mean?',
         )
         result = await extract_data_specialist_output(run)
@@ -104,43 +113,50 @@ class ExtractorFallbackTests(unittest.IsolatedAsyncioTestCase):
         # instead of a string, json-serialize it so ``json.loads``
         # downstream still works.
         payload_dict = {'kind': 'data', 'status': 'ok', 'summary': 'x'}
-        run = _RunResultStub(new_items=[_ToolOutputItem(output=payload_dict)])
+        run = _run(new_items=[
+            _tool_call('submit_sql', 'c1'),
+            _tool_output('c1', payload_dict),
+        ])
         result = await extract_data_specialist_output(run)
         self.assertEqual(json.loads(result), payload_dict)
 
-    async def test_empty_new_items_returns_empty_string_or_final(self) -> None:
-        run = _RunResultStub(new_items=[], final_output='')
+    async def test_empty_new_items_no_text_returns_refusal(self) -> None:
+        # S1-3: no tool output and no usable text -> refusal SpecialistResult.
+        run = _run(new_items=[], final_output='')
         result = await extract_data_specialist_output(run)
-        self.assertEqual(result, '')
+        decoded = json.loads(result)
+        self.assertEqual(decoded['status'], 'error')
+        self.assertNotEqual(decoded['summary'], '')
 
-    async def test_non_string_final_output_returns_empty(self) -> None:
-        run = _RunResultStub(new_items=[], final_output=None)  # type: ignore[arg-type]
+    async def test_non_string_final_output_returns_refusal(self) -> None:
+        # S1-3: a None final_output with no tool output -> refusal JSON.
+        run = _run(new_items=[], final_output=None)
         result = await extract_data_specialist_output(run)
-        self.assertEqual(result, '')
+        decoded = json.loads(result)
+        self.assertEqual(decoded['status'], 'error')
+        self.assertNotEqual(decoded['summary'], '')
 
 
-class ExtractorHandlesAlternateRawShapesTests(unittest.IsolatedAsyncioTestCase):
-    async def test_dict_raw_item_with_matching_name(self) -> None:
-        run = _RunResultStub(new_items=[
-            _ToolOutputItem(
-                output='{"kind":"data","status":"ok"}',
-                raw_item={'type': 'function_call_output', 'name': 'submit_sql'},
-            ),
+class ExtractorMatchesByCallIdIndexTests(unittest.IsolatedAsyncioTestCase):
+    async def test_matches_submit_sql_via_call_id_index(self) -> None:
+        run = _run(new_items=[
+            _tool_call('submit_sql', 'c1'),
+            _tool_output('c1', '{"kind":"data","status":"ok"}'),
         ])
         result = await extract_data_specialist_output(run)
         self.assertEqual(result, '{"kind":"data","status":"ok"}')
 
-    async def test_raw_item_attribute_with_matching_name(self) -> None:
-        @dataclass
-        class _AltRaw:
-            name: str = 'submit_sql'
-
-        run = _RunResultStub(new_items=[
-            _ToolOutputItem(
-                output='{"kind":"data","status":"ok"}',
-                raw_item=_AltRaw(),
-            ),
-        ])
+    async def test_attribute_style_raw_items_match(self) -> None:
+        call = SimpleNamespace(
+            type='tool_call_item',
+            raw_item=SimpleNamespace(name='submit_sql', call_id='c1'),
+        )
+        out = SimpleNamespace(
+            type='tool_call_output_item',
+            raw_item=SimpleNamespace(call_id='c1'),
+            output='{"kind":"data","status":"ok"}',
+        )
+        run = _run(new_items=[call, out])
         result = await extract_data_specialist_output(run)
         self.assertEqual(result, '{"kind":"data","status":"ok"}')
 

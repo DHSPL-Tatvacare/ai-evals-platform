@@ -9,10 +9,7 @@ from typing import Any
 
 import openai
 from agents import Agent, FunctionTool
-from agents.model_settings import ModelSettings
-from agents.models.openai_responses import OpenAIResponsesModel
 from agents.tool_context import ToolContext
-from openai.types.shared import Reasoning
 
 from app.services.sherlock_v3.contracts import (
     Artifact,
@@ -22,6 +19,7 @@ from app.services.sherlock_v3.contracts import (
     ErrorPart,
     EvidencePart,
     EvidenceRef,
+    RetryPart,
     SpecialistMeta,
     SpecialistResult,
     ToolPart,
@@ -33,6 +31,11 @@ from app.services.sherlock_v3.contracts import (
 from app.services.sherlock_v3.data_specialist_prompt import build_data_specialist_prompt
 from app.services.sherlock_v3.grounding import GroundingContext
 from app.services.sherlock_v3.limits import MAX_SPECIALIST_ATTEMPTS
+from app.services.sherlock_v3.specialist_factory import make_specialist_agent
+from app.services.sherlock_v3.tool_output import (
+    build_call_name_index,
+    is_tool_output_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +160,22 @@ def _make_submit_sql_handler(
         if isinstance(scratch, dict):
             attempt_no = scratch.get('_submit_sql_attempts', 0) + 1
             scratch['_submit_sql_attempts'] = attempt_no
+            # Retries are now in-specialist (bounded submit_sql loop, S1-8), so
+            # the RetryPart fires here off the in-handler attempt_no — not on a
+            # supervisor re-dispatch. attempt_no>1 means the prior attempt failed
+            # and the model called submit_sql again with the failure in context.
+            if attempt_no > 1 and emitter is not None:
+                prior = scratch.get('_last_data_specialist_attempt')
+                if isinstance(prior, Attempt):
+                    await emitter.emit(RetryPart(
+                        id=new_part_id(),
+                        chat_session_id='',
+                        seq=0,
+                        created_at=0,
+                        specialist='data_specialist',
+                        attempt_number=attempt_no,
+                        failed_attempt=prior,
+                    ))
             if attempt_no > MAX_SPECIALIST_ATTEMPTS:
                 cap_message = (
                     f'Sherlock tried {MAX_SPECIALIST_ATTEMPTS} times and '
@@ -1087,17 +1106,38 @@ async def _persist_sql_evidence(
 # ─────────────────────── as_tool output extractor ───────────────────────
 
 
-# Tool name we look for in the data_specialist's RunResult. The data_specialist
-# has exactly one tool (``submit_sql``); the extractor still matches by name so
-# a future second tool doesn't silently leak the wrong shape.
+# Tool name we look for in the data_specialist's RunResult. The shared
+# safe matcher joins outputs back to this name via the call_id index, so
+# a future second tool can never silently leak the wrong shape.
 _SUBMIT_SQL_TOOL_NAME = 'submit_sql'
+
+_DATA_REFUSAL_SUMMARY = (
+    'The data specialist could not produce a result for this question.'
+)
+
+
+def _data_refusal_json() -> str:
+    """Deterministic refusal SpecialistResult JSON when no usable output exists.
+
+    Mirrors query_synthesis_specialist._refusal_brief: rather than a silent
+    empty string (which the supervisor would project to a blank error card),
+    carry a non-empty human reason so the FE shows why the turn failed.
+    """
+    return SpecialistResult(
+        kind='error',
+        status='error',
+        summary=_DATA_REFUSAL_SUMMARY,
+    ).model_dump_json()
 
 
 async def extract_data_specialist_output(run_result: Any) -> str:
-    """Pull the last submit_sql tool output (SpecialistResult JSON) from the data_specialist RunResult; fall back to final assistant text when the LLM did not call submit_sql."""
+    """Pull the last submit_sql tool output (SpecialistResult JSON) from the data_specialist RunResult; fall back to final assistant text, then a refusal SpecialistResult when neither exists."""
     new_items = list(getattr(run_result, 'new_items', []) or [])
+    call_name_index = build_call_name_index(new_items)
     for item in reversed(new_items):
-        if not _is_tool_output_for(item, _SUBMIT_SQL_TOOL_NAME):
+        if not is_tool_output_for(
+            item, _SUBMIT_SQL_TOOL_NAME, call_name_index=call_name_index,
+        ):
             continue
         output = getattr(item, 'output', None)
         if isinstance(output, str) and output.strip():
@@ -1107,33 +1147,11 @@ async def extract_data_specialist_output(run_result: Any) -> str:
     # Fallback: SDK default — last message text. Used when the LLM
     # answered without calling submit_sql (e.g., a clarifying question).
     final_output = getattr(run_result, 'final_output', None)
-    return final_output if isinstance(final_output, str) else ''
-
-
-def _is_tool_output_for(item: Any, tool_name: str) -> bool:
-    """Return True iff ``item`` is a ToolCallOutputItem produced by ``tool_name``.
-
-    SDK shape (post 2026-04 refresh): ``ToolCallOutputItem`` has a
-    ``raw_item`` whose ``name`` (when emitted by the Responses API) names
-    the tool. Older shapes name it via ``call_id`` matched against a
-    preceding ``ToolCallItem``; we accept either path so a SDK minor
-    bump doesn't break the extractor silently.
-    """
-    item_type = getattr(item, 'type', None)
-    if item_type != 'tool_call_output_item':
-        return False
-    raw = getattr(item, 'raw_item', None)
-    if isinstance(raw, dict):
-        if raw.get('name') == tool_name:
-            return True
-    name_attr = getattr(raw, 'name', None)
-    if isinstance(name_attr, str) and name_attr == tool_name:
-        return True
-    # data_specialist has only one tool; if the item is a tool output and
-    # we couldn't read a name from raw_item, assume it's submit_sql. This
-    # is safe today (one tool) and surfaces a hint via a routing log line
-    # if a second tool is ever added.
-    return True
+    if isinstance(final_output, str) and final_output.strip():
+        return final_output
+    # No tool output and no usable text — emit a refusal SpecialistResult
+    # so the supervisor never projects a blank error summary.
+    return _data_refusal_json()
 
 
 # ─────────────────────── agent build ───────────────────────
@@ -1190,22 +1208,19 @@ def build_data_specialist(
         instructions_block=instructions_block,
     )
 
-    return Agent(
-        name='sherlock-data-specialist',
+    return make_specialist_agent(
+        role='data',
+        app_id=app_id,
+        client=client,
+        model=model,
         instructions=system_prompt,
-        model=OpenAIResponsesModel(model, client),
-        model_settings=ModelSettings(
-            tool_choice='auto',
-            parallel_tool_calls=False,
-            reasoning=Reasoning(effort='low'),
-        ),
-        # submit_sql already produces the final SpecialistResult JSON;
-        # stop_on_first_tool returns that directly as the agent's output
-        # instead of paying for a second LLM round-trip whose output the
-        # supervisor never sees (extract_data_specialist_output reads
-        # the tool result, not the post-tool LLM text). Cuts per-turn
-        # specialist latency roughly in half.
-        tool_use_behavior='stop_on_first_tool',
+        reasoning_effort='low',
+        tool_choice='auto',
+        # Bounded multi-turn: the specialist may call submit_sql again after
+        # seeing an error verdict (run_llm_again, the factory default), capped
+        # by max_turns=MAX_SPECIALIST_ATTEMPTS on the as_specialist_tool wrapper.
+        # extract_data_specialist_output reads the LAST submit_sql output, so
+        # the final SpecialistResult is the last attempt.
         tools=[
             FunctionTool(
                 name='submit_sql',

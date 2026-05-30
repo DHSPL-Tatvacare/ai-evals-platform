@@ -93,10 +93,14 @@ class AuthoringSpecialistExtractorTests(unittest.IsolatedAsyncioTestCase):
         result = await extract_authoring_specialist_output(run_result)
         self.assertEqual(result, 'Which connection should I use?')
 
-    async def test_returns_empty_string_when_no_items_no_final(self) -> None:
+    async def test_no_items_no_final_returns_refusal(self) -> None:
+        # S1-3: no apply_patch output and no usable text -> refusal
+        # SpecialistResult JSON with a non-empty human reason.
         run_result = SimpleNamespace(new_items=[], final_output=None)
         result = await extract_authoring_specialist_output(run_result)
-        self.assertEqual(result, '')
+        decoded = json.loads(result)
+        self.assertEqual(decoded['status'], 'error')
+        self.assertNotEqual(decoded['summary'], '')
 
     async def test_handles_attribute_style_raw_items(self) -> None:
         """Some SDK builds expose raw_item as an object, not a dict.

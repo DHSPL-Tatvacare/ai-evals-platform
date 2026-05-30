@@ -21,13 +21,13 @@ def _client(compacted_id: str = 'resp_compacted') -> SimpleNamespace:
 
 
 def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(emitter=SimpleNamespace(emit=AsyncMock()))
+    return SimpleNamespace(emitter=SimpleNamespace(emit=AsyncMock(), update=AsyncMock()))
 
 
 class SupervisorCompactionTriggerTests(unittest.IsolatedAsyncioTestCase):
     async def test_compacts_and_swaps_chain_head_when_over_threshold(self):
         ctx, client = _ctx(), _client()
-        new_id = await _maybe_compact_supervisor(
+        new_id, _tokens = await _maybe_compact_supervisor(
             ctx=ctx, client=client, model='gpt-5.4',
             last_response_id='resp_original',
             cumulative_tokens=CONTEXT_COMPACT_THRESHOLD_TOKENS,
@@ -41,7 +41,7 @@ class SupervisorCompactionTriggerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_noop_when_under_threshold(self):
         ctx, client = _ctx(), _client()
-        new_id = await _maybe_compact_supervisor(
+        new_id, _tokens = await _maybe_compact_supervisor(
             ctx=ctx, client=client, model='gpt-5.4',
             last_response_id='resp_original',
             cumulative_tokens=CONTEXT_COMPACT_THRESHOLD_TOKENS - 1,
@@ -52,7 +52,7 @@ class SupervisorCompactionTriggerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_noop_when_no_chain_head(self):
         ctx, client = _ctx(), _client()
-        new_id = await _maybe_compact_supervisor(
+        new_id, _tokens = await _maybe_compact_supervisor(
             ctx=ctx, client=client, model='gpt-5.4',
             last_response_id=None,
             cumulative_tokens=CONTEXT_COMPACT_THRESHOLD_TOKENS * 10,

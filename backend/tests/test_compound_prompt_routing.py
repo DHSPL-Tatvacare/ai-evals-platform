@@ -98,17 +98,24 @@ def _patched_supervisor():
         agent.as_tool = MagicMock(return_value='query_synthesis_specialist_tool')
         return agent
 
-    def _fake_agent(*args, **kwargs):
+    from app.services.sherlock_v3 import specialist_factory as factory_mod
+
+    def _fake_make_specialist_agent(*args, **kwargs):
         captured['tools'] = kwargs.get('tools')
-        captured['model_settings'] = kwargs.get('model_settings')
-        return MagicMock()
+        # Route through the real factory (tools emptied so the Agent ctor
+        # accepts the sentinel tool list) to capture the ModelSettings the
+        # seam actually builds — parallel_tool_calls=False rides on it.
+        real_kwargs = dict(kwargs)
+        real_kwargs['tools'] = []
+        agent = factory_mod.make_specialist_agent(*args, **real_kwargs)
+        captured['model_settings'] = agent.model_settings
+        return agent
 
     return fake_client, captured, [
         patch.object(sup_mod, 'build_data_specialist', side_effect=_fake_build_data_specialist),
         patch.object(sup_mod, 'build_authoring_specialist', side_effect=_fake_build_authoring_specialist),
         patch.object(sup_mod, 'build_query_synthesis_specialist', side_effect=_fake_build_query_synthesis_specialist),
-        patch.object(sup_mod, 'Agent', side_effect=_fake_agent),
-        patch.object(sup_mod, 'OpenAIResponsesModel', MagicMock()),
+        patch.object(sup_mod, 'make_specialist_agent', side_effect=_fake_make_specialist_agent),
     ]
 
 
@@ -119,7 +126,7 @@ class SupervisorParallelDisabledTests(unittest.TestCase):
 
     def test_supervisor_keeps_parallel_tool_calls_false(self) -> None:
         fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',
@@ -134,7 +141,7 @@ class SupervisorParallelDisabledTests(unittest.TestCase):
     def test_supervisor_includes_both_specialists_in_tool_list(self) -> None:
         # Sequencing only matters when both tools are on the surface.
         fake_client, captured, patchers = _patched_supervisor()
-        with patchers[0], patchers[1], patchers[2], patchers[3], patchers[4]:
+        with patchers[0], patchers[1], patchers[2], patchers[3]:
             sup_mod.build_supervisor(
                 'inside-sales', fake_client,
                 supervisor_model='gpt-4o',

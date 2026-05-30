@@ -31,15 +31,13 @@ from typing import Any
 
 import openai
 from agents import Agent
-from agents.model_settings import ModelSettings
-from agents.models.openai_responses import OpenAIResponsesModel
-from openai.types.shared import Reasoning
 
 from app.services.sherlock_v3.contracts import (
     SubQuestion,
     SynthesisBrief,
     SynthesisTarget,
 )
+from app.services.sherlock_v3.specialist_factory import make_specialist_agent
 
 logger = logging.getLogger(__name__)
 
@@ -141,14 +139,13 @@ def build_query_synthesis_specialist(
         + '\n'
     )
 
-    return Agent(
-        name='sherlock-query-synthesis-specialist',
+    return make_specialist_agent(
+        role='query_synthesis',
+        app_id=app_id,
+        client=client,
+        model=model,
         instructions=system_prompt,
-        model=OpenAIResponsesModel(model, client),
-        model_settings=ModelSettings(
-            parallel_tool_calls=False,
-            reasoning=Reasoning(effort='low'),
-        ),
+        reasoning_effort='low',
         output_type=SynthesisBrief,
         tools=[],
     )

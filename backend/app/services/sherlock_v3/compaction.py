@@ -14,11 +14,15 @@ move in lockstep.
 """
 from __future__ import annotations
 
-# Rendered-context size at which the supervisor chain is compacted.
-# Production target: 120_000 (leaves ~50K headroom under gpt-5.4's working
-# context). TEMP 2026-05-19: lowered to 20_000 for live UI verification of the
-# compaction separator + progress pill. Revert to 120_000 after user sign-off.
-CONTEXT_COMPACT_THRESHOLD_TOKENS: int = 20_000
+# Rendered-context size at which the supervisor chain is compacted, derived
+# window-relative. The window is the supervisor model's context_limit from
+# analytics.ref_llm_models_catalog (gpt-5.4 = 1_050_000); compaction fires at
+# 90% of it. Static constant by design — no per-turn DB lookup.
+MODEL_CONTEXT_WINDOW_TOKENS: int = 1_050_000
+CONTEXT_COMPACT_RATIO: float = 0.9
+CONTEXT_COMPACT_THRESHOLD_TOKENS: int = round(
+    CONTEXT_COMPACT_RATIO * MODEL_CONTEXT_WINDOW_TOKENS
+)
 
 # Ratio above which the chat widget starts showing a "context filling" pill
 # (75% → 0.75). Below this, no FE noise. Above, it ticks at 10% increments.
@@ -27,6 +31,8 @@ CONTEXT_PROGRESS_TICK_RATIO: float = 0.10
 
 
 __all__ = [
+    'MODEL_CONTEXT_WINDOW_TOKENS',
+    'CONTEXT_COMPACT_RATIO',
     'CONTEXT_COMPACT_THRESHOLD_TOKENS',
     'CONTEXT_PROGRESS_START_RATIO',
     'CONTEXT_PROGRESS_TICK_RATIO',
