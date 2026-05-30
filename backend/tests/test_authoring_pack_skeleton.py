@@ -45,11 +45,13 @@ class AuthoringPackSkeletonTests(unittest.TestCase):
         )
 
     def test_reason_codes_complete(self) -> None:
-        # All 13 codes from the implementation plan §Reason codes.
+        # Plan §Reason codes plus the A-Step 2 value-level vocabulary guard
+        # (UNKNOWN_OUTCOME / UNKNOWN_EVENT) the per-node schema cannot enforce.
         expected = {
             'NO_BUILDER_CONTEXT', 'PERMISSION_DENIED', 'APP_FORBIDDEN',
             'WORKFLOW_NOT_FOUND', 'UNKNOWN_NODE_TYPE', 'NODE_CONFIG_INVALID',
             'PREDICATE_INVALID', 'GRAPH_INVALID', 'UUID_NOT_AUTHORIZED',
+            'UNKNOWN_OUTCOME', 'UNKNOWN_EVENT',
             'BASE_HASH_MISMATCH', 'CREDENTIAL_LEAK_BLOCKED',
             'PATCH_OPS_EMPTY', 'PATCH_TOO_LARGE',
         }

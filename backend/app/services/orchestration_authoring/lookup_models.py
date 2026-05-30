@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from app.services.orchestration_authoring.credential_field_filter import (
     FORBIDDEN_FIELD_NAMES,
@@ -79,6 +80,28 @@ class NodeTypeRef(BaseModel):
     output_edges: list[str] = Field(default_factory=list)
 
 
+class UpstreamVariables(BaseModel):
+    """Response envelope for `list_upstream_variables`.
+
+    A thin pass-through of `resolve_upstream_variables`'s output so the
+    authoring agent reads the SAME {fields, events, outcome_enums,
+    unresolved} the builder's input pane gets. The resolver owns the
+    vocabulary — this model never re-derives outcome/event names. Shapes
+    mirror `app.schemas.orchestration` (dicts, not the ORM) and carry no
+    credential fields. Serializes camelCase (`outcomeEnums`) to match the
+    resolver response and the rest of the API contract.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid', alias_generator=to_camel, populate_by_name=True,
+    )
+
+    fields: list[dict[str, Any]] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    outcome_enums: list[dict[str, Any]] = Field(default_factory=list)
+    unresolved: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # ----- response envelopes -----
 
 
@@ -100,6 +123,10 @@ class CohortDatasetsList(BaseModel):
 class NodeTypesList(BaseModel):
     model_config = ConfigDict(extra='forbid')
     items: list[NodeTypeRef] = Field(default_factory=list)
+
+
+# `UpstreamVariables` is its own envelope (not an `items` list) because the
+# resolver returns four parallel, named buckets, not a homogeneous row set.
 
 
 ProviderName = Literal['wati', 'bolna', 'sms', 'lsq', 'msg91', 'aisensy']
@@ -125,6 +152,7 @@ __all__ = [
     'ActionTemplateRef',
     'CohortDatasetRef',
     'NodeTypeRef',
+    'UpstreamVariables',
     'ProviderConnectionsList',
     'ActionTemplatesList',
     'CohortDatasetsList',

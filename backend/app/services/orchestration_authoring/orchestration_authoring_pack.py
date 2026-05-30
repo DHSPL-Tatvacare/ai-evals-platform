@@ -53,7 +53,16 @@ from app.services.orchestration_authoring.lookup_models import (
     NodeTypesList,
     ProviderConnectionRef,
     ProviderConnectionsList,
+    UpstreamVariables,
     contains_credential_fields,
+)
+from app.services.orchestration.upstream_variables import (
+    UpstreamSourceNotFound,
+    resolve_upstream_variables,
+)
+from app.schemas.orchestration import (
+    WorkflowDefinitionEdge,
+    WorkflowDefinitionNode,
 )
 
 
@@ -77,6 +86,8 @@ REASON_CODES: frozenset[str] = frozenset({
     'NODE_CONFIG_INVALID',
     'PREDICATE_INVALID',
     'GRAPH_INVALID',
+    'UNKNOWN_OUTCOME',
+    'UNKNOWN_EVENT',
     'UUID_NOT_AUTHORIZED',
     'BASE_HASH_MISMATCH',
     'CREDENTIAL_LEAK_BLOCKED',
@@ -386,6 +397,149 @@ def _classify_reason_code(errors: list[dict[str, Any]]) -> str:
     return 'GRAPH_INVALID'
 
 
+def _walk_predicate_leaves(predicate: Any) -> list[tuple[str, Any]]:
+    """Yield every (field, value) leaf in a raw predicate dict.
+
+    Walks the recursive and/or/not wire-shape so a conditional value buried
+    under a conjunction is checked, not just top-level leaves.
+    """
+    out: list[tuple[str, Any]] = []
+
+    def _walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        if 'field' in node and 'op' in node:
+            out.append((node.get('field'), node.get('value')))
+            return
+        for key in ('and', 'or'):
+            branch = node.get(key)
+            if isinstance(branch, list):
+                for sub in branch:
+                    _walk(sub)
+        if 'not' in node:
+            _walk(node.get('not'))
+
+    _walk(predicate)
+    return out
+
+
+def _check_outcome_event_vocabulary(
+    *,
+    resolved: Any,
+    node_type: str,
+    config: dict[str, Any],
+) -> tuple[str, str] | None:
+    """Value-level guard the per-node ``extra='forbid'`` schema cannot do.
+
+    The schema knows the field names; only the resolver knows whether a
+    conditional ``value`` or a wait ``event_name`` is a REAL provider outcome /
+    event for THIS canvas. Vocabulary is resolver-owned — never re-derived here.
+
+    Returns ``(reason_code, message)`` on a vocabulary miss, else ``None``.
+    For ``logic.conditional``: a predicate leaf whose ``field`` is an
+    outcome-bag path must carry a ``value`` in that field's canonical outcome
+    set. For ``logic.wait``: ``event_name`` must be a resolved event name.
+    """
+    if node_type == 'logic.conditional':
+        canonicals_by_field: dict[str, set[str]] = {}
+        for enum in getattr(resolved, 'outcome_enums', []) or []:
+            canonicals_by_field.setdefault(enum.field, set()).add(enum.canonical)
+        if not canonicals_by_field:
+            return None
+        for branch in config.get('branches') or []:
+            if not isinstance(branch, dict):
+                continue
+            for field, value in _walk_predicate_leaves(branch.get('predicate')):
+                allowed = canonicals_by_field.get(field)
+                if allowed is None:
+                    continue  # not an outcome field; schema/predicate own it
+                if value not in allowed:
+                    return (
+                        'UNKNOWN_OUTCOME',
+                        f"conditional branches on {field}={value!r} but the "
+                        f"upstream producer yields only {sorted(allowed)}. Call "
+                        'list_upstream_variables and use a canonical outcome.',
+                    )
+        return None
+
+    if node_type == 'logic.wait':
+        event_name = config.get('event_name')
+        if not event_name:
+            return None
+        allowed_events = {
+            ev.event_name for ev in (getattr(resolved, 'events', []) or [])
+        }
+        if not allowed_events:
+            return None
+        if event_name not in allowed_events:
+            return (
+                'UNKNOWN_EVENT',
+                f"wait gates on event_name={event_name!r} but the upstream "
+                f"producer emits only {sorted(allowed_events)}. Call "
+                'list_upstream_variables and use a resolved event name.',
+            )
+    return None
+
+
+async def _guard_outcome_event_values(
+    *,
+    candidate: dict[str, Any],
+    authored_node_ids: set[str],
+    auth: Any,
+    builder_context: Any,
+) -> tuple[str, str] | None:
+    """Resolve upstream vocabulary for each authored conditional/wait node and
+    value-check it. Returns ``(reason_code, message)`` on the first miss.
+
+    Resolves once per authored node (only conditional/wait carry the value
+    surfaces this guard owns), reusing the SAME resolver A-Step 1 exposed —
+    no vocabulary re-derivation, no hardcoded outcome/event lists.
+    """
+    targets = [
+        n for n in candidate.get('nodes') or []
+        if n.get('id') in authored_node_ids
+        and n.get('type') in ('logic.conditional', 'logic.wait')
+    ]
+    if not targets:
+        return None
+
+    nodes = [
+        WorkflowDefinitionNode.model_validate(n)
+        for n in candidate.get('nodes') or []
+    ]
+    edges = [
+        WorkflowDefinitionEdge.model_validate(e)
+        for e in candidate.get('edges') or []
+    ]
+
+    from app.database import async_session
+
+    async with async_session() as db:
+        for node in targets:
+            try:
+                resolved = await resolve_upstream_variables(
+                    db,
+                    tenant_id=auth.tenant_id,
+                    app_id=builder_context.app_id,
+                    workflow_type=builder_context.workflow_type,
+                    nodes=nodes,
+                    edges=edges,
+                    target_node_id=node.get('id'),
+                )
+            except UpstreamSourceNotFound:
+                # No resolvable producer upstream — nothing to value-check
+                # against; the draft graph validator already passed.
+                continue
+            miss = _check_outcome_event_vocabulary(
+                resolved=resolved,
+                node_type=node.get('type'),
+                config=node.get('config') or {},
+            )
+            if miss is not None:
+                return miss
+    return None
+
+
 async def _apply_patch_handler(ctx: Any, args: str) -> str:
     """Terminal authoring tool — validate ops + emit one CanvasPatch artifact.
 
@@ -577,6 +731,29 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                 detail={'errors': exc.errors},
             )
 
+        # ── Value-level outcome/event vocabulary guard ───────────────────
+        # The per-node schema is extra='forbid' but cannot know whether a
+        # conditional value / wait event_name is a real provider outcome /
+        # event for THIS canvas. Resolve the producer vocabulary and reject
+        # invented strings at author time instead of silently at runtime.
+        authored_node_ids = {
+            op.node_id for op in validated_ops
+            if op.op in ('add_node', 'update_node_config')
+        }
+        vocab_miss = await _guard_outcome_event_values(
+            candidate=candidate,
+            authored_node_ids=authored_node_ids,
+            auth=auth,
+            builder_context=builder_context,
+        )
+        if vocab_miss is not None:
+            reason_code, message = vocab_miss
+            return _error_result(
+                reason_code=reason_code,
+                message=message,
+                started=started,
+            )
+
         canvas_patch = CanvasPatch(
             workflow_id=str(builder_context.workflow_id),
             version_id=(
@@ -674,6 +851,21 @@ _LIST_NODE_TYPES_SCHEMA: dict[str, Any] = {
         'category': {
             'type': 'string',
             'description': "Optional category filter (e.g. 'source', 'sink').",
+        },
+    },
+}
+
+_LIST_UPSTREAM_VARIABLES_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['target_node_id'],
+    'properties': {
+        'target_node_id': {
+            'type': 'string',
+            'description': (
+                'Id of the node to resolve upstream variables for. Resolution '
+                'walks the current canvas backward from this node.'
+            ),
         },
     },
 }
@@ -886,6 +1078,97 @@ async def _list_node_types_handler(ctx: Any, args: str) -> str:
             tool='list_node_types',
             builder_context=builder_context,
             auth=auth,
+            started=started,
+            reason_code=audit.get('reason_code'),
+            patch_op_count=0,
+        )
+
+
+async def _list_upstream_variables_handler(ctx: Any, args: str) -> str:
+    """Wrap `resolve_upstream_variables` for the CURRENT builder canvas.
+
+    Surfaces the SAME {fields, events, outcome_enums, unresolved} the
+    builder's input pane gets, so the agent wires a downstream conditional /
+    wait against real provider outcome + event vocabulary instead of magic
+    strings. Read-only; vocabulary is resolver-owned and never re-derived
+    here. UUIDs are NOT allowlisted — this tool returns no patchable ids.
+    """
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    audit: dict[str, Any] = {'reason_code': None}
+    builder_context = getattr(sherlock_ctx, 'builder_context', None)
+    auth_outer = getattr(sherlock_ctx, 'auth', None)
+    try:
+        check = await _check_layered_auth(sherlock_ctx, started=started, audit=audit)
+        if isinstance(check, str):
+            return check
+        auth, builder_context = check
+
+        parsed = json.loads(args) if args.strip() else {}
+        target_node_id = parsed.get('target_node_id')
+        if not isinstance(target_node_id, str) or not target_node_id:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='target_node_id is required',
+                started=started,
+            )
+
+        definition = builder_context.definition or {}
+        nodes = [
+            WorkflowDefinitionNode.model_validate(n)
+            for n in definition.get('nodes', [])
+        ]
+        edges = [
+            WorkflowDefinitionEdge.model_validate(e)
+            for e in definition.get('edges', [])
+        ]
+
+        from app.database import async_session
+
+        try:
+            async with async_session() as db:
+                resolved = await resolve_upstream_variables(
+                    db,
+                    tenant_id=auth.tenant_id,
+                    app_id=builder_context.app_id,
+                    workflow_type=builder_context.workflow_type,
+                    nodes=nodes,
+                    edges=edges,
+                    target_node_id=target_node_id,
+                )
+        except UpstreamSourceNotFound as exc:
+            audit['reason_code'] = 'GRAPH_INVALID'
+            return _error_result(
+                reason_code='GRAPH_INVALID',
+                message=str(exc),
+                started=started,
+            )
+
+        dumped = resolved.model_dump(mode='json', by_alias=True)
+        payload = UpstreamVariables(
+            fields=dumped.get('fields', []),
+            events=dumped.get('events', []),
+            outcome_enums=dumped.get('outcomeEnums', []),
+            unresolved=dumped.get('unresolved', []),
+        ).model_dump(mode='json', by_alias=True)
+
+        event_count = len(payload['events'])
+        outcome_count = len(payload['outcomeEnums'])
+        return _mark_leak_in_result(audit, _lookup_result_json(
+            started=started,
+            summary=(
+                f'{outcome_count} outcome enum(s), {event_count} event(s) '
+                f'upstream of {target_node_id}.'
+            ),
+            payload=payload,
+            tool_name='list_upstream_variables',
+        ))
+    finally:
+        _emit_authoring_audit(
+            tool='list_upstream_variables',
+            builder_context=builder_context,
+            auth=auth_outer,
             started=started,
             reason_code=audit.get('reason_code'),
             patch_op_count=0,
@@ -1142,6 +1425,17 @@ class OrchestrationAuthoringPack:
                 'params_json_schema': _LIST_NODE_TYPES_SCHEMA,
             },
             {
+                'name': 'list_upstream_variables',
+                'description': (
+                    'Resolve the payload variables, provider outcome enums, '
+                    'and resumable event names available upstream of a node on '
+                    'the current canvas. Pass `target_node_id`. Use this before '
+                    'wiring a conditional or wait so you branch on real provider '
+                    'outcomes/events — never invented strings.'
+                ),
+                'params_json_schema': _LIST_UPSTREAM_VARIABLES_SCHEMA,
+            },
+            {
                 'name': 'list_provider_connections',
                 'description': (
                     'List provider_connections in this app for a given '
@@ -1175,6 +1469,7 @@ class OrchestrationAuthoringPack:
         return {
             'apply_patch': _apply_patch_handler,
             'list_node_types': _list_node_types_handler,
+            'list_upstream_variables': _list_upstream_variables_handler,
             'list_provider_connections': _list_provider_connections_handler,
             'list_action_templates': _list_action_templates_handler,
             'list_cohort_datasets': _list_cohort_datasets_handler,
@@ -1195,6 +1490,10 @@ class OrchestrationAuthoringPack:
             'list_node_types': (
                 'List node types available for this builder, optionally '
                 'filtered by category.'
+            ),
+            'list_upstream_variables': (
+                'Resolve upstream fields, provider outcome enums, and event '
+                'names for a node — read before wiring conditionals or waits.'
             ),
             'list_provider_connections': (
                 'List provider connections (id, name, provider). UUIDs are '
