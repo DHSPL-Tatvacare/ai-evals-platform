@@ -36,14 +36,14 @@ export function ChatArtifactCard({
 
   return (
     <div
-      className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-sm)] transition-shadow duration-200 hover:shadow-[var(--shadow-md)]"
+      className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-[var(--shadow-sm)] transition-shadow duration-200 hover:shadow-[var(--shadow-md)]"
       data-artifact-kind={kind}
     >
       <div className="h-0.5 w-full [background-image:var(--gradient-brand-mark)]" />
       {hasHeader ? (
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--border-default)] px-4 py-3">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[var(--surface-brand-subtle)] text-[var(--text-brand)]">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-4 py-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[var(--surface-brand-subtle)] text-[var(--text-brand)]">
               <Icon className="h-3.5 w-3.5" />
             </span>
             <div className="min-w-0">

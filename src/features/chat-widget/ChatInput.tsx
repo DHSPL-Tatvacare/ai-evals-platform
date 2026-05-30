@@ -48,11 +48,17 @@ export function ChatInput({ onSend, onStop, disabled, showStop = false, placehol
       <FlowingBorder
         active={working}
         className={cn(
-          'rounded-lg border bg-[var(--bg-secondary)]',
-          'border-[var(--border-default)] transition-colors',
-          'focus-within:border-[var(--color-brand-accent)]',
-          'focus-within:ring-1 focus-within:ring-[var(--color-brand-accent)]',
-          (disabled || showStop) ? 'opacity-60' : '',
+          'rounded-lg border bg-[var(--bg-secondary)] transition-colors',
+          // While a turn is active the flowing border owns the edge; otherwise a
+          // resting/focus border. Never dim the wrapper here — that washes out
+          // the active animation.
+          working
+            ? 'border-transparent'
+            : cn(
+                'border-[var(--border-default)]',
+                'focus-within:border-[var(--color-brand-accent)]',
+                'focus-within:ring-1 focus-within:ring-[var(--color-brand-accent)]',
+              ),
         )}
       >
         {showChip ? (

@@ -1,16 +1,13 @@
-/** Turn-grouped chat renderer: avatars, specialist blocks, charts, cost, copy.
+/** Turn-grouped chat renderer: specialist blocks, charts, cost, copy.
  *  Pure render over the flat typed Part stream — streamStore stays the only state. */
 import { RotateCcw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
-import { useAuthStore } from '@/stores/authStore';
 import { CostChip } from '@/features/cost/components/CostChip';
 import { ThinkingIndicator } from '@/features/chat-widget/components/ThinkingIndicator';
 
-import { Avatar } from './components/Avatar';
 import { CopyButton } from './components/CopyButton';
-import { getUserInitials } from './initials';
 import { SpecialistGroup, type SpecialistPart } from './components/SpecialistGroup';
 import {
   AssistantMarkdown,
@@ -39,17 +36,7 @@ function isSpecialistPart(part: SherlockPart): part is SpecialistPart {
 }
 
 function AssistantAnswer({ part }: { part: AssistantTextPart }) {
-  const text = part.text ?? '';
-  return (
-    <div className="group relative">
-      <AssistantMarkdown part={part} />
-      {text.trim() ? (
-        <div className="absolute -right-1 -top-1">
-          <CopyButton text={text} />
-        </div>
-      ) : null}
-    </div>
-  );
+  return <AssistantMarkdown part={part} />;
 }
 
 function renderAssistantBody(turn: Turn, appId: string, sessionId: string | null, settled: boolean) {
@@ -96,14 +83,13 @@ function renderAssistantBody(turn: Turn, appId: string, sessionId: string | null
   return blocks;
 }
 
-function UserTurn({ turn, initials }: { turn: Turn; initials: string }) {
+function UserTurn({ turn }: { turn: Turn }) {
   const text = turn.parts
     .map((p) => (p.type === 'user_message' ? p.text : ''))
     .join('');
   return (
-    <div className="ml-auto flex max-w-[88%] flex-row-reverse gap-3">
-      <Avatar role="user" initials={initials} />
-      <div className="rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-4 py-3 text-[13px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
+    <div className="flex justify-end">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-3 py-1.5 text-[10.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
         {text}
       </div>
     </div>
@@ -140,32 +126,43 @@ function AssistantTurn({
   const showThinking = isLiveTurn && !answerStreaming;
   const showRetry = isLast && failed;
 
-  return (
-    <div className="mr-auto flex w-full gap-2.5">
-      <Avatar role="assistant" initials="" />
-      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">
-          Sherlock
-          {status && status !== 'done' ? (
-            <span
-              className={cn(
-                'rounded-full px-2 py-0.5 text-[10px] capitalize tracking-normal',
-                failed
-                  ? 'bg-[color-mix(in_srgb,var(--interactive-danger)_14%,transparent)] text-[var(--interactive-danger)]'
-                  : 'bg-[var(--bg-secondary)]',
-              )}
-            >
-              {status}
-            </span>
-          ) : null}
-          {turnId ? (
-            <CostChip ownerType="sherlock_turn" ownerId={turnId} className="lowercase" />
-          ) : null}
-        </div>
+  // Action bar below a finished message: copy + cost, plus a status pill when
+  // the turn didn't end cleanly. Driven by the persisted parts (answer text +
+  // step_finish.turn_id), so it's identical across live stream / replay / hydration.
+  const answerText = turn.parts
+    .filter((p): p is AssistantTextPart => p.type === 'assistant_text')
+    .map((p) => p.text ?? '')
+    .join('');
+  const abnormalStatus = !!status && status !== 'done';
+  const showActions = settled && (answerText.trim() !== '' || !!turnId || abnormalStatus);
 
+  return (
+    <div className="w-full">
+      <div className="flex min-w-0 flex-col gap-2.5">
         {renderAssistantBody(turn, appId, sessionId, settled)}
 
         {showThinking ? <ThinkingIndicator phrases={phrasesForContext(turn.parts)} /> : null}
+
+        {showActions ? (
+          <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+            {answerText.trim() ? <CopyButton text={answerText} alwaysVisible /> : null}
+            {turnId ? (
+              <CostChip ownerType="sherlock_turn" ownerId={turnId} className="lowercase" />
+            ) : null}
+            {abnormalStatus ? (
+              <span
+                className={cn(
+                  'ml-auto rounded-full px-2 py-0.5 text-[10px] capitalize',
+                  failed
+                    ? 'bg-[color-mix(in_srgb,var(--interactive-danger)_14%,transparent)] text-[var(--interactive-danger)]'
+                    : 'bg-[var(--bg-secondary)]',
+                )}
+              >
+                {status}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {showRetry ? (
           <div className="flex items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--interactive-danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_6%,var(--bg-primary))] px-4 py-3 text-[13px] text-[var(--text-primary)]">
@@ -184,8 +181,6 @@ function AssistantTurn({
 }
 
 export function TurnList({ parts, appId, sessionId, streaming, onRetry }: TurnListProps) {
-  const displayName = useAuthStore((s) => s.user?.displayName);
-  const initials = getUserInitials(displayName);
   const turns = groupPartsIntoTurns(parts);
   const last = turns[turns.length - 1];
   const trailingThinking = streaming && (!last || last.role === 'user');
@@ -195,7 +190,7 @@ export function TurnList({ parts, appId, sessionId, streaming, onRetry }: TurnLi
       {turns.map((turn, i) => {
         const isLast = i === turns.length - 1;
         if (turn.role === 'user') {
-          return <UserTurn key={turn.id} turn={turn} initials={initials} />;
+          return <UserTurn key={turn.id} turn={turn} />;
         }
         return (
           <AssistantTurn
@@ -211,14 +206,8 @@ export function TurnList({ parts, appId, sessionId, streaming, onRetry }: TurnLi
       })}
 
       {trailingThinking ? (
-        <div className="mr-auto flex w-full gap-2.5">
-          <Avatar role="assistant" initials="" />
-          <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">
-              Sherlock
-            </div>
-            <ThinkingIndicator />
-          </div>
+        <div className="w-full">
+          <ThinkingIndicator />
         </div>
       ) : null}
     </div>

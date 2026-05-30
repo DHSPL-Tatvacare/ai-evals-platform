@@ -89,8 +89,10 @@ describe('ChatCanvasChangeCard', () => {
     expect(screen.getByText('+1 steps')).toBeInTheDocument();
     expect(screen.getByText(chatWidgetCopy.rationaleLabel)).toBeInTheDocument();
     expect(screen.getByText(baseProps.rationale)).toBeInTheDocument();
-    expect(screen.getByText(chatWidgetCopy.undo)).toBeInTheDocument();
-    expect(screen.getByText(chatWidgetCopy.showOnCanvas)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: chatWidgetCopy.undo })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: chatWidgetCopy.showOnCanvas }),
+    ).toBeInTheDocument();
   });
 
   it('conflict: conflict copy with Redo on latest + Keep as is', () => {
@@ -103,8 +105,10 @@ describe('ChatCanvasChangeCard', () => {
       />,
     );
     expect(screen.getByText(chatWidgetCopy.conflict)).toBeInTheDocument();
-    expect(screen.getByText(chatWidgetCopy.redoOnLatest)).toBeInTheDocument();
-    expect(screen.getByText(chatWidgetCopy.keepAsIs)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: chatWidgetCopy.redoOnLatest }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: chatWidgetCopy.keepAsIs })).toBeInTheDocument();
   });
 
   it('blocked: blocked copy with node name, no destructive actions', () => {
@@ -113,8 +117,10 @@ describe('ChatCanvasChangeCard', () => {
     );
     expect(screen.getByText(chatWidgetCopy.blocked, { exact: false })).toBeInTheDocument();
     expect(screen.getByText('Place call', { exact: false })).toBeInTheDocument();
-    expect(screen.queryByText(chatWidgetCopy.undo)).not.toBeInTheDocument();
-    expect(screen.queryByText(chatWidgetCopy.redoOnLatest)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: chatWidgetCopy.undo })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: chatWidgetCopy.redoOnLatest }),
+    ).not.toBeInTheDocument();
   });
 
   it('reverted: reverted copy with Redo on latest', () => {
@@ -126,6 +132,8 @@ describe('ChatCanvasChangeCard', () => {
       />,
     );
     expect(screen.getByText(chatWidgetCopy.reverted)).toBeInTheDocument();
-    expect(screen.getByText(chatWidgetCopy.redoOnLatest)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: chatWidgetCopy.redoOnLatest }),
+    ).toBeInTheDocument();
   });
 });

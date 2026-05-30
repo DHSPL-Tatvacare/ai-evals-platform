@@ -7,9 +7,11 @@ import { cn } from '@/utils/cn';
 interface CopyButtonProps {
   text: string;
   className?: string;
+  /** Always shown (action-bar use). Default: hover-revealed on the parent group. */
+  alwaysVisible?: boolean;
 }
 
-export function CopyButton({ text, className }: CopyButtonProps) {
+export function CopyButton({ text, className, alwaysVisible = false }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
   const Icon = copied ? Check : Copy;
 
@@ -26,9 +28,11 @@ export function CopyButton({ text, className }: CopyButtonProps) {
       onClick={() => void handleCopy()}
       aria-label={copied ? 'Copied' : 'Copy message'}
       className={cn(
-        'inline-flex h-6 w-6 items-center justify-center rounded-md',
-        'text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]',
-        'focus-visible:opacity-100 group-hover:opacity-100',
+        'inline-flex h-6 w-6 items-center justify-center rounded-md transition-opacity',
+        'text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]',
+        alwaysVisible
+          ? 'opacity-100'
+          : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100',
         className,
       )}
     >

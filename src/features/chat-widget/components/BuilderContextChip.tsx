@@ -2,8 +2,8 @@
  * Persistent canvas-context chip rendered inside `ChatInput`.
  *
  * One card, two visual states driven by `workflowBuilderStore.canvasContextEnabled`:
- *   - On — bold card (solid surface + gradient hairline): Sherlock icon +
- *     status dot + "Editing · {workflow}" (verb reflects viewMode), a right
+ *   - On — bold card (solid surface + gradient hairline): status dot +
+ *     "Editing · {workflow}" (verb reflects viewMode), a right
  *     workflow-type badge, and the Canvas Switch. An info line below derives
  *     the flow shape, or — when a node is selected — a "Focused on: {label}"
  *     scope chip with a clear control.
@@ -16,8 +16,6 @@ import { X } from 'lucide-react';
 
 import { cn } from '@/utils/cn';
 import { Badge } from '@/components/ui/Badge';
-import { SherlockIcon } from '@/components/ui/SherlockIcon';
-import { StatusDot } from '@/components/ui/StatusDot';
 import { Switch } from '@/components/ui/Switch';
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import type { NodeTypeDescriptor } from '@/features/orchestration/types';
@@ -99,16 +97,17 @@ export function BuilderContextChip({ pageContext, working }: BuilderContextChipP
         data-testid="builder-context-chip"
         data-canvas-on="false"
       >
+        <span className="truncate text-[var(--text-muted)]">
+          {chatWidgetCopy.canvasOffLine}
+        </span>
         <Switch
+          className="ml-auto shrink-0"
           size="sm"
           checked={false}
           onCheckedChange={() => setCanvasContextEnabled(true)}
           aria-label={chatWidgetCopy.canvasToggleLabel}
           data-testid="builder-context-chip-switch"
         />
-        <span className="truncate text-[var(--text-muted)]">
-          {chatWidgetCopy.canvasOffLine}
-        </span>
       </div>
     );
   }
@@ -129,8 +128,6 @@ export function BuilderContextChip({ pageContext, working }: BuilderContextChipP
     >
       <div className="rounded-[5px] bg-[var(--bg-primary)] px-2 py-1.5">
         <div className="flex items-center gap-1.5 text-[12px]">
-          <SherlockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--text-brand)]" />
-          <StatusDot status={isEdit ? 'running' : 'neutral'} size="sm" pulse={isEdit} />
           <span className="truncate font-medium text-[var(--text-primary)]">
             {headerLabel}
           </span>

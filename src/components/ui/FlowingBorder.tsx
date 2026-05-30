@@ -62,7 +62,10 @@ export function FlowingBorder({
             animated && 'flowing-border-overlay--animated',
           )}
           style={{
-            background: 'var(--gradient-flow-border)',
+            // Reference --angle directly (not via --gradient-flow-border) so the
+            // registered @property animation repaints; colours stay tokenised.
+            background:
+              'conic-gradient(from var(--angle), var(--color-flow-1), var(--color-flow-2), var(--color-flow-3), var(--color-flow-2), var(--color-flow-1))',
             WebkitMask:
               'linear-gradient(var(--bg-primary) 0 0) content-box, linear-gradient(var(--bg-primary) 0 0)',
             WebkitMaskComposite: 'xor',

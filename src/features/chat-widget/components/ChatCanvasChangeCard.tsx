@@ -1,8 +1,10 @@
+import { Locate, Redo2, Undo2, X } from 'lucide-react';
+
 import type { CanvasPatchOp } from '@/features/orchestration/copilot/canvasPatchSchema';
 import type { NodeTypeDescriptor } from '@/features/orchestration/types';
 
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 
 import { chatWidgetCopy } from '../copy';
 import { ChatArtifactCard } from './ChatArtifactCard';
@@ -102,14 +104,22 @@ export function ChatCanvasChangeCard({
         actions={
           <>
             {onUndo ? (
-              <Button variant="ghost" size="sm" onClick={onUndo}>
-                {chatWidgetCopy.undo}
-              </Button>
+              <IconButton
+                icon={Undo2}
+                variant="ghost"
+                size="sm"
+                label={chatWidgetCopy.undo}
+                onClick={onUndo}
+              />
             ) : null}
             {onShowOnCanvas ? (
-              <Button variant="secondary" size="sm" onClick={onShowOnCanvas}>
-                {chatWidgetCopy.showOnCanvas}
-              </Button>
+              <IconButton
+                icon={Locate}
+                variant="secondary"
+                size="sm"
+                label={chatWidgetCopy.showOnCanvas}
+                onClick={onShowOnCanvas}
+              />
             ) : null}
           </>
         }
@@ -146,14 +156,22 @@ export function ChatCanvasChangeCard({
         actions={
           <>
             {onRedoOnLatest ? (
-              <Button variant="secondary" size="sm" onClick={onRedoOnLatest}>
-                {chatWidgetCopy.redoOnLatest}
-              </Button>
+              <IconButton
+                icon={Redo2}
+                variant="secondary"
+                size="sm"
+                label={chatWidgetCopy.redoOnLatest}
+                onClick={onRedoOnLatest}
+              />
             ) : null}
             {onKeepAsIs ? (
-              <Button variant="ghost" size="sm" onClick={onKeepAsIs}>
-                {chatWidgetCopy.keepAsIs}
-              </Button>
+              <IconButton
+                icon={X}
+                variant="ghost"
+                size="sm"
+                label={chatWidgetCopy.keepAsIs}
+                onClick={onKeepAsIs}
+              />
             ) : null}
           </>
         }
@@ -170,9 +188,13 @@ export function ChatCanvasChangeCard({
         title={chatWidgetCopy.cardTitleApplied}
         actions={
           onRedoOnLatest ? (
-            <Button variant="secondary" size="sm" onClick={onRedoOnLatest}>
-              {chatWidgetCopy.redoOnLatest}
-            </Button>
+            <IconButton
+              icon={Redo2}
+              variant="secondary"
+              size="sm"
+              label={chatWidgetCopy.redoOnLatest}
+              onClick={onRedoOnLatest}
+            />
           ) : null
         }
       >

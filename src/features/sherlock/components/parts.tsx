@@ -60,7 +60,7 @@ export function RetryPill({ part }: PartOf<RetryPart>) {
 
 const MARKDOWN_COMPONENTS = {
   p: ({ children }: { children?: React.ReactNode }) => (
-    <p className="text-[13px] leading-relaxed mb-2 last:mb-0">{children}</p>
+    <p className="text-[10.5px] leading-relaxed mb-2 last:mb-0">{children}</p>
   ),
   h1: ({ children }: { children?: React.ReactNode }) => (
     <h1 className="text-base font-semibold mt-3 mb-2 first:mt-0">{children}</h1>
@@ -158,7 +158,7 @@ export function AssistantMarkdown({ part }: PartOf<AssistantTextPart>) {
   const text = part.text ?? '';
   return (
     <div
-      className="text-[13px] text-[var(--text-primary)]"
+      className="text-[10.5px] text-[var(--text-primary)]"
       data-part-type="assistant_text"
       data-part-id={part.id}
       data-final={part.final}
