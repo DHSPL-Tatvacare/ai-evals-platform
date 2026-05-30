@@ -1,36 +1,50 @@
 /**
- * Phase 3 Step 6 — rebase-redo flow tests.
+ * canvasPatchApplier — hash-mismatch (rebase) tests.
  *
- * The hash-mismatch path now caches the patch's rationale on a
- * module-level pending-rebase slot. When the user replies with a redo
- * trigger ("yes, redo"), the chat widget calls `consumeRebaseRedo` and
- * substitutes a synthetic prompt carrying the cached rationale verbatim
- * before dispatching the next turn. The original user text remains
- * visible in the chat thread above.
+ * The applier is pure: on a stale `base_data_hash` it applies nothing and
+ * returns `{ kind: 'hash_mismatch', rationale }`. The caller (chat widget)
+ * owns whatever rebase prompt or redo flow it wants — the applier no longer
+ * holds module state or a "yes, redo" text path.
  *
  * Coverage:
- *   - hash mismatch caches the rationale and posts the rebase prompt once
- *   - "yes, redo" reply produces a synthetic rebase prompt with the
- *     rationale embedded
- *   - any other reply discards the pending state with no synthetic
- *   - successful re-apply clears the pending state so the next mismatch
- *     starts fresh
+ *   - stale hash returns hash_mismatch carrying the patch rationale verbatim
+ *   - nothing lands in the store on mismatch
+ *   - a matching hash on the next call applies cleanly (no carried state)
+ *   - each mismatch reports its own rationale independently
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
+import type { NodeTypeDescriptor } from '@/features/orchestration/types';
 
-import {
-  _resetRebaseStateForTests,
-  applyCanvasPatch,
-  consumeRebaseRedo,
-} from './canvasPatchApplier';
+import { applyCanvasPatch } from './canvasPatchApplier';
 
-// Empty config is the draft-default for partial authoring — every node
-// schema permits it under ``parseNodeConfig({mode: 'draft'})``. The applier
-// re-validates every add_node config; a fabricated key (the previous fixture
-// value) is now rejected as ``config_invalid``.
-const VALID_CONFIG = {};
+function descriptor(nodeType: string, displayLabel: string): NodeTypeDescriptor {
+  return {
+    nodeType,
+    workflowType: 'crm',
+    displayLabel,
+    displayCategory: 'routing',
+    description: '',
+    authoringStatus: 'active',
+    configSchema: {},
+    editorHints: {},
+    requiredPayloadFields: [],
+    emittedPayloadFields: [],
+    outputEdges: [],
+    graphRules: {},
+    runtimeContract: { executionKind: 'routing' },
+    category: 'sink',
+    label: displayLabel,
+  } as NodeTypeDescriptor;
+}
+
+function seedCatalog() {
+  useWorkflowBuilderStore.getState().setPaletteCatalog([
+    descriptor('sink.complete', 'Mark complete'),
+    descriptor('source.event_trigger', 'Event trigger'),
+  ]);
+}
 
 function fixturePatch(baseHash: string, rationale: string) {
   return {
@@ -47,110 +61,68 @@ function fixturePatch(baseHash: string, rationale: string) {
       {
         op: 'add_node',
         node_id: 'n_c',
-        payload: {
-          node_type: 'source.event_trigger',
-          config: VALID_CONFIG,
-        },
+        payload: { node_type: 'source.event_trigger', config: {} },
       },
     ],
   };
 }
 
-describe('canvasPatchApplier — rebase redo flow', () => {
+describe('canvasPatchApplier — hash mismatch', () => {
   beforeEach(() => {
     useWorkflowBuilderStore.getState().reset();
-    _resetRebaseStateForTests();
+    seedCatalog();
     vi.restoreAllMocks();
   });
 
-  it('reports hash mismatch once and primes pending-rebase with the rationale', async () => {
-    const onChatMessage = vi.fn();
-
+  it('returns hash_mismatch carrying the rationale and applies nothing', async () => {
     const result = await applyCanvasPatch(
       fixturePatch('stale-hash', 'add cohort + sink chain'),
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
 
     expect(result.kind).toBe('hash_mismatch');
-    expect(onChatMessage).toHaveBeenCalledTimes(1);
-    expect(onChatMessage.mock.calls[0][0]).toContain('changed while I was working');
+    if (result.kind !== 'hash_mismatch') return;
+    expect(result.rationale).toBe('add cohort + sink chain');
 
-    // The hash-mismatch primes the rebase slot — a redo trigger now
-    // produces the synthetic.
-    const synthetic = consumeRebaseRedo('yes, redo');
-    expect(synthetic).not.toBeNull();
-    expect(synthetic).toContain('add cohort + sink chain');
-    expect(synthetic).toContain('Re-read current state');
+    const state = useWorkflowBuilderStore.getState();
+    expect(state.nodes).toHaveLength(0);
+    expect(state.edges).toHaveLength(0);
   });
 
-  it('matches multiple redo-trigger phrasings (case-insensitive)', async () => {
-    const triggers = ['yes, redo', 'YES, REDO', 'Yes Redo', 'redo'];
-    for (const trigger of triggers) {
-      _resetRebaseStateForTests();
-      await applyCanvasPatch(
-        fixturePatch('stale-hash', 'rationale-A'),
-        { onChatMessage: vi.fn(), staggerMs: 0 },
-      );
-      const synthetic = consumeRebaseRedo(trigger);
-      expect(synthetic, `trigger=${trigger}`).not.toBeNull();
-      expect(synthetic).toContain('rationale-A');
+  it('carries each mismatch rationale independently', async () => {
+    const first = await applyCanvasPatch(
+      fixturePatch('stale-hash', 'first-attempt'),
+      { staggerMs: 0 },
+    );
+    const second = await applyCanvasPatch(
+      fixturePatch('still-stale', 'second-attempt'),
+      { staggerMs: 0 },
+    );
+
+    expect(first.kind).toBe('hash_mismatch');
+    if (first.kind === 'hash_mismatch') {
+      expect(first.rationale).toBe('first-attempt');
+    }
+    expect(second.kind).toBe('hash_mismatch');
+    if (second.kind === 'hash_mismatch') {
+      expect(second.rationale).toBe('second-attempt');
     }
   });
 
-  it('discards pending-rebase silently when the user replies with anything else', async () => {
-    await applyCanvasPatch(
-      fixturePatch('stale-hash', 'rationale-B'),
-      { onChatMessage: vi.fn(), staggerMs: 0 },
-    );
-
-    const synthetic = consumeRebaseRedo('actually, never mind');
-    expect(synthetic).toBeNull();
-
-    // Pending was cleared — a follow-up "yes, redo" no longer fires.
-    const second = consumeRebaseRedo('yes, redo');
-    expect(second).toBeNull();
-  });
-
-  it('returns null when no rebase is pending', () => {
-    expect(consumeRebaseRedo('yes, redo')).toBeNull();
-    expect(consumeRebaseRedo('anything')).toBeNull();
-  });
-
-  it('hash mismatch is reported once and cleared after a fresh apply', async () => {
-    // First call: stale hash → mismatch.
-    const onChatMessage = vi.fn();
-    await applyCanvasPatch(
+  it('applies cleanly on the next call once the hash matches (no carried state)', async () => {
+    const mismatch = await applyCanvasPatch(
       fixturePatch('stale-hash', 'rationale-C'),
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
-    expect(onChatMessage).toHaveBeenCalledTimes(1);
+    expect(mismatch.kind).toBe('hash_mismatch');
 
-    // Second call: matching hash → applies cleanly. The pending slot
-    // must clear so a future mismatch starts fresh.
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
     const result = await applyCanvasPatch(
       fixturePatch(baseHash, 'rationale-D'),
-      { onChatMessage: vi.fn(), staggerMs: 0 },
+      { staggerMs: 0 },
     );
     expect(result.kind).toBe('applied');
-
-    // After a successful apply, "yes, redo" no longer rewrites — the
-    // earlier mismatch is fully resolved.
-    expect(consumeRebaseRedo('yes, redo')).toBeNull();
-  });
-
-  it('most recent rationale wins when multiple mismatches stack', async () => {
-    await applyCanvasPatch(
-      fixturePatch('stale-hash', 'first-attempt'),
-      { onChatMessage: vi.fn(), staggerMs: 0 },
-    );
-    await applyCanvasPatch(
-      fixturePatch('still-stale', 'second-attempt'),
-      { onChatMessage: vi.fn(), staggerMs: 0 },
-    );
-
-    const synthetic = consumeRebaseRedo('yes, redo');
-    expect(synthetic).toContain('second-attempt');
-    expect(synthetic).not.toContain('first-attempt');
+    if (result.kind !== 'applied') return;
+    expect(result.addedNodeIds).toEqual(['n_a', 'n_c']);
   });
 });

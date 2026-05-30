@@ -1,19 +1,58 @@
 /**
- * Phase 2 (sherlock-builder) — applier tests.
+ * canvasPatchApplier — pure applier tests.
  *
- * Coverage matches the Phase 2 acceptance criteria:
- *   - applies ops in order
- *   - runs the hash check
- *   - surfaces a chat-thread message on hash mismatch (Scenario 10)
+ * The applier is a pure function over the live builder store: it parses,
+ * runs the workflow/version/hash guards, re-validates configs, applies ops,
+ * and returns an enriched result. There is no chat callback and no module
+ * state. Coverage:
+ *   - applies ops in order on hash match, returns changed-id sets
+ *   - hydrates add_node `data` from the palette descriptor
+ *   - returns the inverse op per applied op (undo contract)
  *   - batches store mutations (one currentDataHash recompute per group)
  *   - aborts mid-stream when AbortSignal fires
+ *   - hash mismatch returns `{ kind: 'hash_mismatch', rationale }` and
+ *     applies nothing
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useWorkflowBuilderStore } from '@/features/orchestration/store/workflowBuilderStore';
 import * as snapshotHashModule from '@/features/orchestration/contracts/snapshotHash';
+import type { NodeTypeDescriptor } from '@/features/orchestration/types';
 
 import { applyCanvasPatch } from './canvasPatchApplier';
+
+function descriptor(
+  nodeType: string,
+  displayLabel: string,
+  description: string,
+): NodeTypeDescriptor {
+  return {
+    nodeType,
+    workflowType: 'crm',
+    displayLabel,
+    displayCategory: 'routing',
+    description,
+    authoringStatus: 'active',
+    configSchema: {},
+    editorHints: {},
+    requiredPayloadFields: [],
+    emittedPayloadFields: [],
+    outputEdges: [],
+    graphRules: {},
+    runtimeContract: { executionKind: 'routing' },
+    category: 'sink',
+    label: displayLabel,
+  } as NodeTypeDescriptor;
+}
+
+const FIXTURE_CATALOG: NodeTypeDescriptor[] = [
+  descriptor('sink.complete', 'Mark complete', 'Ends the run as complete.'),
+  descriptor('source.event_trigger', 'Event trigger', 'Starts on an inbound event.'),
+];
+
+function seedCatalog() {
+  useWorkflowBuilderStore.getState().setPaletteCatalog(FIXTURE_CATALOG);
+}
 
 // Empty config is the draft-default for partial authoring — every node
 // schema permits it under ``parseNodeConfig({mode: 'draft'})``. The applier
@@ -71,35 +110,169 @@ function fixturePatch(baseHash: string) {
 describe('applyCanvasPatch', () => {
   beforeEach(() => {
     useWorkflowBuilderStore.getState().reset();
+    seedCatalog();
     vi.restoreAllMocks();
   });
 
-  it('applies ops in order on hash match', async () => {
+  it('applies ops in order on hash match and returns changed-id sets', async () => {
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
 
     const result = await applyCanvasPatch(fixturePatch(baseHash), {
-      onChatMessage,
       staggerMs: 0,
     });
 
     expect(result.kind).toBe('applied');
     if (result.kind !== 'applied') return;
     expect(result.opsApplied).toBe(5);
+    expect(result.rationale).toBe('demo');
+    expect(result.addedNodeIds).toEqual(['n_a', 'n_b', 'n_c']);
+    expect(result.editedNodeIds).toEqual([]);
+    expect(result.removedNodeIds).toEqual([]);
+    expect(result.connectEdgeIds).toEqual(['e1', 'e2']);
 
     const state = useWorkflowBuilderStore.getState();
     expect(state.nodes.map((n) => n.id)).toEqual(['n_a', 'n_b', 'n_c']);
     expect(state.edges.map((e) => e.id)).toEqual(['e1', 'e2']);
-    expect(onChatMessage).not.toHaveBeenCalled();
+  });
+
+  it('hydrates add_node data fields from the palette descriptor', async () => {
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+
+    await applyCanvasPatch(fixturePatch(baseHash), { staggerMs: 0 });
+
+    const state = useWorkflowBuilderStore.getState();
+    const nodeA = state.nodes.find((n) => n.id === 'n_a');
+    expect(nodeA?.data.label).toBe('Mark complete');
+    expect(nodeA?.data.nodeType).toBe('sink.complete');
+
+    const nodeC = state.nodes.find((n) => n.id === 'n_c');
+    expect(nodeC?.data.label).toBe('Event trigger');
+    expect(nodeC?.data.nodeType).toBe('source.event_trigger');
+  });
+
+  it('returns inverse ops that undo each applied op', async () => {
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+
+    const result = await applyCanvasPatch(fixturePatch(baseHash), {
+      staggerMs: 0,
+    });
+    expect(result.kind).toBe('applied');
+    if (result.kind !== 'applied') return;
+
+    // One inverse op per applied op, in apply order.
+    expect(result.inverse).toHaveLength(5);
+    expect(result.inverse[0]).toEqual({ kind: 'remove_node', nodeId: 'n_a' });
+    expect(result.inverse[1]).toEqual({ kind: 'remove_node', nodeId: 'n_b' });
+    expect(result.inverse[2]).toEqual({ kind: 'remove_node', nodeId: 'n_c' });
+    expect(result.inverse[3]).toEqual({ kind: 'remove_edge', edgeId: 'e1' });
+    expect(result.inverse[4]).toEqual({ kind: 'remove_edge', edgeId: 'e2' });
+  });
+
+  it('captures the prior full config as the update_node_config inverse', async () => {
+    const store = useWorkflowBuilderStore.getState();
+    store.addNode({
+      id: 'n_existing',
+      type: 'core.webhook_out',
+      position: { x: 0, y: 0 },
+      data: {},
+      config: { url: 'https://old.example.com/in', method: 'POST' },
+    });
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+
+    const result = await applyCanvasPatch(
+      {
+        workflow_id: 'wf_demo',
+        base_data_hash: baseHash,
+        ops: [
+          {
+            op: 'update_node_config',
+            node_id: 'n_existing',
+            payload: { config_patch: { url: 'https://new.example.com/in' } },
+          },
+        ],
+      },
+      { staggerMs: 0 },
+    );
+
+    expect(result.kind).toBe('applied');
+    if (result.kind !== 'applied') return;
+    expect(result.editedNodeIds).toEqual(['n_existing']);
+    expect(result.inverse).toEqual([
+      {
+        kind: 'update_node_config',
+        nodeId: 'n_existing',
+        config: { url: 'https://old.example.com/in', method: 'POST' },
+      },
+    ]);
+
+    const updated = useWorkflowBuilderStore
+      .getState()
+      .nodes.find((n) => n.id === 'n_existing');
+    expect(updated?.config).toMatchObject({
+      url: 'https://new.example.com/in',
+      method: 'POST',
+    });
+  });
+
+  it('captures the removed node + its edges as the remove_node inverse', async () => {
+    const store = useWorkflowBuilderStore.getState();
+    store.addNode({
+      id: 'n_a',
+      type: 'sink.complete',
+      position: { x: 5, y: 7 },
+      data: { label: 'Mark complete', nodeType: 'sink.complete' },
+      config: {},
+    });
+    store.addNode({
+      id: 'n_b',
+      type: 'sink.complete',
+      position: { x: 0, y: 0 },
+      data: {},
+      config: {},
+    });
+    store.addEdge({
+      id: 'e_x',
+      source: 'n_a',
+      target: 'n_b',
+      output_id: 'default',
+    });
+    const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
+
+    const result = await applyCanvasPatch(
+      {
+        workflow_id: 'wf_demo',
+        base_data_hash: baseHash,
+        ops: [{ op: 'remove_node', node_id: 'n_a', payload: {} }],
+      },
+      { staggerMs: 0 },
+    );
+
+    expect(result.kind).toBe('applied');
+    if (result.kind !== 'applied') return;
+    expect(result.removedNodeIds).toEqual(['n_a']);
+    expect(result.inverse).toHaveLength(1);
+    expect(result.inverse[0]).toEqual({
+      kind: 'add_node',
+      node: {
+        id: 'n_a',
+        type: 'sink.complete',
+        position: { x: 5, y: 7 },
+        data: { label: 'Mark complete', nodeType: 'sink.complete' },
+        config: {},
+      },
+      edges: [{ id: 'e_x', source: 'n_a', target: 'n_b', output_id: 'default' }],
+    });
+
+    const state = useWorkflowBuilderStore.getState();
+    expect(state.nodes.map((n) => n.id)).toEqual(['n_b']);
+    expect(state.edges).toHaveLength(0);
   });
 
   it('batches add_node ops and connect ops separately (2 hash recomputes)', async () => {
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
-
     const dataHashSpy = vi.spyOn(snapshotHashModule, 'dataSnapshotHash');
 
-    await applyCanvasPatch(fixturePatch(baseHash), { onChatMessage, staggerMs: 0 });
+    await applyCanvasPatch(fixturePatch(baseHash), { staggerMs: 0 });
 
     // Three add_node ops collapse into one addNodes call → 1 dataSnapshotHash.
     // Two connect ops collapse into one addEdges call → 1 dataSnapshotHash.
@@ -107,46 +280,39 @@ describe('applyCanvasPatch', () => {
     expect(dataHashSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('surfaces the rebase prompt on hash mismatch and applies nothing', async () => {
-    const onChatMessage = vi.fn();
+  it('returns hash_mismatch with the rationale and applies nothing', async () => {
     const before = {
       nodes: useWorkflowBuilderStore.getState().nodes.length,
       edges: useWorkflowBuilderStore.getState().edges.length,
     };
 
     const result = await applyCanvasPatch(fixturePatch('h_stale'), {
-      onChatMessage,
       staggerMs: 0,
     });
 
     expect(result.kind).toBe('hash_mismatch');
-    expect(onChatMessage).toHaveBeenCalledTimes(1);
-    expect(onChatMessage.mock.calls[0][0]).toContain('changed while I was working');
+    if (result.kind !== 'hash_mismatch') return;
+    expect(result.rationale).toBe('demo');
 
     const after = useWorkflowBuilderStore.getState();
     expect(after.nodes).toHaveLength(before.nodes);
     expect(after.edges).toHaveLength(before.edges);
   });
 
-  it('returns parse_error and surfaces a message on garbage input', async () => {
-    const onChatMessage = vi.fn();
-
-    const result = await applyCanvasPatch({ ops: 'not-an-array' }, {
-      onChatMessage,
-      staggerMs: 0,
-    });
+  it('returns parse_error on garbage input', async () => {
+    const result = await applyCanvasPatch(
+      { ops: 'not-an-array' },
+      { staggerMs: 0 },
+    );
 
     expect(result.kind).toBe('parse_error');
-    expect(onChatMessage).toHaveBeenCalledTimes(1);
   });
 
   it('aborts remaining ops when AbortSignal fires between groups', async () => {
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
     const controller = new AbortController();
 
     const promise = applyCanvasPatch(fixturePatch(baseHash), {
-      onChatMessage,
       staggerMs: 25,
       signal: controller.signal,
     });
@@ -171,13 +337,10 @@ describe('applyCanvasPatch', () => {
       type: 'core.webhook_out',
       position: { x: 0, y: 0 },
       data: {},
-      // Existing fields belong to the core.webhook_out schema so the
-      // re-validation lets the merged config through.
       config: { url: 'https://old.example.com/in', method: 'POST' },
     });
 
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
 
     await applyCanvasPatch(
       {
@@ -191,7 +354,7 @@ describe('applyCanvasPatch', () => {
           },
         ],
       },
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
 
     const updated = useWorkflowBuilderStore
@@ -234,7 +397,7 @@ describe('applyCanvasPatch', () => {
         base_data_hash: baseHash,
         ops: [{ op: 'remove_node', node_id: 'n_a', payload: {} }],
       },
-      { onChatMessage: vi.fn(), staggerMs: 0 },
+      { staggerMs: 0 },
     );
 
     const state = useWorkflowBuilderStore.getState();
@@ -246,6 +409,7 @@ describe('applyCanvasPatch', () => {
 describe('applyCanvasPatch — Section 6 guards', () => {
   beforeEach(() => {
     useWorkflowBuilderStore.getState().reset();
+    seedCatalog();
     vi.restoreAllMocks();
   });
 
@@ -257,13 +421,11 @@ describe('applyCanvasPatch — Section 6 guards', () => {
       workflowType: 'crm',
     });
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
     const result = await applyCanvasPatch(
       { workflow_id: 'wf_B', base_data_hash: baseHash, ops: [] },
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
     expect(result.kind).toBe('workflow_mismatch');
-    expect(onChatMessage).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a patch authored against a stale version', async () => {
@@ -274,7 +436,6 @@ describe('applyCanvasPatch — Section 6 guards', () => {
       workflowType: 'crm',
     });
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
     const result = await applyCanvasPatch(
       {
         workflow_id: 'wf_A',
@@ -282,7 +443,7 @@ describe('applyCanvasPatch — Section 6 guards', () => {
         base_data_hash: baseHash,
         ops: [],
       },
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
     expect(result.kind).toBe('version_mismatch');
   });
@@ -295,7 +456,6 @@ describe('applyCanvasPatch — Section 6 guards', () => {
       workflowType: 'crm',
     });
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
     const result = await applyCanvasPatch(
       {
         workflow_id: 'wf_demo',
@@ -311,7 +471,7 @@ describe('applyCanvasPatch — Section 6 guards', () => {
           },
         ],
       },
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
     expect(result.kind).toBe('config_invalid');
     if (result.kind !== 'config_invalid') return;
@@ -337,7 +497,6 @@ describe('applyCanvasPatch — Section 6 guards', () => {
       config: { reason: 'ok' },
     });
     const baseHash = useWorkflowBuilderStore.getState().currentDataHash;
-    const onChatMessage = vi.fn();
     const result = await applyCanvasPatch(
       {
         workflow_id: 'wf_demo',
@@ -350,7 +509,7 @@ describe('applyCanvasPatch — Section 6 guards', () => {
           },
         ],
       },
-      { onChatMessage, staggerMs: 0 },
+      { staggerMs: 0 },
     );
     expect(result.kind).toBe('config_invalid');
     if (result.kind !== 'config_invalid') return;

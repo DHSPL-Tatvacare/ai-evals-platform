@@ -1,6 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..800&display=swap');
 @import "tailwindcss";
 
+/* Registered custom property so the conic gradient angle can animate (plain
+   custom properties can't be transitioned/animated). Used by the flowing
+   border tokens in the light + dark blocks below. */
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
 @theme {
   /* Font Family */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -310,6 +319,14 @@
   --gradient-brand-mark: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
   --shadow-brand-cta: 0 6px 18px rgba(112, 48, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 
+  /* Flowing border — animated conic gradient that laps the --angle property.
+     --color-flow-3 is a working-default fuchsia pending sign-off. */
+  --color-flow-1: var(--color-brand-secondary);
+  --color-flow-2: var(--color-brand-primary);
+  --color-flow-3: #D14FBF;
+  --gradient-flow-border: conic-gradient(from var(--angle), var(--color-flow-1), var(--color-flow-2), var(--color-flow-3), var(--color-flow-2), var(--color-flow-1));
+  --duration-flow-lap: 2s;
+
   /* AI node accent — the only node category with a gradient fill, so it reads
      distinctly from the solid-token categories. Composed from existing tokens
      (they shift per-mode, so the gradient adapts automatically). */
@@ -464,6 +481,14 @@
   --gradient-brand-text: linear-gradient(90deg, var(--color-brand-accent) 0%, #8b5cf6 50%, var(--color-brand-accent) 100%);
   --gradient-brand-mark: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
   --shadow-brand-cta: 0 6px 18px rgba(112, 48, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+  /* Flowing border — animated conic gradient that laps the --angle property.
+     --color-flow-3 is a working-default fuchsia pending sign-off. */
+  --color-flow-1: var(--color-brand-secondary);
+  --color-flow-2: var(--color-brand-primary);
+  --color-flow-3: #D14FBF;
+  --gradient-flow-border: conic-gradient(from var(--angle), var(--color-flow-1), var(--color-flow-2), var(--color-flow-3), var(--color-flow-2), var(--color-flow-1));
+  --duration-flow-lap: 2s;
 
   /* AI node accent — gradient fill that adapts via the per-mode color tokens. */
   --gradient-node-ai: linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-status-capped) 50%, var(--color-info) 100%);
