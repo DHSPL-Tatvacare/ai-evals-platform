@@ -19,7 +19,7 @@ import {
 } from './components/parts';
 import { phrasesForContext } from './contextualPhrases';
 import { groupPartsIntoTurns, type Turn } from './grouping';
-import type { AssistantTextPart, SherlockPart } from './generated/sherlockContract';
+import type { AssistantTextPart, CompactionPart, SherlockPart } from './generated/sherlockContract';
 
 interface TurnListProps {
   parts: SherlockPart[];
@@ -74,9 +74,6 @@ function renderAssistantBody(turn: Turn, appId: string, sessionId: string | null
       case 'error':
         blocks.push(<ErrorBanner key={part.id} part={part} />);
         break;
-      case 'compaction':
-        blocks.push(<CompactionMarker key={part.id} part={part} />);
-        break;
     }
   }
   flushRun();
@@ -89,7 +86,7 @@ function UserTurn({ turn }: { turn: Turn }) {
     .join('');
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-3 py-1.5 text-[10.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-3 py-1.5 text-[12px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
         {text}
       </div>
     </div>
@@ -189,6 +186,14 @@ export function TurnList({ parts, appId, sessionId, streaming, onRetry }: TurnLi
     <div className="flex flex-col gap-5">
       {turns.map((turn, i) => {
         const isLast = i === turns.length - 1;
+        if (turn.role === 'compaction') {
+          const compaction = turn.parts.find(
+            (p): p is CompactionPart => p.type === 'compaction',
+          );
+          return compaction ? (
+            <CompactionMarker key={turn.id} part={compaction} />
+          ) : null;
+        }
         if (turn.role === 'user') {
           return <UserTurn key={turn.id} turn={turn} />;
         }

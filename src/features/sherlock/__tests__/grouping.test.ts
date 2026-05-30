@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { groupPartsIntoTurns } from '@/features/sherlock/grouping';
 import type {
   AssistantTextPart,
+  CompactionPart,
   ErrorPart,
   SherlockPart,
   StepFinishPart,
@@ -55,6 +56,9 @@ function assistantText(seq: number, text = 'answer', final = true): AssistantTex
 }
 function errorPart(seq: number): ErrorPart {
   return { ...BASE, id: `er-${seq}`, seq, type: 'error', source: 'supervisor', message: 'boom', recoverable: true };
+}
+function compaction(seq: number): CompactionPart {
+  return { ...BASE, id: `cp-${seq}`, seq, type: 'compaction', summary: 'summary', tokens_before: 21000 };
 }
 function stepFinish(seq: number, turnId: string, status = 'done'): StepFinishPart {
   return {
@@ -159,5 +163,41 @@ describe('groupPartsIntoTurns', () => {
     const turns = groupPartsIntoTurns(parts);
     expect(turns.map((t) => t.role)).toEqual(['user', 'assistant']);
     expect(turns[1].parts.map((p) => p.id)).toEqual(['at-1']);
+  });
+
+  it('renders a mid-turn compaction as its own separator, keeping the answer + step_finish together', () => {
+    // step_start → user → answer → COMPACTION → step_finish. The compaction must
+    // not land inside the answer turn (which would split the message from its
+    // action bar); the answer turn must still own its step_finish, above the divider.
+    const parts: SherlockPart[] = [
+      stepStart(0, 'turn-1'),
+      userMsg(1),
+      assistantText(2, 'a1'),
+      compaction(3),
+      stepFinish(4, 'turn-1'),
+    ];
+    const turns = groupPartsIntoTurns(parts);
+    expect(turns.map((t) => t.role)).toEqual(['user', 'assistant', 'compaction']);
+    expect(turns[1].parts.map((p) => p.type)).toEqual(['assistant_text']);
+    expect(turns[1].stepFinish?.id).toBe('sf-4');
+    expect(turns[2].parts.map((p) => p.type)).toEqual(['compaction']);
+  });
+
+  it('renders a between-turns compaction as a standalone separator turn', () => {
+    const parts: SherlockPart[] = [
+      stepStart(0, 'turn-1'),
+      userMsg(1),
+      assistantText(2, 'a1'),
+      stepFinish(3, 'turn-1'),
+      compaction(4),
+      stepStart(5, 'turn-2'),
+      userMsg(6),
+      assistantText(7, 'a2'),
+      stepFinish(8, 'turn-2'),
+    ];
+    const turns = groupPartsIntoTurns(parts);
+    expect(turns.map((t) => t.role)).toEqual([
+      'user', 'assistant', 'compaction', 'user', 'assistant',
+    ]);
   });
 });

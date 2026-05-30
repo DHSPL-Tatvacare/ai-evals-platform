@@ -4,7 +4,7 @@ import type { SherlockPart, StepFinishPart } from './generated/sherlockContract'
 
 export interface Turn {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'compaction';
   parts: SherlockPart[];
   stepFinish?: StepFinishPart;
 }
@@ -42,6 +42,13 @@ export function groupPartsIntoTurns(parts: SherlockPart[]): Turn[] {
       case 'step_finish':
         (assistant ?? openAssistant()).stepFinish = part;
         assistant = null;
+        break;
+      case 'compaction':
+        // Session-level separator — its own turn, never inside a message body,
+        // so it can't split a message from its action bar. Leave `assistant`
+        // untouched so a trailing step_finish still lands on the answer turn
+        // above this divider.
+        turns.push({ id: part.id, role: 'compaction', parts: [part] });
         break;
       default:
         (assistant ?? openAssistant()).parts.push(part);
