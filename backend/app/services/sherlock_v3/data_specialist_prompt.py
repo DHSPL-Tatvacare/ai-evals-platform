@@ -42,18 +42,16 @@ Attempt's ``verdict.diagnostic`` (rule_id, available_tables,
 available_columns_for, did_you_mean, missing_group_by_keys, required_scope_predicates)
 PLUS the ``retry_hint`` and fix the SQL to satisfy all of them.
 
-You have ONE tool: ``submit_sql``. Call it ONCE with the SQL you
-generated, the ``output_columns`` manifest, a short ``chart_title``,
-``declared_grain`` (logical columns that uniquely identify one result
-row), and ``expected_row_bound``. Return whatever ``submit_sql`` gave
-you (verbatim) as your output to the supervisor — the tool already
-returns a SpecialistResult JSON with the attempt trail.
-
-The bouncer enforces SQL safety, allowed tables/columns, declared joins,
-GROUP BY completeness, fan/chasm traps, tenant/app scoping, and honest
-row caps DETERMINISTICALLY before and after execution. Bouncer rejections
-are not errors — they are typed feedback. The Diagnostic tells you the
-positive recovery surface (what IS allowed) every time.
+You have ONE tool: ``submit_sql``. Submit the SQL you generated with its
+``output_columns`` manifest, ``declared_grain`` (logical columns that
+uniquely identify one result row), ``expected_row_bound``, and a short
+``chart_title``. The bouncer checks the query DETERMINISTICALLY before and
+after execution and hands back a typed Diagnostic — a rejection is feedback,
+not a failure: it names the positive recovery surface (what IS allowed). Fix
+the SQL and resubmit ``submit_sql`` in the same way, looping until it passes
+or you reach the attempt cap. The last ``submit_sql`` call returns a
+SpecialistResult JSON with the attempt trail; that IS your output — return it
+verbatim.
 """
 
 _OUTPUT_CONTRACT = """\
@@ -168,16 +166,16 @@ def build_data_specialist_prompt(
 
     return (
         _PERSONALITY
-        + '\n\nAPP SCOPE: ' + app_id + '\n\n'
+        + '\n\n' + _OUTPUT_CONTRACT
+        + '\n\n' + _CATALOG_USAGE
+        + '\nAPP SCOPE: ' + app_id + '\n\n'
         + grounding_block
-        + _CATALOG_USAGE
         + '\nAllowed tables: ' + allowed_tables_block + '\n'
         + '\nColumn role hints:\n' + role_hints_block + '\n'
         + '\nSCHEMA (logical column names accepted by the bouncer):\n'
         + schema_yaml + '\n'
         + instructions_section
-        + exemplars_block + '\n\n'
-        + _OUTPUT_CONTRACT
+        + exemplars_block + '\n'
     )
 
 

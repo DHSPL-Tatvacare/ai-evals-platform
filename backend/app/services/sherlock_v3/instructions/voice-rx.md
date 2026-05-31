@@ -1,8 +1,5 @@
 # voice-rx data_specialist instructions
 
-Residual rules that the schema and verified queries do not encode. Apply
-in addition to the safety contract and SQL rules already in the prompt.
-
 ## Output formatting
 
 - Render rates and percentages with **one decimal place** (e.g. `87.4`,

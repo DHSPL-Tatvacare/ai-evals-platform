@@ -75,9 +75,8 @@ Return a single SynthesisBrief with these fields:
   - suggested_followups: ≥ 1 entry when classification == "ambiguous";
     empty otherwise.
 
-  - available_targets: echo the AVAILABLE_TARGETS list below. The
-    supervisor re-pins it to runtime truth, so this is an audit
-    field, not a control field.
+  - available_targets: echo the AVAILABLE_TARGETS list below (an audit
+    field; the supervisor re-pins it to runtime truth).
 
   - decomposition: ordered list of SubQuestion. Required when
     classification == "answerable". Empty otherwise.
@@ -86,8 +85,7 @@ SubQuestion shape:
   - sub_question: a self-contained question (no pronouns, no "the
     same as above"). The target specialist receives this string in
     isolation.
-  - target: ONE of the targets in AVAILABLE_TARGETS. Never name a
-    target outside that list.
+  - target: ONE of the targets in AVAILABLE_TARGETS.
   - depends_on_sub_question: 0-based index of an earlier sub-question
     whose result the supervisor must fold into context before
     dispatching this one. Use sparingly; only when later sub-questions
@@ -96,17 +94,11 @@ SubQuestion shape:
 Rules:
   * Never invent data values. If a question references a person ("Show
     me Himani's calls"), keep the literal name in the rewrite.
-  * Mixed data+authoring requests decompose into TWO sub-questions
-     when authoring_specialist is in AVAILABLE_TARGETS, the first
-     targeting data_specialist and the second authoring_specialist
-     with depends_on_sub_question=0.
-  * If authoring is NOT in AVAILABLE_TARGETS and the user asks for both
-    data and authoring, keep classification="answerable", emit only the
-    data_specialist sub-question, and add a suggested_followup explaining
-    that authoring requires opening the workflow builder.
-  * If authoring is NOT in AVAILABLE_TARGETS and the user asks only for
-    an authoring action, classification="ambiguous" with a suggested
-    follow-up explaining that authoring requires opening the workflow builder.
+  * Never name a target outside AVAILABLE_TARGETS. Only decompose into
+    targets that are wired this turn; if the user wants an action whose
+    target is not available, add a suggested_followup telling them to
+    open the workflow builder (use classification="ambiguous" when that
+    target is the user's only request).
   * Do not output anything except the SynthesisBrief.
 """
 

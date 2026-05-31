@@ -67,13 +67,13 @@ class SupervisorPromptCompoundRuleTests(unittest.TestCase):
         self.assertIn('first', prompt.lower())
         self.assertIn('{available_tools_block}', prompt)
 
-    def test_decomposition_ordering_lives_inside_tool_persistence_rules_block(self) -> None:
+    def test_decomposition_ordering_rule_survives_in_playbook(self) -> None:
+        # The restated <tool_persistence_rules> XML block was trimmed (S1-P-A);
+        # the load-bearing sequencing rule now lives in the Playbook: synthesis
+        # is called first and dependent sub-questions wait on their predecessor.
         prompt = sup_mod._SUPERVISOR_PROMPT
-        block_start = prompt.index('<tool_persistence_rules>')
-        block_end = prompt.index('</tool_persistence_rules>')
-        block = prompt[block_start:block_end]
-        self.assertIn('order', block.lower())
-        self.assertIn('query synthesis', block.lower())
+        self.assertIn('query_synthesis_specialist', prompt)
+        self.assertIn('depends on an earlier one', prompt.lower())
 
 
 def _patched_supervisor():
