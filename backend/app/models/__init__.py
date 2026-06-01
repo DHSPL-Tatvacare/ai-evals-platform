@@ -78,6 +78,7 @@ from app.models.orchestration import (
     WorkflowRunRecipientOverride,
 )
 from app.models.provider_connection import ProviderConnection
+from app.models.channel_default_connection import ChannelDefaultConnection
 from app.models.tenant_llm_credential import TenantLlmCredential
 from app.models.tenant_llm_deployment import TenantLlmDeployment
 from app.models.tenant_curated_model import TenantCuratedModel
@@ -115,6 +116,7 @@ __all__ = [
     "WorkflowConsentRecord", "WorkflowRun", "WorkflowRunCancelAudit", "WorkflowRunNodeStep",
     "WorkflowRunRecipientState", "WorkflowRunRecipientAction", "WorkflowRunRecipientOverride",
     "ProviderConnection",
+    "ChannelDefaultConnection",
     "TenantLlmCredential",
     "TenantLlmDeployment",
     "TenantCuratedModel",
