@@ -20,6 +20,7 @@ from app.services.chat_engine.manifest_validator import (
 from app.services.chat_engine.workbench_catalog import (
     WorkbenchCatalogError,
     _clear_catalog_cache_for_tests,
+    catalog_vocabulary,
     load_workbench_catalog_strict,
     parse_workbench_catalog,
     workbench_to_prompt_inputs,
@@ -206,6 +207,50 @@ class CatalogParseTests(unittest.TestCase):
         with self.assertRaises(WorkbenchCatalogError) as cm:
             parse_workbench_catalog(raw)
         self.assertIn("raw JSONB column", str(cm.exception))
+
+    def test_catalog_synonyms_field(self) -> None:
+        raw = _minimal_catalog_yaml()
+        raw["tables"]["fact_evaluation"]["dimensions"].append(
+            {"name": "agent_alias", "expr": "agent", "synonyms": ["rep", "salesperson"]}
+        )
+        raw["tables"]["fact_evaluation"]["metrics"] = [
+            {"name": "avg_score", "expr": "AVG(result_score)", "synonyms": ["mean score"]}
+        ]
+        catalog = parse_workbench_catalog(raw)
+        col = catalog.tables["fact_evaluation"].logical_column("agent_alias")
+        assert col is not None
+        self.assertEqual(col.synonyms, ["rep", "salesperson"])
+        metric = catalog.tables["fact_evaluation"].metrics[0]
+        self.assertEqual(metric.synonyms, ["mean score"])
+
+    def test_catalog_vocabulary_is_compact(self) -> None:
+        raw = _minimal_catalog_yaml()
+        raw["tables"]["fact_evaluation"]["dimensions"].append(
+            {"name": "agent_alias", "expr": "agent", "synonyms": ["rep"]}
+        )
+        raw["tables"]["fact_evaluation"]["metrics"] = [
+            {"name": "avg_score", "expr": "AVG(result_score)", "synonyms": ["mean score"]}
+        ]
+        catalog = parse_workbench_catalog(raw)
+        vocab = catalog_vocabulary(catalog)
+
+        kinds = {e["kind"] for e in vocab}
+        self.assertTrue(kinds.issubset({"table", "dimension", "time_dimension", "fact", "metric"}))
+        for entry in vocab:
+            self.assertEqual(set(entry.keys()), {"name", "kind", "description", "synonyms"})
+        # synonyms carried through to the vocabulary.
+        carried = {tuple(e["synonyms"]) for e in vocab if e["synonyms"]}
+        self.assertIn(("rep",), carried)
+        self.assertIn(("mean score",), carried)
+        # No physical/expr leakage.
+        vocab_text = repr(vocab)
+        self.assertNotIn("expr", vocab_text)
+        self.assertNotIn("grain", vocab_text)
+        self.assertNotIn("sample_values", vocab_text)
+        self.assertNotIn("->", vocab_text)
+        # Far smaller than the full prompt schema_context.
+        schema_context, _, _, _ = workbench_to_prompt_inputs(catalog)
+        self.assertLess(len(repr(vocab)), len(repr(schema_context)))
 
     def test_prompt_inputs_do_not_expose_jsonb_expressions(self) -> None:
         raw = _minimal_catalog_yaml()

@@ -63,6 +63,7 @@ tables:
       - name: avg_call_score
         expr: "ROUND(AVG(avg_score)::numeric, 2)"
         description: Average rubric score per run (0–45.7).
+        synonyms: [average call quality, average score, mean score, call quality]
 
   fact_evaluation:
     table_kind: fact
@@ -84,6 +85,7 @@ tables:
         data_type: nominal
         physical_type: text
         description: TatvaCare inside-sales rep name (human).
+        synonyms: [rep, caller, salesperson, sales rep, executive]
       - name: direction
         expr: direction
         data_type: nominal
@@ -155,6 +157,8 @@ tables:
         expr: "(result_detail->>'overall_score')::numeric"
         data_type: quantitative
         physical_type: numeric
+        description: Overall rubric score for the call.
+        synonyms: [call quality, quality score, score, call score]
         source_table: fact_evaluation
 
       # ── JSONB-derived: yes/no outcome flags ──
@@ -279,7 +283,11 @@ tables:
       - { name: created_at, expr: created_at, data_type: temporal, physical_type: timestamptz }
 
     facts:
-      - { name: result_score, expr: result_score, data_type: quantitative, physical_type: double precision }
+      - name: result_score
+        expr: result_score
+        data_type: quantitative
+        physical_type: double precision
+        synonyms: [call quality, quality score, score, call score]
       - { name: duration_seconds, expr: duration_seconds, data_type: quantitative, physical_type: double precision }
       - { name: total_turns, expr: total_turns, data_type: quantitative, physical_type: integer }
 
@@ -287,6 +295,7 @@ tables:
       - name: avg_call_score
         expr: "ROUND(AVG(result_score)::numeric, 2)"
         description: Average rubric score (0–45.7 scale).
+        synonyms: [average call quality, average score, mean score, call quality]
       - name: max_call_score
         expr: "MAX(result_score)"
       - name: avg_call_opening
@@ -307,7 +316,11 @@ tables:
       - { name: lead_id, expr: lead_id, data_type: nominal, physical_type: text }
       - { name: source, expr: source, data_type: nominal, physical_type: text }
       - { name: source_ref, expr: source_ref, data_type: nominal, physical_type: text }
-      - { name: latest_stage_observed, expr: latest_stage_observed, data_type: nominal, physical_type: text }
+      - name: latest_stage_observed
+        expr: latest_stage_observed
+        data_type: nominal
+        physical_type: text
+        synonyms: [stage, current stage, pipeline stage, funnel stage]
     time_dimensions:
       - { name: lsq_created_on, expr: lsq_created_on, data_type: temporal, physical_type: timestamptz }
       - { name: first_seen_at, expr: first_seen_at, data_type: temporal, physical_type: timestamptz }
@@ -385,11 +398,13 @@ tables:
         expr: "attributes->>'disposition'"
         data_type: nominal
         physical_type: text
+        synonyms: [result, outcome, call result, call outcome]
         source_table: fact_lead_activity
       - name: sub_disposition
         expr: "attributes->>'sub_disposition'"
         data_type: nominal
         physical_type: text
+        synonyms: [sub outcome, sub result, detailed disposition]
         source_table: fact_lead_activity
     time_dimensions:
       - { name: occurred_at, expr: occurred_at, data_type: temporal, physical_type: timestamptz }

@@ -68,18 +68,20 @@ tables:
       - { name: pass_count, expr: pass_count, data_type: quantitative, physical_type: integer }
       - { name: fail_count, expr: fail_count, data_type: quantitative, physical_type: integer }
       - { name: error_count, expr: error_count, data_type: quantitative, physical_type: integer }
-      - { name: pass_rate, expr: pass_rate, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
+      - { name: pass_rate, expr: pass_rate, data_type: quantitative, physical_type: double precision, pre_aggregated: true, synonyms: [success rate, passing rate, percent passed] }
       - { name: avg_intent_accuracy, expr: avg_intent_accuracy, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
       - { name: adversarial_total, expr: adversarial_total, data_type: quantitative, physical_type: integer, pre_aggregated: true }
       - { name: adversarial_blocked, expr: adversarial_blocked, data_type: quantitative, physical_type: integer, pre_aggregated: true }
-      - { name: adversarial_block_rate, expr: adversarial_block_rate, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
-      - { name: avg_score, expr: avg_score, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
+      - { name: adversarial_block_rate, expr: adversarial_block_rate, data_type: quantitative, physical_type: double precision, pre_aggregated: true, synonyms: [block rate, defense rate, attacks blocked] }
+      - { name: avg_score, expr: avg_score, data_type: quantitative, physical_type: double precision, pre_aggregated: true, synonyms: [score, average score, mean score, quality, quality score] }
       - { name: duration_ms, expr: duration_ms, data_type: quantitative, physical_type: double precision }
     metrics:
       - name: avg_pass_rate
         expr: "ROUND(AVG(pass_rate)::numeric, 2)"
+        synonyms: [success rate, passing rate, average pass rate]
       - name: avg_adversarial_block_rate
         expr: "ROUND(AVG(adversarial_block_rate)::numeric, 2)"
+        synonyms: [block rate, defense rate, attacks blocked]
 
   fact_evaluation:
     table_kind: fact
@@ -112,8 +114,9 @@ tables:
         physical_type: text
         is_enum: true
         sample_values: [PASS, SOFT FAIL, HARD FAIL, CRITICAL, INCOMPLETE, NOT APPLICABLE]
-      - { name: intent, expr: intent, data_type: nominal, physical_type: text }
-      - { name: route, expr: route, data_type: nominal, physical_type: text }
+        synonyms: [result, outcome, disposition, verdict, pass/fail]
+      - { name: intent, expr: intent, data_type: nominal, physical_type: text, synonyms: [topic, purpose, user intent] }
+      - { name: route, expr: route, data_type: nominal, physical_type: text, synonyms: [handler, destination, routed to] }
       - name: query_type
         expr: query_type
         data_type: nominal
@@ -126,6 +129,7 @@ tables:
         physical_type: text
         is_enum: true
         sample_values: [EASY, MEDIUM, HARD, CRACK, MORIARTY]
+        synonyms: [level, hardness, tier, complexity]
       - { name: success, expr: success, data_type: boolean, physical_type: boolean }
       - name: persona_tactic
         expr: "context->>'persona_tactics_attempted'"
@@ -142,14 +146,16 @@ tables:
     time_dimensions:
       - { name: created_at, expr: created_at, data_type: temporal, physical_type: timestamptz }
     facts:
-      - { name: result_score, expr: result_score, data_type: quantitative, physical_type: double precision }
+      - { name: result_score, expr: result_score, data_type: quantitative, physical_type: double precision, synonyms: [score, quality, quality score, rating] }
       - { name: duration_seconds, expr: duration_seconds, data_type: quantitative, physical_type: double precision }
       - { name: total_turns, expr: total_turns, data_type: quantitative, physical_type: integer }
     metrics:
       - name: avg_result_score
         expr: "ROUND(AVG(result_score)::numeric, 2)"
+        synonyms: [average score, mean score, quality score]
       - name: success_rate
         expr: "AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END)"
+        synonyms: [pass rate, passing rate, percent passed]
 
   fact_evaluation_criterion:
     table_kind: fact
@@ -164,7 +170,7 @@ tables:
       - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
       - { name: item_id, expr: item_id, data_type: nominal, physical_type: text }
       - { name: criterion_id, expr: criterion_id, data_type: nominal, physical_type: text }
-      - { name: criterion_label, expr: criterion_label, data_type: nominal, physical_type: text }
+      - { name: criterion_label, expr: criterion_label, data_type: nominal, physical_type: text, synonyms: [rule, criterion, check, requirement] }
       - name: criterion_source
         expr: criterion_source
         data_type: nominal
@@ -197,6 +203,7 @@ tables:
     metrics:
       - name: criterion_pass_rate
         expr: "AVG(CASE WHEN passed THEN 1.0 ELSE 0.0 END)"
+        synonyms: [compliance rate, rule pass rate, percent followed]
 
 relationships:
   - name: fact_eval_to_agg_run

@@ -105,6 +105,8 @@ class LogicalColumn(BaseModel):
     description: str | None = None
     is_enum: bool = False
     sample_values: list[Any] = Field(default_factory=list)
+    # Planner-facing aliases so the supervisor can map user phrasing to this column.
+    synonyms: list[str] = Field(default_factory=list)
     # Only meaningful for derived columns whose expr extracts from a JSONB
     # column on a *different-grain* parent. For Phase 1 we keep this
     # optional; derived columns inside the same table set the field
@@ -145,6 +147,8 @@ class Metric(BaseModel):
     name: str
     expr: str
     description: str | None = None
+    # Planner-facing aliases so the supervisor can map user phrasing to this metric.
+    synonyms: list[str] = Field(default_factory=list)
 
 
 class RelationshipColumn(BaseModel):
@@ -646,6 +650,49 @@ def workbench_to_prompt_inputs(
         if "->" not in v.sql
     ]
     return schema_context, allowed_tables, role_hints[:30], exemplars
+
+
+def catalog_vocabulary(catalog: WorkbenchCatalog) -> list[dict]:
+    """The single planner-facing vocabulary: names + one-line description + synonyms only.
+
+    Deliberately excludes expr/grain/sample_values/physical_type/allowed_values/
+    source_table — the planner maps user phrasing to names; SQL shape lives in
+    ``workbench_to_prompt_inputs``. Do not add a parallel vocabulary source.
+    """
+    out: list[dict] = []
+    for table in catalog.tables.values():
+        out.append(
+            {
+                "name": table.name,
+                "kind": "table",
+                "description": _prompt_safe_description(table.description),
+                "synonyms": [],
+            }
+        )
+        for kind, cols in (
+            ("dimension", table.dimensions),
+            ("time_dimension", table.time_dimensions),
+            ("fact", table.facts),
+        ):
+            for col in cols:
+                out.append(
+                    {
+                        "name": col.name,
+                        "kind": kind,
+                        "description": _prompt_safe_description(col.description),
+                        "synonyms": list(col.synonyms),
+                    }
+                )
+        for metric in table.metrics:
+            out.append(
+                {
+                    "name": metric.name,
+                    "kind": "metric",
+                    "description": _prompt_safe_description(metric.description),
+                    "synonyms": list(metric.synonyms),
+                }
+            )
+    return out
 
 
 def _prompt_safe_description(description: str | None) -> str:

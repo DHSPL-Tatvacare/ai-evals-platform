@@ -41,6 +41,7 @@ tables:
         physical_type: text
         is_enum: true
         sample_values: [pending, running, completed, completed_with_errors, failed]
+        synonyms: ["state", "run status", "result", "disposition", "outcome"]
     time_dimensions:
       - { name: created_at, expr: created_at, data_type: temporal, physical_type: timestamptz }
       - { name: completed_at, expr: completed_at, data_type: temporal, physical_type: timestamptz }
@@ -49,13 +50,24 @@ tables:
       - { name: pass_count, expr: pass_count, data_type: quantitative, physical_type: integer }
       - { name: fail_count, expr: fail_count, data_type: quantitative, physical_type: integer }
       - { name: error_count, expr: error_count, data_type: quantitative, physical_type: integer }
-      - { name: pass_rate, expr: pass_rate, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
-      - { name: avg_score, expr: avg_score, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
+      - name: pass_rate
+        expr: pass_rate
+        data_type: quantitative
+        physical_type: double precision
+        pre_aggregated: true
+        synonyms: ["pass percentage", "success rate", "pass %"]
+      - name: avg_score
+        expr: avg_score
+        data_type: quantitative
+        physical_type: double precision
+        pre_aggregated: true
+        synonyms: ["average score", "call quality", "quality", "rating"]
       - { name: duration_ms, expr: duration_ms, data_type: quantitative, physical_type: double precision }
     metrics:
       - name: avg_run_score
         expr: "ROUND(AVG(avg_score)::numeric, 2)"
         description: Average stored run-level Voice Rx score.
+        synonyms: ["average score", "call quality", "quality", "rating"]
       - name: avg_pass_rate
         expr: "ROUND(AVG(pass_rate)::numeric, 2)"
         description: Average run pass rate as a 0-100 percentage.
@@ -84,21 +96,31 @@ tables:
         physical_type: text
         is_enum: true
         sample_values: [critique, custom]
-      - { name: evaluator_name, expr: evaluator_name, data_type: nominal, physical_type: text }
+      - name: evaluator_name
+        expr: evaluator_name
+        data_type: nominal
+        physical_type: text
+        synonyms: ["evaluator", "reviewer", "grader", "check"]
       - name: result_status
         expr: result_status
         data_type: nominal
         physical_type: text
         is_enum: true
         sample_values: [completed]
+        synonyms: ["result", "disposition", "outcome", "state"]
     time_dimensions:
       - { name: created_at, expr: created_at, data_type: temporal, physical_type: timestamptz }
     facts:
-      - { name: result_score, expr: result_score, data_type: quantitative, physical_type: double precision }
+      - name: result_score
+        expr: result_score
+        data_type: quantitative
+        physical_type: double precision
+        synonyms: ["call quality", "quality", "score", "rating"]
       - { name: duration_seconds, expr: duration_seconds, data_type: quantitative, physical_type: double precision }
     metrics:
       - name: avg_recording_score
         expr: "ROUND(AVG(result_score)::numeric, 2)"
+        synonyms: ["average score", "call quality", "quality", "rating"]
       - name: evaluated_recordings
         expr: "COUNT(DISTINCT item_id)"
 

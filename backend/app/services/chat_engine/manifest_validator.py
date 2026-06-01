@@ -331,6 +331,75 @@ def validate_workbench_against_manifest(
 
 
 # ──────────────────────────────────────────────────────────────────
+# Rubric coverage — catalog result_detail keys ↔ evaluator output_schema
+# ──────────────────────────────────────────────────────────────────
+
+
+_RESULT_DETAIL_KEY_RE = re.compile(r"result_detail\s*->>?\s*'([^']+)'")
+
+
+def _output_schema_field_names(output_schema: list) -> set[str]:
+    """Return the identifier of each output_schema field (``key`` or ``name``)."""
+    names: set[str] = set()
+    for field in output_schema:
+        if isinstance(field, dict):
+            ident = field.get("key") or field.get("name")
+            if ident:
+                names.add(str(ident))
+    return names
+
+
+def check_rubric_coverage(
+    catalog: WorkbenchCatalog, output_schema: list | None
+) -> list[str]:
+    """Return WARNING strings for catalog rubric keys absent from the evaluator schema.
+
+    Pure + boundary-clean: the sole home of the rubric-vs-schema rule.
+    For each logical column extracting ``result_detail->>'<key>'``, warn when
+    that key is not a declared field in a non-empty ``output_schema``. A None
+    or empty schema means "no standard schema resolvable" → skip (return []).
+    """
+    if not output_schema:
+        return []
+    declared = _output_schema_field_names(output_schema)
+    warnings_out: list[str] = []
+    for table_name, table in catalog.tables.items():
+        for col in table.all_logical_columns():
+            for key in _RESULT_DETAIL_KEY_RE.findall(col.effective_expr()):
+                if key not in declared:
+                    warnings_out.append(
+                        f"[{catalog.name}] catalog table {table_name!r}: rubric key "
+                        f"{key!r} (column {col.name!r}) is not a field in the evaluator "
+                        f"output_schema"
+                    )
+    return warnings_out
+
+
+async def _resolve_standard_output_schema(
+    db: AsyncSession, app_id: str
+) -> list | None:
+    """Best-effort fetch of the SYSTEM-owned evaluator output_schema for an app.
+
+    Returns the STANDARD (library) schema list, or None when no SYSTEM
+    evaluator exists for the app. Read-only; output_schema is consumed
+    only here at boot per THE RULE.
+    """
+    from app.constants import SYSTEM_TENANT_ID
+
+    result = await db.execute(
+        text(
+            "SELECT output_schema FROM platform.evaluators "
+            "WHERE app_id = :app_id AND tenant_id = :tenant_id "
+            "AND output_schema IS NOT NULL "
+            "ORDER BY created_at LIMIT 1"
+        ),
+        {"app_id": app_id, "tenant_id": str(SYSTEM_TENANT_ID)},
+    )
+    schema = result.scalar()
+    return schema if isinstance(schema, list) else None
+
+
+# ──────────────────────────────────────────────────────────────────
 # Non-empty check, declared-vs-observed JSONB keys, cardinality audit
 # ──────────────────────────────────────────────────────────────────
 
@@ -579,6 +648,22 @@ async def run_manifest_validator(db: AsyncSession) -> None:
                 len(catalog.tables),
                 len(catalog.verified_queries),
             )
+            # Best-effort rubric coverage warning; a DB hiccup here must never block boot.
+            try:
+                output_schema = await _resolve_standard_output_schema(db, manifest.app_id)
+                if not output_schema:
+                    logger.debug(
+                        "rubric guard skipped: no standard schema for %s", manifest.app_id
+                    )
+                else:
+                    for w in check_rubric_coverage(catalog, output_schema):
+                        logger.warning(w)
+            except Exception:
+                logger.debug(
+                    "rubric guard skipped: schema resolve failed for %s",
+                    manifest.app_id,
+                    exc_info=True,
+                )
 
         # Non-empty + attribute-schema + cardinality audits (manifest
         # invariant 1.1.11 + §6.3). These run against live data; an empty

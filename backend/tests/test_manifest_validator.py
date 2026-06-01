@@ -14,9 +14,77 @@ from app.services.chat_engine.manifest import (
 )
 from app.services.chat_engine.manifest_validator import (
     ManifestDriftError,
+    check_rubric_coverage,
     run_manifest_validator,
     validate_manifest_against_postgres,
 )
+from app.services.chat_engine.workbench_catalog import (
+    BaseTableRef,
+    KeyDef,
+    LogicalColumn,
+    VerifiedQuery,
+    WorkbenchCatalog,
+    WorkbenchTable,
+)
+
+
+def _vqs() -> list[VerifiedQuery]:
+    return [
+        VerifiedQuery(name=f"vq{i}", question="q", sql="SELECT 1")
+        for i in range(3)
+    ]
+
+
+def _rubric_catalog(rubric_key: str) -> WorkbenchCatalog:
+    """Catalog whose one derived column extracts ``rubric_key`` from result_detail."""
+    table = WorkbenchTable(
+        name="call_quality",
+        table_kind="fact",
+        base_table=BaseTableRef(schema="analytics", table="fact_evaluation"),
+        physical_primary_key=KeyDef(columns=["id"]),
+        analytical_grain=KeyDef(columns=["id"]),
+        facts=[
+            LogicalColumn(
+                name=f"{rubric_key}_score",
+                expr=f"(result_detail->>'{rubric_key}')::numeric",
+                source_table="call_quality",
+            )
+        ],
+    )
+    return WorkbenchCatalog(
+        name="call_quality_catalog",
+        tables={"call_quality": table},
+        verified_queries=_vqs(),
+    )
+
+
+def test_rubric_guard_warns_on_unknown_key() -> None:
+    catalog = _rubric_catalog("foo")
+    warnings = check_rubric_coverage(catalog, [{"key": "bar"}, {"key": "baz"}])
+    assert any("foo" in w for w in warnings)
+    # A schema containing 'foo' clears the warning.
+    assert check_rubric_coverage(catalog, [{"key": "foo"}]) == []
+
+
+def test_rubric_guard_skips_when_no_schema() -> None:
+    catalog = _rubric_catalog("foo")
+    assert check_rubric_coverage(catalog, None) == []
+    assert check_rubric_coverage(catalog, []) == []
+
+
+def test_rubric_guard_accepts_name_keyed_fields() -> None:
+    # Library output_schema fields identify via `name`, not only `key`.
+    catalog = _rubric_catalog("foo")
+    assert check_rubric_coverage(catalog, [{"name": "foo"}]) == []
+    assert any("foo" in w for w in check_rubric_coverage(catalog, [{"name": "bar"}]))
+
+
+def test_rubric_guard_never_raises_on_malformed_schema() -> None:
+    # Contract: pure + boot-safe — non-dict / missing-ident entries are
+    # tolerated, the resolvable field still clears the warning, never raises.
+    catalog = _rubric_catalog("foo")
+    schema = ["junk", None, 42, {}, {"key": "foo"}]
+    assert check_rubric_coverage(catalog, schema) == []
 
 
 @pytest.fixture
