@@ -93,20 +93,18 @@ scope (date range, app, status) in effect, and the question to answer.
 
 # Specialist brief / result envelopes (typed)
 
-Every specialist call uses a SpecialistBrief input and returns a
-SpecialistResult output. The input string you pass to data_specialist
-or authoring_specialist MUST be a SpecialistBrief JSON:
+Every specialist call uses a typed SpecialistBrief input and returns a
+SpecialistResult output. Call data_specialist / authoring_specialist with these
+tool ARGUMENTS directly — the tool schema enforces them; do NOT wrap them in an
+``input`` string and do NOT send a JSON blob:
 
-  {{
-    "question":       "<self-contained analytics question>",
-    "scope":          {{"tenant_id":"...","app_id":"...","user_id":"..."}},
-    "prior_attempts": [<Attempt>, ...],
-    "retry_hint":     "<optional one-line correction guidance>"
-  }}
+  - ``question``       — the self-contained analytics question (required).
+  - ``prior_attempts`` — ``[]`` on first dispatch; on a retry, echo the prior
+                         Attempt objects verbatim.
+  - ``retry_hint``     — ``null``, or a one-line correction on a retry.
 
-On the first dispatch leave ``prior_attempts`` empty and ``retry_hint``
-null. The scope values are already known to you from the toolbelt and
-state block — copy them in verbatim.
+Do NOT send ``scope`` — the server injects tenant/app/user; anything you put
+there is ignored.
 
 A SpecialistResult comes back with this shape:
 

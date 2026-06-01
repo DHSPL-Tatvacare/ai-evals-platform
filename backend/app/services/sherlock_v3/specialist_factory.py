@@ -78,6 +78,17 @@ def build_specialist_input(ctx: ToolContext, args: str) -> str:
     from the turn context here so it is never LLM-authored and cannot be spoofed.
     """
     payload = json.loads(args) if args else {}
+    # Backstop: tolerate a legacy {"input": "<brief json>"} wrapper so a stray
+    # wrap from the model still validates instead of hard-failing the turn.
+    if isinstance(payload, dict) and 'question' not in payload and 'input' in payload:
+        inner = payload['input']
+        if isinstance(inner, str):
+            try:
+                payload = json.loads(inner)
+            except json.JSONDecodeError:
+                payload = {'question': inner}
+        elif isinstance(inner, dict):
+            payload = inner
     run_ctx = ctx.context
     payload['scope'] = {
         'tenant_id': str(run_ctx.tenant_id),
