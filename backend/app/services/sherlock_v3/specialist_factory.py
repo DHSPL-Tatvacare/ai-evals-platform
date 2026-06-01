@@ -95,7 +95,12 @@ def build_specialist_input(ctx: ToolContext, args: str) -> str:
         'app_id': run_ctx.app_id,
         'user_id': str(run_ctx.user_id),
     }
-    return SpecialistBrief.model_validate(payload).model_dump_json()
+    brief_json = SpecialistBrief.model_validate(payload).model_dump_json()
+    # Re-wrap as the SDK's AgentAsToolInput shape: the underlying as_tool handler
+    # is run_agent(ctx, input: str) and extracts the `input` key as the nested
+    # agent's input. Returning the bare brief here would feed the specialist an
+    # empty input, so it never calls its tool.
+    return json.dumps({'input': brief_json})
 
 
 def as_specialist_tool(

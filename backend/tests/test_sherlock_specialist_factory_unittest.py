@@ -152,7 +152,12 @@ class BuildSpecialistInputTest(unittest.TestCase):
             }
         )
         out = build_specialist_input(self._scope_ctx(), llm_args)
-        brief = SpecialistBrief.model_validate_json(out)
+        # Corrected contract: build wraps the brief as the SDK AgentAsToolInput
+        # {"input": "<brief json>"} so the nested as_tool handler feeds it as the
+        # specialist's input (a bare brief leaves the specialist with empty input).
+        wrapper = json.loads(out)
+        self.assertEqual(set(wrapper), {'input'})
+        brief = SpecialistBrief.model_validate_json(wrapper['input'])
         self.assertEqual(brief.question, 'how many leads converted?')
         self.assertEqual(brief.scope.tenant_id, 'tenant-1')
         self.assertEqual(brief.scope.app_id, 'kaira-bot')
@@ -165,7 +170,7 @@ class BuildSpecialistInputTest(unittest.TestCase):
 
         llm_args = json.dumps({'question': 'q', 'prior_attempts': [], 'retry_hint': 'hint'})
         out = build_specialist_input(self._scope_ctx(), llm_args)
-        brief = SpecialistBrief.model_validate_json(out)
+        brief = SpecialistBrief.model_validate_json(json.loads(out)['input'])
         self.assertEqual(brief.question, 'q')
         self.assertEqual(brief.retry_hint, 'hint')
         self.assertEqual(brief.scope.tenant_id, 'tenant-1')
