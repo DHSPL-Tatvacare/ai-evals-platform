@@ -11,10 +11,10 @@ the specialist owns the SDK wiring. When the v3 harness eventually
 auto-wires packs (per `docs/plans/sherlock-future-plan.md`), this
 specialist's manual import becomes a one-line refactor.
 
-Per [[Decisions/2026-05-10-agents-sdk-conformance-review|conformance review]]:
-- §A: `as_tool()` takes no parameters JSON Schema; the supervisor sends
-  free-text briefs and structured validation lives on this sub-agent's
-  tools.
+Per the agents-SDK conformance review (updated 2026-06-01):
+- §A: the supervisor's hand-off is a typed SpecialistBrief enforced at the
+  `as_tool` seam (the SDK does support a parameters schema as of 0.14.2);
+  per-tool validation (`apply_patch`) additionally uses strict_json_schema.
 - §C: `apply_patch` config travels as JSON-encoded strings to satisfy
   strict_json_schema.
 - §E: Canvas snapshot is baked into the system prompt at agent build

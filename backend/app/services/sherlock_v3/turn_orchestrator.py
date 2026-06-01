@@ -103,6 +103,7 @@ async def run_chat_turn(
             app_id=runtime_session.app_id,
             chat_session_id=uuid.UUID(runtime_session.chat_session_id),
             turn_id=uuid.UUID(turn.id),
+            client_turn_id=turn.client_turn_id,
             auth=auth,
             emitter=emitter,
             builder_context=builder_context,

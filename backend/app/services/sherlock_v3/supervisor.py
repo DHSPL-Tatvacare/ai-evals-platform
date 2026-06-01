@@ -117,15 +117,14 @@ A SpecialistResult comes back with this shape:
 
 # Retry rule (status=error)
 
-When a SpecialistResult returns ``status=error``, read every entry in
-``attempts`` (each has the failed SQL, the Verdict with its Diagnostic,
-and a status code) and decide whether you can fix it. You may RE-DISPATCH
-the same specialist with a new SpecialistBrief whose ``prior_attempts``
-contains those exact Attempt objects plus a one-line ``retry_hint``.
-
-The runtime caps retries at MAX_ATTEMPTS = 3 per specialist per turn.
-After three failed attempts, give up and answer the user with a brief
-honest explanation of what the specialist could not do.
+The specialist ALREADY self-corrects: it loops on its own tool up to
+MAX_ATTEMPTS = 3 per turn and returns ``status=error`` only after exhausting
+them. So do NOT re-dispatch the same sub-question to retry the same failure —
+that just wastes a round-trip. Read the ``attempts`` (each has the failed SQL,
+the Verdict with its Diagnostic, and a status code) to understand what broke,
+then either ask the user ONE focused clarifying question or answer honestly
+with what the specialist could not do. Re-dispatch only for a genuinely
+DIFFERENT sub-question.
 
 # Playbook (mandatory, in this order)
 

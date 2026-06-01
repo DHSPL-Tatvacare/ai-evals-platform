@@ -84,6 +84,7 @@ def _ctx_with_subtask(emitter: _FakeEmitter, *, call_id: str, specialist: str) -
         app_id='inside-sales',
         chat_session_id=uuid.uuid4(),
         turn_id=uuid.uuid4(),
+        client_turn_id=str(uuid.uuid4()),
         auth=None,  # type: ignore[arg-type]
         emitter=emitter,  # type: ignore[arg-type]
     )

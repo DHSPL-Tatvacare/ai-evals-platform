@@ -24,6 +24,7 @@ def _ctx() -> SherlockTurnContext:
         app_id='kaira-bot',
         chat_session_id=uuid.uuid4(),
         turn_id=uuid.uuid4(),
+        client_turn_id=str(uuid.uuid4()),
         auth=object(),  # type: ignore[arg-type]
         emitter=_StubEmitter(),  # type: ignore[arg-type]
     )

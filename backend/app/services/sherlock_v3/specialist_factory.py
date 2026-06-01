@@ -128,8 +128,10 @@ def as_specialist_tool(
     async def on_invoke_tool(context: ToolContext, args: str) -> Any:
         return await inner_invoke(context, build(context, args))
 
-    # strict_json_schema off: the brief nests dict-valued diagnostics the SDK
-    # strictifier rejects; real enforcement is the input_builder's model_validate.
+    # Wrap as_tool's tool rather than pass parameters= natively: the SDK-native
+    # path runs ensure_strict_json_schema, which rejects this brief (its nested
+    # bouncer Verdict/Diagnostic dicts set additionalProperties). strict_json_schema
+    # off here; real enforcement is the input_builder's model_validate.
     return dataclasses.replace(
         tool,
         params_json_schema=parameters.model_json_schema(),

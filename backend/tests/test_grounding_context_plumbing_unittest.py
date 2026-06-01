@@ -48,6 +48,7 @@ def _make_ctx() -> SherlockTurnContext:
         app_id='voice-rx',
         chat_session_id=uuid.uuid4(),
         turn_id=uuid.uuid4(),
+        client_turn_id=str(uuid.uuid4()),
         auth=_make_auth(),
         emitter=_StubEmitter(),  # type: ignore[arg-type]
         previous_response_id=None,

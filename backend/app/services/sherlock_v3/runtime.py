@@ -56,6 +56,9 @@ class SherlockTurnContext:
     app_id: str
     chat_session_id: uuid.UUID
     turn_id: uuid.UUID
+    # The client-minted turn id (distinct from the DB turn primary key turn_id);
+    # the user-message echo id derives from this so the FE optimistic bubble reconciles.
+    client_turn_id: str
     auth: AuthContext
     emitter: PartEmitter | None = None
     previous_response_id: str | None = None
@@ -177,9 +180,9 @@ async def run_turn(
         turn_id=str(ctx.turn_id),
     ))
     await ctx.emitter.emit(UserMessagePart(
-        # Deterministic id so the client's optimistic user bubble reconciles
-        # (upsert-by-id) instead of duplicating when the echo arrives.
-        id=f'user-{ctx.turn_id}',
+        # Echo the CLIENT turn id (not the DB turn_id) so the client's optimistic
+        # `user-<turnId>` bubble reconciles (upsert-by-id) instead of duplicating.
+        id=f'user-{ctx.client_turn_id}',
         chat_session_id='',
         seq=0,
         created_at=0,
