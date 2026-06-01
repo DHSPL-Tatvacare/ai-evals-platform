@@ -65,13 +65,16 @@ class _ConnectionMissing(enum.Enum):
 _CONNECTION_MISSING = _ConnectionMissing.TOKEN
 
 
-def _collect_ancestors(
-    target_node_id: str, edges: list[WorkflowDefinitionEdge],
+def collect_ancestors(
+    target_node_id: str, edge_pairs: list[tuple[str, str]],
 ) -> list[str]:
-    """Node ids reachable upstream of ``target_node_id`` via incoming edges."""
+    """Node ids reachable upstream of ``target_node_id`` via incoming edges.
+
+    ``edge_pairs`` are ``(source, target)`` tuples so callers holding either
+    typed edges or raw dict edges share one ancestor walk."""
     incoming: dict[str, list[str]] = {}
-    for edge in edges:
-        incoming.setdefault(edge.target, []).append(edge.source)
+    for source, target in edge_pairs:
+        incoming.setdefault(target, []).append(source)
 
     ordered: list[str] = []
     seen: set[str] = set()
@@ -367,7 +370,7 @@ async def resolve_upstream_variables(
         fields.append(field)
         sample[field.path] = value
 
-    for node_id in _collect_ancestors(target_node_id, edges):
+    for node_id in collect_ancestors(target_node_id, [(e.source, e.target) for e in edges]):
         node = node_by_id.get(node_id)
         if node is None:
             continue

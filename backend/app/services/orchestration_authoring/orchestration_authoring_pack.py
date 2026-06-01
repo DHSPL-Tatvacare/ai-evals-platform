@@ -48,6 +48,7 @@ from app.services.orchestration_authoring.connection_resolver import (
     ConnRef,
     resolve_connection_ladder,
 )
+from app.services.orchestration_authoring.layout import layout_new_nodes
 from app.services.orchestration_authoring.lookup_models import (
     ActionTemplateRef,
     ActionTemplatesList,
@@ -68,6 +69,9 @@ from app.services.orchestration.api.provider_listings import (
     list_connection_wati_templates,
 )
 from app.services.orchestration_authoring.template_resolver import match_template
+from app.services.orchestration_authoring.patch_coherence import (
+    check_bound_fields_carried,
+)
 from app.schemas.orchestration import (
     WorkflowDefinitionEdge,
     WorkflowDefinitionNode,
@@ -761,6 +765,40 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                 message=message,
                 started=started,
             )
+
+        # A payload-bound dispatch field must be carried by its direct upstream
+        # source; an uncarried field resolves to "" silently at runtime.
+        carry_violations = check_bound_fields_carried(candidate)
+        if carry_violations:
+            reason_code = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code=reason_code,
+                message='; '.join(carry_violations)
+                + '. Add the field to the upstream source.cohort.payload_fields.',
+                started=started,
+            )
+
+        # ── Deterministic auto-layout for NEW nodes ──────────────────────
+        # The agent never hand-places nodes. Assign positions for add_node
+        # ops by topological depth, anchored below/right of existing nodes,
+        # and write them back onto the emitted ops. Existing nodes keep their
+        # positions; we emit no position ops for them.
+        added_node_ids = {op.node_id for op in validated_ops if op.op == 'add_node'}
+        if added_node_ids:
+            existing_positions = {
+                n.get('id'): dict(n.get('position') or {})
+                for n in (builder_context.definition or {}).get('nodes') or []
+                if n.get('id')
+            }
+            placed = layout_new_nodes(
+                nodes=candidate.get('nodes') or [],
+                edges=candidate.get('edges') or [],
+                new_node_ids=added_node_ids,
+                existing_positions=existing_positions,
+            )
+            for op in validated_ops:
+                if op.op == 'add_node' and op.node_id in placed:
+                    op.payload['position'] = placed[op.node_id]
 
         canvas_patch = CanvasPatch(
             workflow_id=str(builder_context.workflow_id),
@@ -2008,7 +2046,8 @@ class OrchestrationAuthoringPack:
             ),
             'list_node_types': (
                 'List node types available for this builder, optionally '
-                'filtered by category.'
+                'filtered by category. Wire edges only from a node\'s declared '
+                'output_edges; never invent a handle (e.g. \'passed\'/\'success\').'
             ),
             'list_upstream_variables': (
                 'Resolve upstream fields, provider outcome enums, and event '
