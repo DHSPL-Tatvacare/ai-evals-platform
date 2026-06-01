@@ -44,6 +44,10 @@ from app.services.orchestration_authoring.canvas_patch import (
     CanvasPatch,
     CanvasPatchOp,
 )
+from app.services.orchestration_authoring.connection_resolver import (
+    ConnRef,
+    resolve_connection_ladder,
+)
 from app.services.orchestration_authoring.lookup_models import (
     ActionTemplateRef,
     ActionTemplatesList,
@@ -60,6 +64,10 @@ from app.services.orchestration.upstream_variables import (
     UpstreamSourceNotFound,
     resolve_upstream_variables,
 )
+from app.services.orchestration.api.provider_listings import (
+    list_connection_wati_templates,
+)
+from app.services.orchestration_authoring.template_resolver import match_template
 from app.schemas.orchestration import (
     WorkflowDefinitionEdge,
     WorkflowDefinitionNode,
@@ -844,6 +852,48 @@ _LIST_COHORT_DATASETS_SCHEMA: dict[str, Any] = {
     'properties': {},
 }
 
+_RESOLVE_TEMPLATE_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['connection_id', 'intent'],
+    'properties': {
+        'connection_id': {
+            'type': 'string',
+            'description': (
+                'WhatsApp (WATI) provider connection UUID. MUST have been '
+                'returned by list_provider_connections / resolve_connection '
+                'earlier this turn.'
+            ),
+        },
+        'intent': {
+            'type': 'string',
+            'description': (
+                'Free-text description of the WhatsApp template to use '
+                '(e.g. its name or what it says).'
+            ),
+        },
+    },
+}
+
+_RESOLVE_CONNECTION_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['channel'],
+    'properties': {
+        'channel': {
+            'type': 'string',
+            'description': "Channel slug (e.g. 'whatsapp', 'voice').",
+        },
+        'hint': {
+            'type': 'string',
+            'description': (
+                'Optional free-text hint (provider name or connection name) '
+                'to disambiguate when the app has several connections.'
+            ),
+        },
+    },
+}
+
 _LIST_NODE_TYPES_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'additionalProperties': False,
@@ -1389,6 +1439,232 @@ async def _list_cohort_datasets_handler(ctx: Any, args: str) -> str:
         )
 
 
+async def _resolve_connection_handler(ctx: Any, args: str) -> str:
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    audit: dict[str, Any] = {'reason_code': None}
+    builder_context = getattr(sherlock_ctx, 'builder_context', None)
+    auth_outer = getattr(sherlock_ctx, 'auth', None)
+    try:
+        check = await _check_layered_auth(sherlock_ctx, started=started, audit=audit)
+        if isinstance(check, str):
+            return check
+        auth, builder_context = check
+
+        parsed = json.loads(args) if args.strip() else {}
+        channel_arg = parsed.get('channel')
+        if not isinstance(channel_arg, str) or not channel_arg:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='channel is required',
+                started=started,
+            )
+        hint = parsed.get('hint')
+        hint = hint if isinstance(hint, str) and hint.strip() else None
+
+        from app.services.orchestration import channel_taxonomy
+
+        canonical = channel_taxonomy.resolve_channel(channel_arg)
+        if canonical is None:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message=f'Unknown channel {channel_arg!r}.',
+                started=started,
+            )
+        providers = set(channel_taxonomy.channel_provider_map().get(canonical, []))
+
+        from sqlalchemy import select
+
+        from app.database import async_session
+        from app.models.channel_default_connection import ChannelDefaultConnection
+        from app.models.provider_connection import ProviderConnection
+
+        async with async_session() as db:
+            rows = (
+                await db.execute(
+                    select(ProviderConnection).where(
+                        ProviderConnection.tenant_id == auth.tenant_id,
+                        ProviderConnection.app_id == builder_context.app_id,
+                        ProviderConnection.provider.in_(providers),
+                        ProviderConnection.active.is_(True),
+                    )
+                )
+            ).scalars().all()
+            default_row = await db.scalar(
+                select(ChannelDefaultConnection).where(
+                    ChannelDefaultConnection.tenant_id == auth.tenant_id,
+                    ChannelDefaultConnection.app_id == builder_context.app_id,
+                    ChannelDefaultConnection.channel == canonical,
+                )
+            )
+
+        candidates = [
+            ConnRef(id=str(row.id), name=row.name, provider=row.provider)
+            for row in rows
+        ]
+        candidate_ids = {c.id for c in candidates}
+        default_id = (
+            str(default_row.connection_id)
+            if default_row is not None
+            and str(default_row.connection_id) in candidate_ids
+            else None
+        )
+
+        resolution = resolve_connection_ladder(
+            candidates=candidates, default_id=default_id, hint=hint,
+        )
+
+        if resolution.status == 'resolved' and resolution.connection is not None:
+            conn = resolution.connection
+            _record_authorized_uuids(
+                sherlock_ctx.scratch if hasattr(sherlock_ctx, 'scratch') else {},
+                [conn.id],
+            )
+            payload = {
+                'status': 'resolved',
+                'connection': {
+                    'id': conn.id, 'name': conn.name, 'provider': conn.provider,
+                },
+            }
+            summary = f'Resolved {canonical} connection {conn.name!r}.'
+        elif resolution.status == 'pick':
+            picks = resolution.candidates or []
+            payload = {
+                'status': 'pick',
+                'candidates': [
+                    {'id': c.id, 'name': c.name, 'provider': c.provider}
+                    for c in picks
+                ],
+            }
+            summary = f'{len(picks)} {canonical} connection(s) to choose from.'
+        else:
+            payload = {'status': 'none', 'candidates': []}
+            summary = f'No {canonical} connection configured for this app.'
+
+        return _mark_leak_in_result(audit, _lookup_result_json(
+            started=started,
+            summary=summary,
+            payload=payload,
+            tool_name='resolve_connection',
+        ))
+    finally:
+        _emit_authoring_audit(
+            tool='resolve_connection',
+            builder_context=builder_context,
+            auth=auth_outer,
+            started=started,
+            reason_code=audit.get('reason_code'),
+            patch_op_count=0,
+        )
+
+
+async def _resolve_template_handler(ctx: Any, args: str) -> str:
+    """Cat-A resolution for a wati_template_picker field.
+
+    Enforces chain order (connection_id MUST be in the per-turn allowlist),
+    fetches via the SAME path the FE picker uses
+    (`list_connection_wati_templates` — D1), and matches the intent with
+    `match_template`. Never passes an unmatched intent through as a template
+    name: an unknown intent returns not_found so the agent asks.
+    """
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    audit: dict[str, Any] = {'reason_code': None}
+    builder_context = getattr(sherlock_ctx, 'builder_context', None)
+    auth_outer = getattr(sherlock_ctx, 'auth', None)
+    try:
+        check = await _check_layered_auth(sherlock_ctx, started=started, audit=audit)
+        if isinstance(check, str):
+            return check
+        auth, builder_context = check
+
+        parsed = json.loads(args) if args.strip() else {}
+        connection_id = parsed.get('connection_id')
+        if not isinstance(connection_id, str) or not connection_id:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='connection_id is required',
+                started=started,
+            )
+        intent = parsed.get('intent')
+        if not isinstance(intent, str) or not intent.strip():
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='intent is required',
+                started=started,
+            )
+
+        # Chain order: the connection must have been resolved/listed this turn.
+        scratch = getattr(sherlock_ctx, 'scratch', {}) or {}
+        authorized = scratch.get('authorized_uuids')
+        if not isinstance(authorized, set):
+            authorized = set(authorized or [])
+        if connection_id not in authorized:
+            audit['reason_code'] = 'UUID_NOT_AUTHORIZED'
+            return _error_result(
+                reason_code='UUID_NOT_AUTHORIZED',
+                message=(
+                    f'connection_id {connection_id} was not resolved this turn. '
+                    'Call resolve_connection (or list_provider_connections) for '
+                    'the WhatsApp channel first.'
+                ),
+                started=started,
+            )
+
+        import uuid as _uuid
+
+        from app.database import async_session
+
+        async with async_session() as db:
+            fetched = await list_connection_wati_templates(
+                db,
+                tenant_id=auth.tenant_id,
+                app_id=builder_context.app_id,
+                connection_id=_uuid.UUID(connection_id),
+                refresh=False,
+            )
+
+        items = fetched.get('items') or []
+        result = match_template(templates=items, intent=intent)
+
+        if result.status == 'resolved':
+            payload: dict[str, Any] = {
+                'status': 'resolved',
+                'name': result.name,
+                'placeholders': result.placeholders,
+            }
+            summary = f'Resolved WhatsApp template {result.name!r}.'
+        elif result.status == 'pick':
+            payload = {'status': 'pick', 'candidates': result.candidates}
+            summary = f'{len(result.candidates)} WhatsApp templates match {intent!r}.'
+        else:
+            payload = {'status': 'not_found', 'name': None, 'candidates': []}
+            summary = (
+                f'No WhatsApp template matches {intent!r}; ask the user which '
+                'template to use.'
+            )
+
+        return _mark_leak_in_result(audit, _lookup_result_json(
+            started=started,
+            summary=summary,
+            payload=payload,
+            tool_name='resolve_template',
+        ))
+    finally:
+        _emit_authoring_audit(
+            tool='resolve_template',
+            builder_context=builder_context,
+            auth=auth_outer,
+            started=started,
+            reason_code=audit.get('reason_code'),
+            patch_op_count=0,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pack class
 # ---------------------------------------------------------------------------
@@ -1448,11 +1724,23 @@ class OrchestrationAuthoringPack:
             {
                 'name': 'list_action_templates',
                 'description': (
-                    'List action templates available for the named '
-                    'channel in this tenant + app. Returns (id, slug, '
-                    'name, channel).'
+                    'List INTERNAL action templates for the named channel in '
+                    'this tenant + app. Returns (id, slug, name, channel). This '
+                    'is NOT the WhatsApp/WATI template source — for a '
+                    'wati_template_picker field use resolve_template instead.'
                 ),
                 'params_json_schema': _LIST_ACTION_TEMPLATES_SCHEMA,
+            },
+            {
+                'name': 'resolve_template',
+                'description': (
+                    'Resolve a WhatsApp (WATI) message template for a '
+                    'wati_template_picker field. Pass `connection_id` (resolved '
+                    'this turn) and a free-text `intent`; returns one resolved '
+                    'template with its placeholders, a pick list, or not_found '
+                    '(ask the user) — never an invented template name.'
+                ),
+                'params_json_schema': _RESOLVE_TEMPLATE_SCHEMA,
             },
             {
                 'name': 'list_cohort_datasets',
@@ -1463,6 +1751,16 @@ class OrchestrationAuthoringPack:
                 ),
                 'params_json_schema': _LIST_COHORT_DATASETS_SCHEMA,
             },
+            {
+                'name': 'resolve_connection',
+                'description': (
+                    'Resolve the provider connection to use for a channel. '
+                    'Pass `channel` and an optional `hint`; returns a single '
+                    'resolved connection (added to the per-turn allowlist), a '
+                    'pick list to disambiguate, or none if unconfigured.'
+                ),
+                'params_json_schema': _RESOLVE_CONNECTION_SCHEMA,
+            },
         )
 
     def tool_handlers(self) -> Mapping[str, Any]:
@@ -1472,7 +1770,9 @@ class OrchestrationAuthoringPack:
             'list_upstream_variables': _list_upstream_variables_handler,
             'list_provider_connections': _list_provider_connections_handler,
             'list_action_templates': _list_action_templates_handler,
+            'resolve_template': _resolve_template_handler,
             'list_cohort_datasets': _list_cohort_datasets_handler,
+            'resolve_connection': _resolve_connection_handler,
         }
 
     def validate_arguments(self, tool_name: str, args: Mapping[str, Any]) -> None:
@@ -1500,10 +1800,21 @@ class OrchestrationAuthoringPack:
                 'added to the per-turn allowlist for apply_patch.'
             ),
             'list_action_templates': (
-                'List action templates by channel.'
+                'List INTERNAL action templates by channel. NOT the '
+                'WhatsApp/WATI template source — use resolve_template for a '
+                'wati_template_picker field.'
+            ),
+            'resolve_template': (
+                'Resolve a WhatsApp template for a wati_template_picker field '
+                'from a free-text intent; returns one template + placeholders, '
+                'a pick list, or not_found.'
             ),
             'list_cohort_datasets': (
                 'List cohort datasets in this app and their latest version IDs.'
+            ),
+            'resolve_connection': (
+                'Resolve the connection for a channel (with an optional hint); '
+                'returns one connection, a pick list, or none.'
             ),
         }
 

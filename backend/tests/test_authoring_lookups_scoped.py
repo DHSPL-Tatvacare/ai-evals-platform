@@ -192,15 +192,17 @@ class LookupResponseShapeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PackToolSurfaceTests(unittest.TestCase):
-    def test_pack_exposes_six_tools(self) -> None:
+    def test_pack_exposes_expected_tools(self) -> None:
         names = [s['name'] for s in OrchestrationAuthoringPack().tool_specs()]
         self.assertEqual(set(names), {
             'apply_patch',
             'list_node_types',
             'list_provider_connections',
             'list_action_templates',
-            'list_wati_templates',
+            'list_upstream_variables',
             'list_cohort_datasets',
+            'resolve_connection',
+            'resolve_template',
         })
 
     def test_every_tool_schema_uses_strict_object(self) -> None:
@@ -218,13 +220,11 @@ class CredentialFieldRegressionTests(unittest.TestCase):
             ActionTemplateRef, ActionTemplatesList, CohortDatasetRef,
             CohortDatasetsList, NodeTypeRef, NodeTypesList,
             ProviderConnectionRef, ProviderConnectionsList,
-            WatiTemplateRef, WatiTemplatesList,
         )
         for cls in (
             ActionTemplateRef, ActionTemplatesList, CohortDatasetRef,
             CohortDatasetsList, NodeTypeRef, NodeTypesList,
             ProviderConnectionRef, ProviderConnectionsList,
-            WatiTemplateRef, WatiTemplatesList,
         ):
             field_names = set(cls.model_fields.keys())
             offenders = field_names & CREDENTIAL_FIELD_BLOCKLIST
