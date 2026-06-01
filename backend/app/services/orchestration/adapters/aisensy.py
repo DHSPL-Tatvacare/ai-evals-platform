@@ -83,6 +83,14 @@ class AiSensyAdapter:
             raw=raw,
         )
 
+    async def list_templates(self, connection: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: ARG002
+        # AiSensy's live template-listing API is undocumented in public references;
+        # signalling unsupported rather than fabricating a GET, mirroring normalize_webhook.
+        raise NotImplementedError(
+            "AiSensy template listing is not supported yet. "
+            "See docs/plans/2026-05-18-orchestration-vendor-abstraction/README.md §4 + §8."
+        )
+
     def normalize_webhook(self, raw: dict[str, Any]) -> CanonicalMessagingEvent:
         raise NotImplementedError(
             "AiSensy webhook field mapping is pending. "

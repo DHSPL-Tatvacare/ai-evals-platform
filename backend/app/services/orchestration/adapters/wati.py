@@ -345,6 +345,10 @@ class WatiAdapter:
 
         return sorted(out_by_name.values(), key=lambda item: item["name"].lower())
 
+    async def list_templates(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
+        # Uniform protocol read — aliases the existing read-only getMessageTemplates GET.
+        return await self.list_message_templates(connection)
+
     async def list_phone_numbers(self, connection: dict[str, Any]) -> list[dict[str, Any]]:
         """Fetch WhatsApp channel phone numbers from GET /api/v2/whatsapp/phoneNumbers.
 

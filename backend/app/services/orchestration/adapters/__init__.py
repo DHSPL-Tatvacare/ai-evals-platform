@@ -21,6 +21,16 @@ from app.services.orchestration.adapters.protocol import (
 )
 
 
+# Adapter methods authoring may invoke — read-only only; excludes every write/dispatch path.
+AUTHORING_READONLY_ADAPTER_METHODS: frozenset[str] = frozenset({
+    "list_templates",
+    "list_message_templates",
+    "extract_variables",
+    "outcome_bucket",
+    "funnel_stages",
+})
+
+
 class AdapterNotRegisteredError(LookupError):
     pass
 
@@ -62,6 +72,7 @@ def capability_for_vendor(vendor: str) -> str | None:
 
 
 __all__ = [
+    "AUTHORING_READONLY_ADAPTER_METHODS",
     "AdapterNotRegisteredError",
     "CanonicalEventBatch",
     "CanonicalEventRecipient",
