@@ -1156,6 +1156,30 @@ async def extract_data_specialist_output(run_result: Any) -> str:
 
 # ─────────────────────── agent build ───────────────────────
 
+_MAX_EXEMPLARS = 10
+
+
+def _merge_exemplars(
+    verified: tuple[Any, ...],
+    static: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Prepend retrieved verified examples to the static catalog ones,
+    dedupe by (question, sql), and cap to bound the prompt."""
+    merged: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for q, s in (
+        [(v.question, v.sql) for v in verified]
+        + [(e['question'], e['sql']) for e in static]
+    ):
+        key = (q, s)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append({'question': q, 'sql': s})
+        if len(merged) >= _MAX_EXEMPLARS:
+            break
+    return merged
+
 
 def build_data_specialist(
     client: openai.AsyncOpenAI,
@@ -1188,6 +1212,9 @@ def build_data_specialist(
     )
     if grounding is not None:
         instructions_block = grounding.instructions_block or None
+        # Merge tenant-scoped retrieved verified examples (dynamic-first for
+        # priority) with the static catalog exemplars, dedupe, cap to bound prompt.
+        exemplars = _merge_exemplars(grounding.verified_examples, exemplars)
     grounding_header = (
         'WORKBENCH CATALOG IN EFFECT — the schema below is the '
         'curated set of tables and logical columns. Joins listed '

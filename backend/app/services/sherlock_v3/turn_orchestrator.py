@@ -318,7 +318,12 @@ async def _record_turn_llm_usage(
 
 
 def _input_token_estimate(usage: dict[str, Any]) -> int:
-    input_tokens = usage.get('inputTokens') or usage.get('input_tokens')
+    # Ring occupancy reads the last-response figure; fall back to the aggregate.
+    input_tokens = (
+        usage.get('occupancy_input_tokens')
+        or usage.get('inputTokens')
+        or usage.get('input_tokens')
+    )
     cached = usage.get('cachedInputTokens') or usage.get('cached_input_tokens') or 0
     if isinstance(input_tokens, int):
         return max(0, input_tokens - (cached if isinstance(cached, int) else 0))

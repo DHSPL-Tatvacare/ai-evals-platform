@@ -1,9 +1,8 @@
 /** Turn-grouped chat renderer: specialist blocks, charts, cost, copy.
  *  Pure render over the flat typed Part stream — streamStore stays the only state. */
-import { RotateCcw } from 'lucide-react';
+import { AlertCircle, RotateCcw } from 'lucide-react';
 
 import { Button } from '@/components/ui';
-import { cn } from '@/utils/cn';
 import { CostChip } from '@/features/cost/components/CostChip';
 import { ThinkingIndicator } from '@/features/chat-widget/components/ThinkingIndicator';
 
@@ -14,12 +13,16 @@ import {
   CanvasChangeCard,
   ChartCard,
   CompactionMarker,
-  ErrorBanner,
   ReasoningBlock,
 } from './components/parts';
 import { phrasesForContext } from './contextualPhrases';
 import { groupPartsIntoTurns, type Turn } from './grouping';
-import type { AssistantTextPart, CompactionPart, SherlockPart } from './generated/sherlockContract';
+import type {
+  AssistantTextPart,
+  CompactionPart,
+  ErrorPart,
+  SherlockPart,
+} from './generated/sherlockContract';
 
 interface TurnListProps {
   parts: SherlockPart[];
@@ -71,9 +74,6 @@ function renderAssistantBody(turn: Turn, appId: string, sessionId: string | null
       case 'canvas_patch':
         blocks.push(<CanvasChangeCard key={part.id} part={part} />);
         break;
-      case 'error':
-        blocks.push(<ErrorBanner key={part.id} part={part} />);
-        break;
     }
   }
   flushRun();
@@ -121,17 +121,21 @@ function AssistantTurn({
   // the growing answer).
   const answerStreaming = turn.parts.some((p) => p.type === 'assistant_text');
   const showThinking = isLiveTurn && !answerStreaming;
-  const showRetry = isLast && failed;
 
-  // Action bar below a finished message: copy + cost, plus a status pill when
-  // the turn didn't end cleanly. Driven by the persisted parts (answer text +
-  // step_finish.turn_id), so it's identical across live stream / replay / hydration.
+  // Action bar below a finished message: copy + cost. Driven by the persisted
+  // parts (answer text + step_finish.turn_id), so it's identical across live
+  // stream / replay / hydration.
   const answerText = turn.parts
     .filter((p): p is AssistantTextPart => p.type === 'assistant_text')
     .map((p) => p.text ?? '')
     .join('');
-  const abnormalStatus = !!status && status !== 'done';
-  const showActions = settled && (answerText.trim() !== '' || !!turnId || abnormalStatus);
+  const showActions = settled && (answerText.trim() !== '' || !!turnId);
+
+  // One error region: the real error message (from the error Part) plus a Retry
+  // control when this is the last turn. Collapses the former banner + pill + card.
+  const errorPart = turn.parts.find((p): p is ErrorPart => p.type === 'error');
+  const errorMessage = errorPart?.message ?? (failed ? (status ?? 'error') : null);
+  const showError = settled && errorMessage !== null;
 
   return (
     <div className="w-full">
@@ -146,30 +150,25 @@ function AssistantTurn({
             {turnId ? (
               <CostChip ownerType="sherlock_turn" ownerId={turnId} className="lowercase" />
             ) : null}
-            {abnormalStatus ? (
-              <span
-                className={cn(
-                  'ml-auto rounded-full px-2 py-0.5 text-[10px] capitalize',
-                  failed
-                    ? 'bg-[color-mix(in_srgb,var(--interactive-danger)_14%,transparent)] text-[var(--interactive-danger)]'
-                    : 'bg-[var(--bg-secondary)]',
-                )}
-              >
-                {status}
-              </span>
-            ) : null}
           </div>
         ) : null}
 
-        {showRetry ? (
-          <div className="flex items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--interactive-danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_6%,var(--bg-primary))] px-4 py-3 text-[13px] text-[var(--text-primary)]">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium capitalize">{status ?? 'error'}</div>
-              <div className="text-xs text-[var(--text-muted)]">Retry the last prompt to continue.</div>
-            </div>
-            <Button variant="ghost" size="sm" icon={RotateCcw} onClick={onRetry}>
-              Retry
-            </Button>
+        {showError ? (
+          <div
+            className="flex items-start gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--interactive-danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--interactive-danger)_6%,var(--bg-primary))] px-4 py-3 text-[13px] text-[var(--text-primary)]"
+            data-part-type="error"
+            data-source={errorPart?.source}
+            role="alert"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--interactive-danger)]" />
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words leading-relaxed">
+              {errorMessage}
+            </span>
+            {isLast ? (
+              <Button variant="ghost" size="sm" icon={RotateCcw} onClick={onRetry}>
+                Retry
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>

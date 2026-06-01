@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useStreamStore } from '@/features/sherlock/streamStore';
+import { selectSessionParts, useStreamStore } from '@/features/sherlock/streamStore';
+import type { SherlockPart, UserMessagePart } from '@/features/sherlock/generated/sherlockContract';
 
 const mocks = vi.hoisted(() => ({
   streamTurn: vi.fn(),
@@ -118,6 +119,61 @@ describe('useChatWidgetStore', () => {
     await pending;
     expect(useChatWidgetStore.getState().status).toBe('idle');
     expect(useChatWidgetStore.getState().activeTurnId).toBeNull();
+  });
+
+  it('send() optimistically inserts the user part before any assistant/thinking part', async () => {
+    const controls = makeFakeStream();
+    mocks.streamTurn.mockImplementation((opts: Record<string, unknown>) => {
+      controls.lastOptions = opts;
+      return { abort: controls.abort, done: controls.done };
+    });
+    useChatWidgetStore.setState({ sessionId: 'sess-1' });
+
+    const pending = useChatWidgetStore.getState().send('hello there', 'inside-sales');
+
+    const parts = selectSessionParts('sess-1')(useStreamStore.getState());
+    expect(parts).toHaveLength(1);
+    const optimistic = parts[0] as UserMessagePart;
+    expect(optimistic.type).toBe('user_message');
+    expect(optimistic.text).toBe('hello there');
+    // The optimistic part exists synchronously, before the stream emits anything.
+    expect(optimistic.id).toBeTruthy();
+
+    controls.resolveDone({ status: 'done', lastError: null });
+    await pending;
+  });
+
+  it('send() user part reconciles by id — the SSE echo does not duplicate the bubble', async () => {
+    const controls = makeFakeStream();
+    mocks.streamTurn.mockImplementation((opts: Record<string, unknown>) => {
+      controls.lastOptions = opts;
+      return { abort: controls.abort, done: controls.done };
+    });
+    useChatWidgetStore.setState({ sessionId: 'sess-1' });
+
+    const pending = useChatWidgetStore.getState().send('reconcile me', 'inside-sales');
+
+    const optimisticId = (
+      selectSessionParts('sess-1')(useStreamStore.getState())[0] as UserMessagePart
+    ).id;
+
+    // Server echoes the user_message with the SAME id the client minted.
+    const echo: SherlockPart = {
+      id: optimisticId,
+      type: 'user_message',
+      chat_session_id: 'sess-1',
+      seq: 1,
+      created_at: 0,
+      text: 'reconcile me',
+    };
+    useStreamStore.getState().applyEvent('sess-1', { kind: 'part_added', seq: 1, part: echo });
+
+    const parts = selectSessionParts('sess-1')(useStreamStore.getState());
+    const userBubbles = parts.filter((p) => p.type === 'user_message');
+    expect(userBubbles).toHaveLength(1);
+
+    controls.resolveDone({ status: 'done', lastError: null });
+    await pending;
   });
 
   it('send() onSession commits the resolved sessionId', async () => {

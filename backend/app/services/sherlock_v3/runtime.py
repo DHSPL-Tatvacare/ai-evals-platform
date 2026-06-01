@@ -177,7 +177,9 @@ async def run_turn(
         turn_id=str(ctx.turn_id),
     ))
     await ctx.emitter.emit(UserMessagePart(
-        id=new_part_id(),
+        # Deterministic id so the client's optimistic user bubble reconciles
+        # (upsert-by-id) instead of duplicating when the echo arrives.
+        id=f'user-{ctx.turn_id}',
         chat_session_id='',
         seq=0,
         created_at=0,
@@ -668,18 +670,39 @@ async def _history_input_for_context(ctx: SherlockTurnContext) -> list[dict[str,
     ]
 
 
+def _last_response_input_tokens(streaming: Any) -> int | None:
+    raw = getattr(streaming, 'raw_responses', None) or []
+    if not raw:
+        return None
+    last_usage = getattr(raw[-1], 'usage', None)
+    val = getattr(last_usage, 'input_tokens', None) if last_usage is not None else None
+    return val if isinstance(val, int) else None
+
+
+def _cached_read_tokens(usage: Any) -> int:
+    details = getattr(usage, 'input_tokens_details', None)
+    cached = getattr(details, 'cached_tokens', 0) if details is not None else 0
+    return cached if isinstance(cached, int) else 0
+
+
 def _extract_usage(streaming: Any) -> dict[str, Any]:
     ctx_wrapper = getattr(streaming, 'context_wrapper', None)
     usage = getattr(ctx_wrapper, 'usage', None) if ctx_wrapper else None
     if usage is None:
         return {
-            'input_tokens': 0, 'output_tokens': 0, 'cached_read_tokens': 0,
-            'cost_usd': 0.0, 'call_count': 0,
+            'input_tokens': 0, 'occupancy_input_tokens': 0, 'output_tokens': 0,
+            'cached_read_tokens': 0, 'cost_usd': 0.0, 'call_count': 0,
         }
+    aggregate_input = getattr(usage, 'input_tokens', 0)
+    # input_tokens stays the turn AGGREGATE (cost/usage display); occupancy is the
+    # LAST response's input — the aggregate re-bills full context per
+    # previous_response_id call, so only the last response reflects the window.
+    occupancy_input = _last_response_input_tokens(streaming)
     return {
-        'input_tokens': getattr(usage, 'input_tokens', 0),
+        'input_tokens': aggregate_input,
+        'occupancy_input_tokens': occupancy_input if occupancy_input is not None else aggregate_input,
         'output_tokens': getattr(usage, 'output_tokens', 0),
-        'cached_read_tokens': getattr(usage, 'cached_input_tokens', 0),
+        'cached_read_tokens': _cached_read_tokens(usage),
         'cost_usd': 0.0,
         'call_count': getattr(usage, 'requests', 0),
     }

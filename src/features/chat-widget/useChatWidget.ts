@@ -220,6 +220,22 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
     activeStream = null;
     activeStreamTurnId = turnId;
 
+    // Optimistically render the user bubble before the thinking shimmer; the SSE
+    // user_message echo carries this same id, so applyEvent upserts in place (no dup).
+    const optimisticUserPartId = `user-${turnId}`;
+    useStreamStore.getState().applyEvent(get().sessionId ?? '', {
+      kind: 'part_added',
+      seq: 0,
+      part: {
+        id: optimisticUserPartId,
+        type: 'user_message',
+        chat_session_id: get().sessionId ?? '',
+        seq: 0,
+        created_at: Date.now(),
+        text,
+      },
+    });
+
     set({
       open: true,
       view: 'chat',
