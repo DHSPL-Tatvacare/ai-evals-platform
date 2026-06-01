@@ -259,19 +259,20 @@ def _validate_op_shape(op: Any) -> tuple[CanvasPatchOp | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
-# Field names inside a node config that reference an external resource
-# UUID. Anything appearing under one of these names must have been
-# returned by a list_* lookup earlier in the same turn.
-_UUID_REFERENCE_KEYS: frozenset[str] = frozenset({
+# Node-config fields that name an external resource the agent must have
+# obtained from a tool this turn — never invented. The id-shaped ones come
+# from list_*/resolve_connection; template_name comes from resolve_template.
+_TOOL_RESOLVED_REFERENCE_KEYS: frozenset[str] = frozenset({
     'connection_id',
     'dataset_version_id',
     'action_template_id',
+    'template_name',
 })
 
 
-def _walk_uuid_references(payload: Any) -> list[tuple[str, str]]:
+def _walk_tool_references(payload: Any) -> list[tuple[str, str]]:
     """Yield every (field_name, value) where field_name is in
-    `_UUID_REFERENCE_KEYS`. Recursive over dicts and lists.
+    `_TOOL_RESOLVED_REFERENCE_KEYS`. Recursive over dicts and lists.
     """
     out: list[tuple[str, str]] = []
 
@@ -280,7 +281,7 @@ def _walk_uuid_references(payload: Any) -> list[tuple[str, str]]:
             for key, v in value.items():
                 if (
                     isinstance(key, str)
-                    and key in _UUID_REFERENCE_KEYS
+                    and key in _TOOL_RESOLVED_REFERENCE_KEYS
                     and isinstance(v, str) and v
                 ):
                     out.append((key, v))
@@ -683,7 +684,7 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
         if not isinstance(authorized, set):
             authorized = set(authorized or [])
         for op in validated_ops:
-            for field, value in _walk_uuid_references(op.payload):
+            for field, value in _walk_tool_references(op.payload):
                 if value not in authorized:
                     authoring_logger.warning(
                         'apply_patch UUID_NOT_AUTHORIZED field=%s value=%s '
@@ -696,8 +697,8 @@ async def _apply_patch_handler(ctx: Any, args: str) -> str:
                     return _error_result(
                         reason_code=reason_code,
                         message=(
-                            f'Patch references {field}={value} but no list_* '
-                            'tool returned that UUID this turn.'
+                            f'Patch references {field}={value} but no lookup/'
+                            'resolve tool returned it this turn.'
                         ),
                         started=started,
                     )
@@ -1864,7 +1865,12 @@ async def _resolve_template_handler(ctx: Any, args: str) -> str:
         items = fetched.get('items') or []
         result = match_template(templates=items, intent=intent)
 
+        # Real template names this turn join the same per-turn allowlist that
+        # gates connection_id etc., so apply_patch rejects any unresolved name.
+        record_target = sherlock_ctx.scratch if hasattr(sherlock_ctx, 'scratch') else {}
+
         if result.status == 'resolved':
+            _record_authorized_uuids(record_target, [result.name])
             payload: dict[str, Any] = {
                 'status': 'resolved',
                 'name': result.name,
@@ -1872,6 +1878,7 @@ async def _resolve_template_handler(ctx: Any, args: str) -> str:
             }
             summary = f'Resolved WhatsApp template {result.name!r}.'
         elif result.status == 'pick':
+            _record_authorized_uuids(record_target, list(result.candidates))
             payload = {'status': 'pick', 'candidates': result.candidates}
             summary = f'{len(result.candidates)} WhatsApp templates match {intent!r}.'
         else:

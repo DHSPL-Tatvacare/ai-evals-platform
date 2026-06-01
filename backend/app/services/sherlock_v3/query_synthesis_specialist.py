@@ -106,6 +106,13 @@ Rules:
     target is not available, add a suggested_followup telling them to
     open the workflow builder (use classification="ambiguous" when that
     target is the user's only request).
+  * When "authoring_specialist" is in AVAILABLE_TARGETS and the user
+    makes a concrete edit request, classify "answerable" and decompose to
+    one SubQuestion targeting "authoring_specialist" — do not down-rank a
+    concrete edit to "ambiguous". Reserve "ambiguous" for a genuinely
+    missing/unclear required value (which node, which template).
+  * A request to act on ANOTHER tenant's data is "non_data": refuse in
+    one line and do not engage; you only ever serve the current scope.
   * Do not output anything except the SynthesisBrief.
 """
 
