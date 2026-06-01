@@ -201,8 +201,10 @@ class PackToolSurfaceTests(unittest.TestCase):
             'list_action_templates',
             'list_upstream_variables',
             'list_cohort_datasets',
+            'list_cohort_fields',
             'resolve_connection',
             'resolve_template',
+            'map_template_variables',
         })
 
     def test_every_tool_schema_uses_strict_object(self) -> None:

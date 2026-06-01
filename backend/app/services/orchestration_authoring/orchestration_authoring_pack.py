@@ -894,6 +894,46 @@ _RESOLVE_CONNECTION_SCHEMA: dict[str, Any] = {
     },
 }
 
+_LIST_COHORT_FIELDS_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['source_ref'],
+    'properties': {
+        'source_ref': {
+            'type': 'string',
+            'description': (
+                "Cohort source key (e.g. 'crm.lead_record', "
+                "'clinical.dim_patient'). Returns each field's name, type, "
+                'allowed values, PII flag, and whether it is filterable.'
+            ),
+        },
+    },
+}
+
+_MAP_TEMPLATE_VARIABLES_SCHEMA: dict[str, Any] = {
+    'type': 'object',
+    'additionalProperties': False,
+    'required': ['placeholders', 'source_ref'],
+    'properties': {
+        'placeholders': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'description': (
+                'Template placeholder names to match (e.g. from a resolved '
+                'WhatsApp template). Each is bound to a cohort field or '
+                'returned as unmatched.'
+            ),
+        },
+        'source_ref': {
+            'type': 'string',
+            'description': (
+                "Cohort source key (e.g. 'crm.lead_record') whose fields are "
+                'matched against the placeholders.'
+            ),
+        },
+    },
+}
+
 _LIST_NODE_TYPES_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'additionalProperties': False,
@@ -1439,6 +1479,161 @@ async def _list_cohort_datasets_handler(ctx: Any, args: str) -> str:
         )
 
 
+async def _list_cohort_fields_handler(ctx: Any, args: str) -> str:
+    """Cat-B field discovery for a cohort source (read-only).
+
+    Thinly wraps ``field_discovery.list_cohort_fields`` — the heavy logic
+    (source resolution, shared live introspection, manifest PII flag) lives
+    there. Returns no patchable UUIDs, so nothing is allowlisted.
+    """
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    audit: dict[str, Any] = {'reason_code': None}
+    builder_context = getattr(sherlock_ctx, 'builder_context', None)
+    auth_outer = getattr(sherlock_ctx, 'auth', None)
+    try:
+        check = await _check_layered_auth(sherlock_ctx, started=started, audit=audit)
+        if isinstance(check, str):
+            return check
+        auth, builder_context = check
+
+        parsed = json.loads(args) if args.strip() else {}
+        source_ref = parsed.get('source_ref')
+        if not isinstance(source_ref, str) or not source_ref:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='source_ref is required',
+                started=started,
+            )
+
+        from app.database import async_session
+        from app.services.orchestration.source_catalog import SourceCatalogError
+        from app.services.orchestration_authoring.field_discovery import (
+            list_cohort_fields,
+        )
+
+        try:
+            async with async_session() as db:
+                fields = await list_cohort_fields(
+                    db=db,
+                    app_id=builder_context.app_id,
+                    source_ref=source_ref,
+                    tenant_id=auth.tenant_id,
+                )
+        except SourceCatalogError:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message=f'Unknown cohort source {source_ref!r}.',
+                started=started,
+            )
+
+        payload = {'fields': [f.model_dump(mode='json') for f in fields]}
+        return _mark_leak_in_result(audit, _lookup_result_json(
+            started=started,
+            summary=f'{len(fields)} field(s) on {source_ref}.',
+            payload=payload,
+            tool_name='list_cohort_fields',
+        ))
+    finally:
+        _emit_authoring_audit(
+            tool='list_cohort_fields',
+            builder_context=builder_context,
+            auth=auth_outer,
+            started=started,
+            reason_code=audit.get('reason_code'),
+            patch_op_count=0,
+        )
+
+
+async def _map_template_variables_handler(ctx: Any, args: str) -> str:
+    """Match template placeholders to a cohort source's fields (read-only).
+
+    Reuses ``field_discovery.list_cohort_fields`` for the field names, then
+    the pure ``variable_mapper.map_variables`` for the matching. Returns no
+    patchable UUIDs, so nothing is allowlisted.
+    """
+    started = time.monotonic()
+    sherlock_ctx = getattr(ctx, 'context', ctx)
+    audit: dict[str, Any] = {'reason_code': None}
+    builder_context = getattr(sherlock_ctx, 'builder_context', None)
+    auth_outer = getattr(sherlock_ctx, 'auth', None)
+    try:
+        check = await _check_layered_auth(sherlock_ctx, started=started, audit=audit)
+        if isinstance(check, str):
+            return check
+        auth, builder_context = check
+
+        parsed = json.loads(args) if args.strip() else {}
+        source_ref = parsed.get('source_ref')
+        placeholders = parsed.get('placeholders')
+        if not isinstance(source_ref, str) or not source_ref:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='source_ref is required',
+                started=started,
+            )
+        if not isinstance(placeholders, list) or not all(
+            isinstance(p, str) for p in placeholders
+        ):
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message='placeholders must be a list of strings',
+                started=started,
+            )
+
+        from app.database import async_session
+        from app.services.orchestration.source_catalog import SourceCatalogError
+        from app.services.orchestration_authoring.field_discovery import (
+            list_cohort_fields,
+        )
+        from app.services.orchestration_authoring.variable_mapper import (
+            map_variables,
+        )
+
+        try:
+            async with async_session() as db:
+                fields = await list_cohort_fields(
+                    db=db,
+                    app_id=builder_context.app_id,
+                    source_ref=source_ref,
+                    tenant_id=auth.tenant_id,
+                )
+        except SourceCatalogError:
+            audit['reason_code'] = 'NODE_CONFIG_INVALID'
+            return _error_result(
+                reason_code='NODE_CONFIG_INVALID',
+                message=f'Unknown cohort source {source_ref!r}.',
+                started=started,
+            )
+
+        result = map_variables(
+            placeholders=placeholders,
+            fields=[f.name for f in fields],
+        )
+        return _mark_leak_in_result(audit, _lookup_result_json(
+            started=started,
+            summary=(
+                f'{len(result["mappings"])} matched, '
+                f'{len(result["unmatched"])} unmatched on {source_ref}.'
+            ),
+            payload=result,
+            tool_name='map_template_variables',
+        ))
+    finally:
+        _emit_authoring_audit(
+            tool='map_template_variables',
+            builder_context=builder_context,
+            auth=auth_outer,
+            started=started,
+            reason_code=audit.get('reason_code'),
+            patch_op_count=0,
+        )
+
+
 async def _resolve_connection_handler(ctx: Any, args: str) -> str:
     started = time.monotonic()
     sherlock_ctx = getattr(ctx, 'context', ctx)
@@ -1752,6 +1947,16 @@ class OrchestrationAuthoringPack:
                 'params_json_schema': _LIST_COHORT_DATASETS_SCHEMA,
             },
             {
+                'name': 'list_cohort_fields',
+                'description': (
+                    'Discover the fields on a cohort source. Pass `source_ref` '
+                    "(e.g. 'crm.lead_record'); returns each field's name, type, "
+                    'allowed values, whether it is filterable, and a PII flag. '
+                    'Use before wiring payload fields or cohort filters.'
+                ),
+                'params_json_schema': _LIST_COHORT_FIELDS_SCHEMA,
+            },
+            {
                 'name': 'resolve_connection',
                 'description': (
                     'Resolve the provider connection to use for a channel. '
@@ -1760,6 +1965,18 @@ class OrchestrationAuthoringPack:
                     'pick list to disambiguate, or none if unconfigured.'
                 ),
                 'params_json_schema': _RESOLVE_CONNECTION_SCHEMA,
+            },
+            {
+                'name': 'map_template_variables',
+                'description': (
+                    'Match template placeholders to a cohort source\'s fields. '
+                    'Pass `placeholders` and `source_ref`; returns payload '
+                    'mappings, payload_fields_to_add, and unmatched. You MUST '
+                    'add payload_fields_to_add to the upstream '
+                    'source.cohort.payload_fields in the SAME apply_patch, and '
+                    'ASK about any unmatched placeholder — never bind a guess.'
+                ),
+                'params_json_schema': _MAP_TEMPLATE_VARIABLES_SCHEMA,
             },
         )
 
@@ -1772,7 +1989,9 @@ class OrchestrationAuthoringPack:
             'list_action_templates': _list_action_templates_handler,
             'resolve_template': _resolve_template_handler,
             'list_cohort_datasets': _list_cohort_datasets_handler,
+            'list_cohort_fields': _list_cohort_fields_handler,
             'resolve_connection': _resolve_connection_handler,
+            'map_template_variables': _map_template_variables_handler,
         }
 
     def validate_arguments(self, tool_name: str, args: Mapping[str, Any]) -> None:
@@ -1812,9 +2031,19 @@ class OrchestrationAuthoringPack:
             'list_cohort_datasets': (
                 'List cohort datasets in this app and their latest version IDs.'
             ),
+            'list_cohort_fields': (
+                'Discover a cohort source\'s fields (name, type, allowed '
+                'values, PII flag, filterable) before wiring payload or filters.'
+            ),
             'resolve_connection': (
                 'Resolve the connection for a channel (with an optional hint); '
                 'returns one connection, a pick list, or none.'
+            ),
+            'map_template_variables': (
+                'Match template placeholders to a cohort source\'s fields. '
+                'Add the returned payload_fields_to_add to the upstream '
+                'source.cohort.payload_fields in the SAME apply_patch; ASK '
+                'about unmatched placeholders rather than binding a guess.'
             ),
         }
 
