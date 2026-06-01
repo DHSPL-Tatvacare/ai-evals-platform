@@ -184,8 +184,88 @@ class SynthesisPromptTests(unittest.TestCase):
         )
         prompt = agent.instructions
         assert isinstance(prompt, str)
-        self.assertIn('emit only the', prompt)
-        self.assertIn('data_specialist sub-question', prompt)
+        # The collapsed authoring-routing rule keeps target gating intent.
+        self.assertIn('Never name a target outside AVAILABLE_TARGETS', prompt)
+        self.assertIn('data_specialist', prompt)
+
+
+class SynthesisVocabularyGroundingTests(unittest.TestCase):
+    """Step 1 — the planner is grounded with the data vocabulary."""
+
+    _VOCAB = [
+        {
+            'name': 'fact_call_evaluation',
+            'kind': 'table',
+            'description': 'One row per evaluated call.',
+            'synonyms': [],
+        },
+        {
+            'name': 'rubric_score',
+            'kind': 'metric',
+            'description': 'Average rubric score for a call.',
+            'synonyms': ['quality score', 'call score'],
+        },
+    ]
+
+    def test_planner_receives_vocabulary(self) -> None:
+        agent = build_query_synthesis_specialist(
+            MagicMock(),
+            'inside-sales',
+            model='gpt-4o-mini',
+            available_targets=['data_specialist'],
+            vocabulary=self._VOCAB,
+        )
+        prompt = agent.instructions
+        assert isinstance(prompt, str)
+        # Names of real entities/metrics are present.
+        self.assertIn('fact_call_evaluation', prompt)
+        self.assertIn('rubric_score', prompt)
+        # A synonym is rendered so the planner can map user phrasing.
+        self.assertIn('quality score', prompt)
+
+    def test_no_vocabulary_block_when_none(self) -> None:
+        agent = build_query_synthesis_specialist(
+            MagicMock(),
+            'inside-sales',
+            model='gpt-4o-mini',
+            available_targets=['data_specialist'],
+        )
+        prompt = agent.instructions
+        assert isinstance(prompt, str)
+        # No vocabulary entries leak in when the app has no catalog.
+        self.assertNotIn('fact_call_evaluation', prompt)
+        self.assertNotIn('quality score', prompt)
+
+    def test_planner_refuses_when_ungrounded(self) -> None:
+        # Contract text: map words to real entities; refuse + ask ONE
+        # clarifying question when a phrase can't be grounded.
+        personality = build_query_synthesis_specialist(
+            MagicMock(),
+            'inside-sales',
+            model='gpt-4o-mini',
+            available_targets=['data_specialist'],
+            vocabulary=self._VOCAB,
+        ).instructions
+        assert isinstance(personality, str)
+        lowered = personality.lower()
+        self.assertIn('cannot be grounded', lowered)
+        self.assertIn('ambiguous', lowered)
+        # One clarifying question — not a guessed field.
+        self.assertIn('clarifying', lowered)
+
+    def test_refusal_brief_yields_ambiguous(self) -> None:
+        from app.services.sherlock_v3.query_synthesis_specialist import (
+            _refusal_brief,
+        )
+
+        brief = _refusal_brief(
+            rewritten_question='show me the thing',
+            reason='phrase could not be grounded to the vocabulary',
+            available_targets=['data_specialist'],
+        )
+        self.assertEqual(brief.classification, 'ambiguous')
+        self.assertEqual(brief.decomposition, [])
+        self.assertGreaterEqual(len(brief.suggested_followups), 1)
 
 
 class SynthesisBriefNonDataTests(unittest.TestCase):

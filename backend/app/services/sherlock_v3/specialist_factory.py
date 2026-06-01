@@ -14,14 +14,21 @@ cache key buys nothing.
 """
 from __future__ import annotations
 
-from typing import Any
+import dataclasses
+import json
+from typing import Any, Awaitable, Callable
 
 import openai
 from agents import Agent, Tool
 from agents.model_settings import ModelSettings
 from agents.models.openai_responses import OpenAIResponsesModel
-from agents.tool import default_tool_error_function
+from agents.tool import FunctionTool, default_tool_error_function
+from agents.tool_context import ToolContext
 from openai.types.shared import Reasoning
+
+from app.services.sherlock_v3.contracts.brief import SpecialistBrief
+
+InputBuilder = Callable[[ToolContext, str], str]
 
 
 def make_specialist_agent(
@@ -64,6 +71,22 @@ def make_specialist_agent(
     )
 
 
+def build_specialist_input(ctx: ToolContext, args: str) -> str:
+    """Fold runtime scope into the LLM-authored brief, yielding the brief JSON the specialist parses.
+
+    The supervisor authors question/prior_attempts/retry_hint; scope is injected
+    from the turn context here so it is never LLM-authored and cannot be spoofed.
+    """
+    payload = json.loads(args) if args else {}
+    run_ctx = ctx.context
+    payload['scope'] = {
+        'tenant_id': str(run_ctx.tenant_id),
+        'app_id': run_ctx.app_id,
+        'user_id': str(run_ctx.user_id),
+    }
+    return SpecialistBrief.model_validate(payload).model_dump_json()
+
+
 def as_specialist_tool(
     agent: Agent,
     *,
@@ -72,22 +95,47 @@ def as_specialist_tool(
     custom_output_extractor: Any | None = None,
     max_turns: int | None = None,
     failure_error_function: Any | None = None,
+    parameters: type | None = None,
+    input_builder: InputBuilder | None = None,
 ) -> Tool:
     """Wrap `agent.as_tool` so every specialist-as-tool is uniform.
 
     Always sets a `failure_error_function` (the SDK default when None) so a
     specialist crash surfaces as a tool error rather than a silent drop, and
-    forwards `max_turns` to bound internal turns.
+    forwards `max_turns` to bound internal turns. When `parameters` is provided,
+    the tool exposes that model's JSON schema at the seam (so the supervisor must
+    author the brief shape) and `input_builder` rewrites the structured args into
+    the bare brief-string the nested specialist already parses — one contract, no
+    second model, no specialist-side change.
     """
     if failure_error_function is None:
         failure_error_function = default_tool_error_function
-    return agent.as_tool(
+    tool = agent.as_tool(
         tool_name=tool_name,
         tool_description=tool_description,
         custom_output_extractor=custom_output_extractor,
         max_turns=max_turns,
         failure_error_function=failure_error_function,
     )
+    if parameters is None:
+        return tool
+    if not isinstance(tool, FunctionTool):
+        return tool
+
+    inner_invoke = tool.on_invoke_tool
+    build = input_builder or build_specialist_input
+
+    async def on_invoke_tool(context: ToolContext, args: str) -> Any:
+        return await inner_invoke(context, build(context, args))
+
+    # strict_json_schema off: the brief nests dict-valued diagnostics the SDK
+    # strictifier rejects; real enforcement is the input_builder's model_validate.
+    return dataclasses.replace(
+        tool,
+        params_json_schema=parameters.model_json_schema(),
+        on_invoke_tool=on_invoke_tool,
+        strict_json_schema=False,
+    )
 
 
-__all__ = ['make_specialist_agent', 'as_specialist_tool']
+__all__ = ['make_specialist_agent', 'as_specialist_tool', 'build_specialist_input']

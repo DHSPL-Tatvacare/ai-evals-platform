@@ -91,6 +91,13 @@ SubQuestion shape:
     dispatching this one. Use sparingly; only when later sub-questions
     literally cannot be expressed without the prior result.
 
+Grounding (when a DATA VOCABULARY block is present below):
+  * Map the user's words to the real entities/metrics in the vocabulary
+    (use the synonyms to bridge phrasing). The rewritten_question MUST
+    name those real fields, not the user's loose phrasing.
+  * If a phrase cannot be grounded to any vocabulary entry, do NOT guess
+    a field: classify "ambiguous" and ask ONE clarifying followup.
+
 Rules:
   * Never invent data values. If a question references a person ("Show
     me Himani's calls"), keep the literal name in the rewrite.
@@ -110,23 +117,53 @@ def _available_targets_block(targets: list[SynthesisTarget]) -> str:
     return f'AVAILABLE_TARGETS: [{rendered}]'
 
 
+def _vocabulary_block(vocabulary: list[dict] | None) -> str:
+    """Compact name + description + synonyms lines; omitted when empty."""
+    if not vocabulary:
+        return ''
+    lines: list[str] = []
+    for entry in vocabulary:
+        name = str(entry.get('name') or '').strip()
+        if not name:
+            continue
+        kind = str(entry.get('kind') or '').strip()
+        desc = str(entry.get('description') or '').strip()
+        synonyms = [str(s) for s in (entry.get('synonyms') or []) if s]
+        line = f'- {name}'
+        if kind:
+            line += f' ({kind})'
+        if desc:
+            line += f': {desc}'
+        if synonyms:
+            line += f' [synonyms: {", ".join(synonyms)}]'
+        lines.append(line)
+    if not lines:
+        return ''
+    return 'DATA VOCABULARY (map user phrasing to these names):\n' + '\n'.join(lines)
+
+
 def build_query_synthesis_specialist(
     client: openai.AsyncOpenAI,
     app_id: str,
     *,
     model: str,
     available_targets: list[SynthesisTarget],
+    vocabulary: list[dict] | None = None,
 ) -> Agent:
     """Construct the query_synthesis_specialist agent for one turn.
 
     The agent is constructed per-turn (not cached) so the
     ``AVAILABLE_TARGETS`` block in the system prompt stays in sync with
-    whatever the supervisor actually wired in for this turn.
+    whatever the supervisor actually wired in for this turn. The caller
+    computes ``vocabulary`` via ``catalog_vocabulary``; this builder stays
+    pure and never loads the catalog itself.
     """
+    vocab_block = _vocabulary_block(vocabulary)
     system_prompt = (
         _PERSONALITY
         + '\n\nAPP SCOPE: ' + app_id
         + '\nCURRENT_DATE: ' + date.today().isoformat()
+        + ('\n\n' + vocab_block if vocab_block else '')
         + '\n\n' + _available_targets_block(available_targets)
         + '\n'
     )

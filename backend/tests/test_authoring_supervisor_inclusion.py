@@ -63,8 +63,8 @@ def _patched_supervisor():
         agent.as_tool = MagicMock(return_value='authoring_specialist_tool')
         return agent
 
-    def _fake_build_query_synthesis_specialist(client, app_id, *, model, available_targets):
-        del client, app_id, model, available_targets
+    def _fake_build_query_synthesis_specialist(client, app_id, *, model, available_targets, vocabulary=None):
+        del client, app_id, model, available_targets, vocabulary
         agent = MagicMock()
         agent.as_tool = MagicMock(return_value='query_synthesis_specialist_tool')
         return agent

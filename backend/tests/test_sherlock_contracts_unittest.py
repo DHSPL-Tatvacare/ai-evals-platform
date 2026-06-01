@@ -255,6 +255,23 @@ def test_verdict_ok_property_and_telemetry():
     assert tele_bad['diagnostic']['available_joins'][0]['many_table'] == 'fact_lead_activity'
 
 
+def test_single_brief_no_taskbrief():
+    # SpecialistBrief IS the one supervisor→specialist brief contract.
+    fields = SpecialistBrief.model_fields
+    for required in ('question', 'scope', 'prior_attempts', 'retry_hint'):
+        assert required in fields, f'SpecialistBrief missing {required}'
+
+    # No parallel/second brief model exists anywhere in sherlock_v3.
+    import importlib
+    import pkgutil
+
+    import app.services.sherlock_v3 as pkg
+
+    for mod in pkgutil.walk_packages(pkg.__path__, pkg.__name__ + '.'):
+        module = importlib.import_module(mod.name)
+        assert not hasattr(module, 'TaskBrief'), f'TaskBrief leaked into {mod.name}'
+
+
 def test_evidence_ref_round_trip():
     import uuid as _u
     ref = EvidenceRef(

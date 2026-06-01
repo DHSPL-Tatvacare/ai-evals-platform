@@ -17,11 +17,12 @@ from __future__ import annotations
 import inspect
 import unittest
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.auth.context import AuthContext
 from app.services.orchestration_authoring.builder_snapshot import BuilderSnapshot
 from app.services.sherlock_v3 import runtime as runtime_mod
+from app.services.sherlock_v3.contracts import SpecialistBrief
 from app.services.sherlock_v3.supervisor import build_supervisor
 
 
@@ -121,6 +122,52 @@ class SupervisorToolbeltGatingTests(unittest.TestCase):
         )
         names = _tool_names(agent)
         self.assertIn('authoring_specialist', names)
+
+
+class SupervisorBriefGroundingTests(unittest.TestCase):
+    """Step 1 — planner grounded with vocabulary; Step 3 — brief shape at the data/authoring seams."""
+
+    def test_supervisor_passes_vocabulary_to_planner(self) -> None:
+        # The supervisor loads the catalog and passes catalog_vocabulary to the
+        # planner builder; for an app WITH a catalog the list is non-empty.
+        client = MagicMock()
+        with patch(
+            'app.services.sherlock_v3.supervisor.build_query_synthesis_specialist',
+            wraps=__import__(
+                'app.services.sherlock_v3.supervisor', fromlist=['build_query_synthesis_specialist']
+            ).build_query_synthesis_specialist,
+        ) as spy:
+            _supervisor('inside-sales', client, auth=_auth())
+        self.assertEqual(spy.call_count, 1)
+        vocab = spy.call_args.kwargs.get('vocabulary')
+        self.assertIsInstance(vocab, list)
+        assert vocab is not None
+        self.assertGreater(len(vocab), 0)
+        # Reuse of catalog_vocabulary — entries carry the planner-facing shape.
+        self.assertIn('name', vocab[0])
+        self.assertIn('description', vocab[0])
+
+    def test_data_and_authoring_tools_enforce_specialistbrief(self) -> None:
+        client = MagicMock()
+        agent = _supervisor(
+            'inside-sales', client,
+            builder_context=_builder_snapshot(view_mode='edit'),
+            auth=_auth(owner=True, perms=frozenset()),
+        )
+        brief_schema = SpecialistBrief.model_json_schema()
+        by_name = {getattr(t, 'name', None): t for t in (agent.tools or [])}
+        for tool_name in ('data_specialist', 'authoring_specialist'):
+            tool = by_name.get(tool_name)
+            self.assertIsNotNone(tool, f'{tool_name} missing from toolbelt')
+            self.assertEqual(
+                getattr(tool, 'params_json_schema', None),
+                brief_schema,
+                f'{tool_name} must expose the SpecialistBrief input schema',
+            )
+        # Synthesis takes the bare user message, NOT a SpecialistBrief envelope.
+        synth = by_name.get('query_synthesis_specialist')
+        self.assertIsNotNone(synth)
+        self.assertNotEqual(getattr(synth, 'params_json_schema', None), brief_schema)
 
 
 class SupervisorPromptTests(unittest.TestCase):

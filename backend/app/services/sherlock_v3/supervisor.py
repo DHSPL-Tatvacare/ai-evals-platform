@@ -66,7 +66,13 @@ from app.services.sherlock_v3.query_synthesis_specialist import (
 )
 from app.services.sherlock_v3.specialist_factory import (
     as_specialist_tool,
+    build_specialist_input,
     make_specialist_agent,
+)
+from app.services.sherlock_v3.contracts.brief import SpecialistBrief
+from app.services.chat_engine.workbench_catalog import (
+    catalog_vocabulary,
+    load_workbench_catalog,
 )
 
 
@@ -264,10 +270,14 @@ def build_supervisor(
         model=specialist_model,
         grounding=grounding,
     )
+    # Ground the planner with the data vocabulary; None-safe for apps without
+    # a catalog. Reuse catalog_vocabulary — never re-derive vocabulary here.
+    _catalog = load_workbench_catalog(app_id)
     synthesis_spec = build_query_synthesis_specialist(
         client, app_id,
         model=specialist_model,
         available_targets=available_targets,
+        vocabulary=catalog_vocabulary(_catalog) if _catalog is not None else None,
     )
 
     # Typed ``list[Any]`` because the supervisor's ``tools=`` list mixes
@@ -303,6 +313,10 @@ def build_supervisor(
             # Single retry cap: the specialist loops on submit_sql across
             # bounded internal turns instead of the supervisor re-dispatching.
             max_turns=MAX_SPECIALIST_ATTEMPTS,
+            # Brief shape authored by the supervisor LLM at the seam; runtime
+            # scope is folded in by build_specialist_input (never LLM-authored).
+            parameters=SpecialistBrief,
+            input_builder=build_specialist_input,
         ),
     ]
 
@@ -318,6 +332,8 @@ def build_supervisor(
                     'Authoring-only — never claim work is saved/published.'
                 ),
                 custom_output_extractor=extract_authoring_specialist_output,
+                parameters=SpecialistBrief,
+                input_builder=build_specialist_input,
             )
         )
 

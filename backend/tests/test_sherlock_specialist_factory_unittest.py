@@ -12,8 +12,10 @@ from unittest.mock import MagicMock
 
 from agents import Agent
 
+from app.services.sherlock_v3.contracts.brief import SpecialistBrief
 from app.services.sherlock_v3.specialist_factory import (
     as_specialist_tool,
+    build_specialist_input,
     make_specialist_agent,
 )
 
@@ -92,6 +94,81 @@ class SpecialistFactoryTest(unittest.TestCase):
         # specialist crash surfaces as a tool error, not a silent drop.
         self.assertIsNotNone(getattr(tool, 'name', None))
         self.assertEqual(tool.name, 'data_specialist')
+
+    def test_default_tool_keeps_bare_string_input_schema(self):
+        # Without parameters, the seam preserves the SDK's default {input: string}.
+        agent = _build()
+        tool = as_specialist_tool(
+            agent,
+            tool_name='query_synthesis',
+            tool_description='desc',
+        )
+        props = tool.params_json_schema.get('properties', {})
+        self.assertEqual(set(props), {'input'})
+        self.assertEqual(props['input']['type'], 'string')
+
+    def test_specialist_tool_enforces_specialistbrief_input(self):
+        # With parameters=SpecialistBrief, the tool's input JSON schema reflects
+        # the brief fields the supervisor must author, not a bare string.
+        agent = _build()
+        tool = as_specialist_tool(
+            agent,
+            tool_name='data_specialist',
+            tool_description='desc',
+            parameters=SpecialistBrief,
+            input_builder=build_specialist_input,
+        )
+        props = tool.params_json_schema.get('properties', {})
+        self.assertIn('question', props)
+        self.assertIn('prior_attempts', props)
+        self.assertIn('retry_hint', props)
+        self.assertNotEqual(set(props), {'input'})
+
+
+class BuildSpecialistInputTest(unittest.TestCase):
+    def _scope_ctx(self):
+        # ToolContext.context carries the turn-level scope object (recon).
+        ctx = MagicMock()
+        ctx.context.tenant_id = 'tenant-1'
+        ctx.context.app_id = 'kaira-bot'
+        ctx.context.user_id = 'user-9'
+        return ctx
+
+    def test_input_builder_injects_runtime_scope_not_llm_scope(self):
+        # The supervisor authors question/attempts; scope comes from the runtime,
+        # overriding anything the LLM tried to put in scope.
+        import json
+
+        llm_args = json.dumps(
+            {
+                'question': 'how many leads converted?',
+                'scope': {
+                    'tenant_id': 'ATTACKER',
+                    'app_id': 'ATTACKER',
+                    'user_id': 'ATTACKER',
+                },
+                'prior_attempts': [],
+                'retry_hint': None,
+            }
+        )
+        out = build_specialist_input(self._scope_ctx(), llm_args)
+        brief = SpecialistBrief.model_validate_json(out)
+        self.assertEqual(brief.question, 'how many leads converted?')
+        self.assertEqual(brief.scope.tenant_id, 'tenant-1')
+        self.assertEqual(brief.scope.app_id, 'kaira-bot')
+        self.assertEqual(brief.scope.user_id, 'user-9')
+
+    def test_input_builder_yields_brief_shape_without_llm_scope(self):
+        # The supervisor may omit scope entirely; the builder still yields the
+        # exact brief JSON shape the specialist parses today.
+        import json
+
+        llm_args = json.dumps({'question': 'q', 'prior_attempts': [], 'retry_hint': 'hint'})
+        out = build_specialist_input(self._scope_ctx(), llm_args)
+        brief = SpecialistBrief.model_validate_json(out)
+        self.assertEqual(brief.question, 'q')
+        self.assertEqual(brief.retry_hint, 'hint')
+        self.assertEqual(brief.scope.tenant_id, 'tenant-1')
 
 
 if __name__ == '__main__':
