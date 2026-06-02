@@ -133,3 +133,125 @@ async def test_prompt_renders_instructions_block(
     )
     assert 'BUSINESS SEMANTICS' in prompt
     assert 'one decimal place' in prompt.lower()
+
+
+def _sample_data_prompt() -> str:
+    return build_data_specialist_prompt(
+        app_id='voice-rx',
+        schema_context={'agg_evaluation_run': {}},
+        allowed_tables=['agg_evaluation_run'],
+        column_role_hints=['agg_evaluation_run.status is dimension'],
+        exemplars=[],
+        max_rows=200,
+        grounding_header=None,
+        instructions_block='',
+    )
+
+
+def test_data_prompt_keeps_submit_sql_contract_tokens() -> None:
+    prompt = _sample_data_prompt()
+    for token in (
+        'output_columns',
+        'declared_grain',
+        'expected_row_bound',
+        'chart_title',
+        'prior_attempts',
+        'retry_hint',
+        'SpecialistResult',
+        'submit_sql',
+    ):
+        assert token in prompt, f'missing contract token: {token}'
+
+
+def test_data_prompt_drops_call_it_once_framing() -> None:
+    prompt = _sample_data_prompt()
+    assert 'Call it ONCE' not in prompt
+    # Self-loop language is present instead.
+    assert 'resubmit' in prompt or 'until it passes' in prompt
+
+
+def test_data_prompt_static_output_contract_precedes_catalog() -> None:
+    # Approved static-first reorder: the static OUTPUT_CONTRACT sits with the
+    # other static prose, BEFORE the per-app catalog YAML / business semantics.
+    prompt = _sample_data_prompt()
+    assert prompt.index('TOOL CALL FORMAT') < prompt.index(
+        'SCHEMA (logical column names accepted by the bouncer):'
+    )
+
+
+# ── synonyms authoring (P1-2) + no-drift audit ──────────────────────
+
+from app.services.chat_engine.workbench_catalog import (  # noqa: E402
+    _clear_catalog_cache_for_tests,
+    load_workbench_catalog_strict,
+)
+
+_SYNONYMS_APPS = ('kaira-bot', 'voice-rx', 'inside-sales')
+
+
+def _all_synonym_bearers(catalog):
+    for table in catalog.tables.values():
+        for col in (*table.dimensions, *table.time_dimensions, *table.facts):
+            yield f'{table.name}.{col.name}', col.name, col.synonyms
+        for metric in table.metrics:
+            yield f'{table.name}::{metric.name}', metric.name, metric.synonyms
+
+
+@pytest.mark.parametrize('app_id', _SYNONYMS_APPS)
+def test_catalog_has_synonyms(app_id: str) -> None:
+    _clear_catalog_cache_for_tests()
+    catalog = load_workbench_catalog_strict(app_id)
+    total = sum(len(syns) for _, _, syns in _all_synonym_bearers(catalog))
+    assert total >= 1, f'{app_id}: catalog declares no synonyms'
+
+
+@pytest.mark.parametrize('app_id', _SYNONYMS_APPS)
+def test_synonyms_lowercase_no_self_or_internal_dup(app_id: str) -> None:
+    _clear_catalog_cache_for_tests()
+    catalog = load_workbench_catalog_strict(app_id)
+    for owner, name, syns in _all_synonym_bearers(catalog):
+        if not syns:
+            continue
+        for syn in syns:
+            assert syn == syn.lower(), f'{owner}: non-lowercase synonym {syn!r}'
+            assert syn.strip() == syn and syn.strip(), f'{owner}: padded/empty synonym {syn!r}'
+        lowered = [s.lower() for s in syns]
+        assert len(lowered) == len(set(lowered)), f'{owner}: internal duplicate in {syns!r}'
+        own = {name.lower(), name.lower().replace('_', ' ')}
+        assert not own.intersection(lowered), f'{owner}: synonym restates own name {syns!r}'
+
+
+@pytest.mark.parametrize('app_id', _SYNONYMS_APPS)
+def test_catalog_parses_and_cross_checks(app_id: str) -> None:
+    # Synonyms are additive on the frozen LogicalColumn/Metric — the catalog
+    # must still parse, cross-check, and keep its column count intact.
+    _clear_catalog_cache_for_tests()
+    catalog = load_workbench_catalog_strict(app_id)
+    cols = sum(
+        len(t.dimensions) + len(t.time_dimensions) + len(t.facts)
+        for t in catalog.tables.values()
+    )
+    assert cols > 0
+
+
+def test_catalog_synonyms_are_planner_facing_only() -> None:
+    # No-drift: the curated synonyms surface lives on the catalog and reaches
+    # the planner via catalog_vocabulary — never re-stitched into the SQL-shape
+    # prompt projection, which has no synonyms key at all.
+    from app.services.chat_engine.workbench_catalog import (
+        catalog_vocabulary,
+        workbench_to_prompt_inputs,
+    )
+
+    _clear_catalog_cache_for_tests()
+    catalog = load_workbench_catalog_strict('inside-sales')
+    vocab = catalog_vocabulary(catalog)
+    assert any(entry['synonyms'] for entry in vocab), 'vocabulary carries no synonyms'
+
+    schema_context, _allowed, _hints, _exemplars = workbench_to_prompt_inputs(catalog)
+    for table_payload in schema_context['tables'].values():
+        for col in table_payload['columns']:
+            assert 'synonyms' not in col, (
+                'synonyms drifted into the SQL-shape prompt projection; '
+                'they belong only on the planner vocabulary'
+            )
