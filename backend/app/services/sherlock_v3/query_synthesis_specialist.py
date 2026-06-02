@@ -267,6 +267,9 @@ def make_synthesis_output_extractor(
                 reason=f'synthesis output invalid: {exc}',
                 available_targets=available_targets,
             ).model_dump_json()
+        # Observability: the decomposition (to-do + depends_on) is otherwise
+        # only in the server-side response chain, never persisted locally.
+        logger.info('sherlock_v3 synthesis brief: %s', brief.model_dump_json())
         return brief.model_dump_json()
 
     return _extract
