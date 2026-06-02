@@ -18,9 +18,9 @@ from pydantic.warnings import UnsupportedFieldAttributeWarning
 
 warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -354,6 +354,16 @@ app = FastAPI(
     description="Backend API for AI evaluation pipelines.",
     lifespan=lifespan,
     openapi_tags=OPENAPI_TAGS,
+    # OpenAPI server URL for docs curl/playground, by deploy profile. In dev the
+    # backend is hit directly (localhost:API_PORT — reachable); in prod /api is
+    # served under APP_BASE_URL via nginx. No hardcoded host.
+    servers=[{
+        "url": (
+            f"http://localhost:{settings.API_PORT}"
+            if settings.is_dev else settings.APP_BASE_URL
+        ),
+        "description": settings.APP_ENVIRONMENT,
+    }],
 )
 
 # Rate limiter (used by auth routes via app.state.limiter)
@@ -395,14 +405,18 @@ app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(GZipSafeMiddleware, minimum_size=1000)
 
 # CORS
-origins = [o.strip() for o in settings.CORS_ORIGINS.split(",")]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+cors_kwargs: dict = {
+    "allow_origins": origins,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+# Dev only: the docs playground (Zudoku) runs on its own localhost port; in
+# prod the docs are same-origin under /docs, so no extra CORS entry is needed.
+if settings.is_dev:
+    cors_kwargs["allow_origin_regex"] = r"http://localhost:\d+"
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 
 API_VERSION = "2.1.0"
@@ -416,34 +430,6 @@ async def health_check():
             return {"status": "ok", "database": "connected", "version": API_VERSION}
     except Exception as e:
         return {"status": "error", "database": str(e), "version": API_VERSION}
-
-
-@app.get("/api/docs", include_in_schema=False)
-async def zudoku_reference(request: Request):
-    """Interactive Zudoku API reference — served in dev environments only.
-
-    Standalone CDN bundle reading the live OpenAPI spec; no build step. Zudoku
-    requires an ABSOLUTE spec URL, built from the inbound request so it is
-    correct on any host. All tags/descriptions carry over from the same spec.
-    """
-    if not settings.is_dev:
-        raise HTTPException(status_code=404)
-    spec_url = str(request.base_url).rstrip("/") + (app.openapi_url or "/openapi.json")
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TatvaCare AI Platform API</title>
-  <link rel="icon" type="image/svg+xml" href="https://cdn.zudoku.dev/logos/favicon.svg" />
-  <script type="module" src="https://cdn.zudoku.dev/latest/main.js" crossorigin></script>
-  <link rel="stylesheet" href="https://cdn.zudoku.dev/latest/style.css" crossorigin />
-</head>
-<body>
-  <div data-api-url="{spec_url}"></div>
-</body>
-</html>"""
-    return HTMLResponse(html)
 
 
 # Register routers
