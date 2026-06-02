@@ -4,12 +4,13 @@
   "type": "module",
   "description": "TatvaCare AI Platform — documentation + API reference (Zudoku).",
   "scripts": {
-    "gen-spec": "cd .. && PYTHONPATH=backend python -c \"import json; from app.main import app; open('apidocs/apis/openapi.json','w').write(json.dumps(app.openapi(), indent=2))\"",
+    "gen-spec": "cd .. && PYTHONPATH=backend python -c \"import json; from app.main import app; s=app.openapi(); s['servers']=[{'url':'/','description':'Same origin'}]; open('apidocs/apis/openapi.json','w').write(json.dumps(s, indent=2))\"",
     "dev": "zudoku dev",
     "build": "zudoku build",
     "preview": "zudoku preview"
   },
   "dependencies": {
+    "mermaid": "^11",
     "zudoku": "latest"
   }
 }
