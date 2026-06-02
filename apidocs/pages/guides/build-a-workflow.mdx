@@ -1,0 +1,118 @@
+---
+title: Build a workflow
+description: Lay out a workflow on the canvas — pick a source, add filtering and logic, take an action, end at a sink — then publish and run it.
+---
+
+A **workflow** is an automation you draw on a canvas. You drop **nodes** (the steps), connect them with **edges** (the arrows that decide what happens next), publish the result, and run it. Each workflow runs over a set of **recipients** — the contacts, leads, or patients you want it to act on — and walks every one of them through the steps you laid out.
+
+This guide takes you from a blank canvas to a published, runnable workflow with a simple end-to-end example. You don't need to write any code.
+
+## The four parts of every workflow
+
+Most workflows are built from four kinds of step, in this order:
+
+| Part | What it does | Example nodes |
+| --- | --- | --- |
+| **Source** | Where the recipients come from | Cohort, Dataset, Event Trigger |
+| **Filter / logic** | Narrows or routes recipients | Eligibility Filter, Conditional Branch, Wait Condition |
+| **Action** | Reaches out or changes a record | Send WhatsApp template, Place voice call, AI Agent |
+| **Sink** | Ends the run for a recipient | Workflow Complete |
+
+Every node carries its own settings (its **config**) and one or more labelled exits called **output edges**. You wire each exit to the next node. The platform validates the whole graph when you publish.
+
+<Mermaid chart={`
+flowchart LR
+  SRC[Source<br/>Cohort / Dataset / Event] -->|recipients| FLT[Eligibility Filter]
+  FLT -->|Passed| ACT[Send WhatsApp template]
+  FLT -->|Skipped| END2[Workflow Complete]
+  ACT -->|Sent| END[Workflow Complete]
+  ACT -->|Failed| END
+`} />
+
+## Step 1 — Pick a source
+
+The source decides who the workflow acts on. The platform ships with three:
+
+- **Cohort** — pull contacts from a saved list you build inline, or reuse one from your catalog.
+- **Dataset** — run against a specific uploaded list. The same contacts every run.
+- **Event Trigger** — start a run automatically when an external event fires, like a new CRM lead. (See [Connect a CRM / event source](/docs/guides/connect-a-crm).)
+
+Drag a source onto the canvas and configure it. A source needs no incoming arrow — it's the start — and has one exit that feeds the rest of the flow.
+
+## Step 2 — Add a filter or logic step
+
+Once you have recipients, you usually want to narrow or steer them.
+
+- **Eligibility Filter** continues only with contacts that match a rule you write. It has two exits: **Passed** and **Skipped** — wire each one wherever it should go.
+- **Conditional Branch** routes each contact to the first matching branch, or to a default branch if nothing matches.
+- **Segment Split** divides contacts into several branches by rule or weighted percentage — useful for A/B tests.
+- **Wait Condition** pauses a contact until a delay elapses or an awaited event arrives, then resumes them.
+
+You can chain several of these together. Every logic node needs at least one of its exits wired to something downstream.
+
+## Step 3 — Add an action
+
+This is where the workflow does something in the real world. Actions are delivered through a **provider connection** — your linked WhatsApp or voice account — so set that up first under your app's connections.
+
+- **Send WhatsApp template** sends a templated WhatsApp message via your connected WhatsApp provider. Exits: **Sent** and **Failed**.
+- **Place voice call** places an AI voice call via your connected voice provider. Exits: **Placed** and **Failed**.
+- **AI Agent** runs a prompt over each contact and saves structured fields back to their record for later steps. Exits: **Success** and **Error**.
+- **Webhook Dispatch** calls an external API with a JSON body built from contact attributes.
+
+Always wire the failure exit too — a contact whose message fails should still go somewhere (usually straight to the sink) so the run completes cleanly.
+
+## Step 4 — Connect to a sink
+
+A **sink** ends the run for a contact. The standard one is **Workflow Complete**: it has no exits and marks the contact done. Every path through your workflow should eventually reach a sink, so no contact is left dangling.
+
+## Step 5 — Publish
+
+Publishing promotes your **draft** (the canvas you've been editing) to a new **published version** — the only version that can actually run. Publish runs full validation:
+
+- Structural problems (a node with no path to a sink, a missing required exit) return **400** with a list of errors.
+- Runtime-required fields that are still empty — for example, a WhatsApp action with no template chosen — return **422** naming the missing field.
+
+Fix what it flags and publish again. See the [API Reference](/docs/api) — `POST /api/orchestration/workflows/{workflow_id}/publish`.
+
+## Step 6 — Run it
+
+With a published version in place, choose **Run now**. The platform resolves your recipient set, creates a **run**, and walks every recipient through the steps. You can watch live progress, per-recipient state, and each outbound action right on the canvas.
+
+See the [API Reference](/docs/api) — `POST /api/orchestration/runs`. Then follow the run with `GET /api/orchestration/runs/{run_id}` (or the live stream at `GET /api/orchestration/runs/{run_id}/stream`).
+
+## A simple end-to-end example
+
+A reminder campaign: message everyone in a cohort who is eligible, and end the run for everyone either way.
+
+```
+Cohort ──▶ Eligibility Filter ──Passed──▶ Send WhatsApp template ──Sent──▶ Workflow Complete
+                       │                              │
+                       └──Skipped──────────────┐      └──Failed──────────▶ Workflow Complete
+                                               ▼
+                                       Workflow Complete
+```
+
+To build it:
+
+1. Drop a **Cohort** source and pick your contact list.
+2. Add an **Eligibility Filter** and write your rule. Wire **Passed** forward; wire **Skipped** to a **Workflow Complete**.
+3. Add **Send WhatsApp template**, choose your connection and template. Wire **Sent** and **Failed** each to a **Workflow Complete**.
+4. **Publish**. Resolve anything the validator flags.
+5. **Run now** and watch it execute.
+
+## Useful endpoints
+
+You build and run everything from the UI, but the same actions are available through the API:
+
+| Action | Endpoint |
+| --- | --- |
+| List your workflows | `GET /api/orchestration/workflows` |
+| Create a workflow | `POST /api/orchestration/workflows` |
+| Save the draft (canvas) | `PUT /api/orchestration/workflows/{workflow_id}/draft` |
+| Check a draft before publishing | `POST /api/orchestration/workflows/validate` |
+| Publish the draft | `POST /api/orchestration/workflows/{workflow_id}/publish` |
+| List the available node types | `GET /api/orchestration/node_types` |
+| Run now | `POST /api/orchestration/runs` |
+| Follow a run | `GET /api/orchestration/runs/{run_id}` |
+
+Browse the full set in the [API Reference](/docs/api) under **orchestration**.

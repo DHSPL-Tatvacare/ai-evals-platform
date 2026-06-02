@@ -1,0 +1,122 @@
+---
+title: LLM providers & credentials
+description: How the platform stores your provider keys, gates models by capability, and picks the right model for every AI feature.
+---
+
+Every AI feature on the platform — evaluations, reports, the Sherlock analytics assistant, workflow extraction — runs on a large language model (LLM). The platform never ships with a built-in key. Instead, each tenant **brings their own key** (BYOK): an admin enables the providers you want, pastes your API credentials, and the platform takes it from there.
+
+This page explains how those credentials are stored, why they stay safe, and how the platform decides which model to use for each task. You don't need to configure anything to read AI results — but if you're an admin setting the platform up, this is the model to have in your head.
+
+## The big picture
+
+Three ideas carry everything on this page:
+
+- **Credentials are per-tenant and encrypted.** Your keys belong to your tenant alone, are encrypted at rest, and are never returned to the browser.
+- **Models are capability-gated.** A model is only offered for a task if it can actually do that task (text, vision, audio, structured output, and so on).
+- **Every AI call resolves through a single path.** Code never hard-codes a provider or key. It names a *call site* (e.g. "report generation") and the platform resolves the right credential and model for that tenant.
+
+## Supported providers
+
+An admin enables one or more of these providers and adds a credential for each. The provider determines the shape of the secret you store.
+
+| Provider | What you store |
+|----------|----------------|
+| OpenAI | API key |
+| Azure OpenAI | API key + endpoint; named deployments |
+| Anthropic | API key |
+| Gemini (AI Studio) | API key |
+| Gemini (Vertex AI) | Service-account JSON + project |
+| AWS Bedrock | Access key id + secret (session token optional) |
+| Sarvam | API key |
+
+Non-secret settings — an Azure endpoint, a Vertex project id, a Bedrock default region — are stored separately from the secret itself, in plaintext config alongside the credential. Secrets live only inside the encrypted blob.
+
+## How credentials are stored
+
+Each credential is one row in `platform.tenant_llm_credentials`, uniquely keyed by **tenant + provider + name**. The `name` lets a tenant keep more than one credential per provider (for example a `default` and a `prod` OpenAI key).
+
+The secret is held in `secret_blob_encrypted` — a JSON dictionary encrypted with **Fernet** (symmetric authenticated encryption) using the process-level `LLM_CREDENTIAL_KEY`. Decryption happens server-side at the moment of use and nowhere else.
+
+A few guarantees worth knowing as a user:
+
+- **GET responses never carry your key.** The API returns whether a key is set and a masked preview only — never the plaintext.
+- **Blank means keep.** When an admin edits a credential and leaves the key field empty, the stored secret is preserved, not erased.
+- **Encrypted at rest.** Without `LLM_CREDENTIAL_KEY`, the stored blob cannot be read.
+
+Admins manage all of this from the AI Settings screens. See the [API Reference](/docs/api):
+
+- `GET /api/admin/ai-settings/providers` — list providers and their credentials
+- `POST /api/admin/ai-settings/providers/{provider}/credentials` — add a credential
+- `PATCH /api/admin/ai-settings/providers/{provider}/credentials/{credential_id}` — edit (blank key = keep)
+- `POST /api/admin/ai-settings/credentials/{credential_id}/validate` — run a live connection test
+- `POST /api/admin/ai-settings/credentials/{credential_id}/discover-models` — list models live from the provider
+
+### Azure deployments
+
+Azure OpenAI is the one provider that needs an extra step. Azure exposes models under tenant-chosen **deployment names** rather than canonical model ids, so each deployment is declared in `platform.tenant_llm_deployments` and mapped to a canonical catalog model. Until that mapping is set (`needs_mapping = true`), the deployment is held back from model dropdowns and cannot be used as a default.
+
+Manage deployments at `GET / POST /api/admin/ai-settings/credentials/{credential_id}/deployments`.
+
+## Capability gating
+
+The platform tracks what each model can do as a set of **capability tags** — for example `text_input`, `text_output`, `image_input`, `audio_input`, `reasoning`, `tool_call`, and `structured_output`. These are computed from the model catalog, not hard-coded.
+
+Every task declares the capabilities it requires. A model is only ever offered — and only ever resolves — when it covers everything the task needs. A text-to-text model will never be handed an audio transcription job; a model without structured-output support won't be chosen to draft an evaluator rubric.
+
+When the catalog hasn't yet confirmed a capability (the upstream flag is unknown rather than `false`), the platform tells the admin to refresh the catalog instead of silently failing — so a missing tag is never confused with an unsupported model.
+
+## Call sites: how a model gets picked
+
+Code on the platform never says "use OpenAI gpt-X". It names a **call site** — a stable identifier for *what* the model is being asked to do. The resolver maps that call site to a concrete provider, credential, and model for the current tenant.
+
+These are some of the registered call sites:
+
+| Call site | Used for |
+|-----------|----------|
+| `chat_text` | Batch, adversarial, and custom evaluation replies |
+| `audio_transcription` | Speech-to-text in the audio evaluation runner |
+| `evaluator_draft` | Drafting evaluator rubrics from your intent |
+| `report_generation` | Report-builder prose synthesis |
+| `analytics_supervisor` | The Sherlock assistant's supervisor turn |
+| `analytics_specialist` | Sherlock specialist subtasks (data / authoring / query-synthesis) |
+| `workflow_llm_extract` | Field extraction inside an orchestration workflow |
+| `lead_signal_extraction` | Structured CRM lead-signal extraction |
+
+You can list the full registry at `GET /api/llm/call-sites`, and see which models are available for your tenant at `GET /api/llm/models`.
+
+### Resolution order
+
+When a call site needs a model, the platform resolves it in this order:
+
+1. **Per-call override** — if the request or job explicitly carries a provider + model, use that.
+2. **Tenant default** — otherwise, the default your admin set for this call site.
+3. **Platform default** — if your tenant hasn't set one, fall back to the platform-wide default.
+
+Once provider, credential, and model are chosen, the resolver decrypts the credential, looks up the model (an Azure deployment maps through the deployment table; everything else maps straight to the catalog), and finally checks that the model's capabilities cover what the call site requires. If anything is missing, you get an actionable error pointing at the screen to fix it — never a silent wrong answer.
+
+Admins set defaults at `GET /api/admin/llm/defaults` and `PUT /api/admin/llm/defaults/{call_site}`.
+
+## The credential flow, end to end
+
+<Mermaid chart={`
+flowchart TD
+    Admin["Admin · AI Settings"] -->|POST credentials| Store["platform.tenant_llm_credentials<br/>(Fernet-encrypted)"]
+    Admin -->|PUT default| Defaults["tenant / platform<br/>call-site defaults"]
+
+    Caller["Any AI feature<br/>(names a call site)"] --> Resolver["Call-site resolver"]
+    Resolver -->|1. override?| Resolver
+    Resolver -->|2. tenant default<br/>3. platform default| Defaults
+    Resolver -->|read + decrypt| Store
+    Resolver -->|map model| Catalog["Model catalog<br/>(+ Azure deployments)"]
+    Resolver -->|check capabilities| Gate["required ⊆ available?"]
+    Gate -->|ok| Provider["Provider call<br/>(OpenAI / Azure / Anthropic / Gemini / Bedrock / Sarvam)"]
+    Gate -->|missing| Error["Actionable error<br/>→ fix in AI Settings"]
+`} />
+
+## What this means for you
+
+- **As a user**, you never touch a key — AI features just work once your admin has set up at least one provider and the defaults for the tasks you use.
+- **As an admin**, enabling a provider is: add a credential, run the connection test, curate the models your team should see, and set the call-site defaults. Map Azure deployments if you use Azure.
+- **If a feature reports "provider not configured" or "no default,"** that's the resolver telling you a credential or a call-site default is missing — both are fixed in AI Settings, not in code.
+
+For the exact request and response shapes, browse the [API Reference](/docs/api) under the AI settings and `llm` route groups.

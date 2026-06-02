@@ -1,0 +1,160 @@
+---
+title: Tenancy & access
+description: How the platform isolates organizations, scopes data to apps, and gates actions with roles and permissions.
+---
+
+Welcome. Before you run anything, it helps to understand how the platform keeps each organization's data separate and decides who can do what. This page walks you through three layers — **tenants**, **apps**, and **roles** — and the small permission vocabulary that ties them together.
+
+You can read it top to bottom. By the end you'll know which app you're working in, what your role lets you do, and where to look in the API Reference when you need to manage access.
+
+## The big picture
+
+The platform is **multi-tenant**: many organizations share one deployment, but each one's data is fully isolated. Inside your organization (your **tenant**), work is organized into **apps**, and people are granted **roles** that combine app access with a set of permissions.
+
+<Mermaid chart={`
+flowchart TD
+  T["Tenant<br/>(your organization)"] --> A1["App: voice-rx"]
+  T --> A2["App: inside-sales"]
+  T --> U["Users"]
+  U --> R["Role"]
+  R -->|app access| A1
+  R -->|app access| A2
+  R -->|permissions| P["view · manage · run · export"]
+`} />
+
+Read the diagram as: a tenant contains apps and users; each user is given one or more roles; a role grants access to specific apps **and** a set of permissions that say what the user may do.
+
+## Tenants — your isolated organization
+
+A **tenant** is one organization on the platform. It's the outermost boundary, and it's strict: every piece of owned data carries a `tenant_id`, and every query filters by it. Two tenants can never see each other's listings, evaluations, workflows, or cost data.
+
+Some things are scoped more tightly than the tenant:
+
+| Scope | What lives here |
+| --- | --- |
+| Tenant | Tenant settings, applications, platform references |
+| Tenant + app | App data, datasets, workflows, cohorts, evaluations |
+| Tenant + app + user | Chat sessions, your personal LLM defaults, your owned listings |
+
+This is the platform's default discrimination triple: **tenant + app + user**. Most resources are owned at one of these three levels.
+
+A small amount of shared, read-only reference data (model catalogs, the seeded evaluator library) lives under a system tenant and is visible to everyone — you don't manage it, you just use it.
+
+## Apps — your workspaces
+
+An **app** (sometimes called a workspace) is a unit of work inside your tenant — for example a voice review app or an inside-sales app. Apps keep related datasets, evaluations, and workflows together, and they're the boundary that **app access** grants control.
+
+A couple of practical notes:
+
+- Most list and detail endpoints expect an `app_id`. If a call returns nothing, check that you passed the right app.
+- Global, per-user settings (like your personal LLM defaults) are looked up with an empty `app_id` (`""`), not tied to any single app.
+
+You can list the apps available to you and read an app's config:
+
+```bash
+GET /api/apps
+GET /api/apps/{slug}/config
+```
+
+See the [API Reference](/docs/api) — `GET /api/apps`.
+
+## Roles — access plus permissions
+
+A **role** bundles two things together:
+
+1. **App access** — which apps the role can look at.
+2. **Permissions** — which actions the role can perform.
+
+The guiding rule is simple: **app access governs looking; permissions govern doing.** Being able to see an app doesn't let you change it — that takes a permission. And a selection that's a step inside an action (picking a model to run an evaluation, choosing saved cases) follows the action's permission; it's never gated separately.
+
+Roles are tenant-scoped — they belong to your organization and apply only within it. Some lifecycle actions stay **owner-only** and can't be handed out through a normal role:
+
+- Creating, editing, and deleting roles
+- Managing tenant identity and tenant-level configuration
+- Permanent hard-delete of invite links (and platform bootstrap actions)
+
+Admins manage roles through the admin surface:
+
+```bash
+GET    /api/admin/roles          # list roles
+POST   /api/admin/roles          # create a role
+GET    /api/admin/roles/{role_id}
+PUT    /api/admin/roles/{role_id}
+DELETE /api/admin/roles/{role_id}
+```
+
+To assign an existing role to a user, the admin needs the `role:manage` permission; the role is set on the user via the update-user endpoint. See the [API Reference](/docs/api) — `GET /api/admin/roles` and `PATCH /api/admin/users/{user_id}`.
+
+## The permission vocabulary
+
+Every permission id reads as `<capability>:<verb>`, and there are only **four verbs**:
+
+| Verb | Meaning |
+| --- | --- |
+| `view` | Look at a surface or its data |
+| `manage` | Create, edit, delete, or change settings |
+| `run` | Start an action (submit a job, start a workflow); cancelling folds in here |
+| `export` | Download results |
+
+There are no `create` / `edit` / `delete` / `cancel` / `share` verbs — those all fold into `manage` (and `cancel` folds into `run`). This keeps the vocabulary small and predictable: if you can `manage` a thing, you can create, edit, and delete it.
+
+## The full permission catalog
+
+These are the real permission ids, grouped exactly as the platform groups them. This is the canonical set — granting a permission means adding one of these ids to a role.
+
+| Group | Permission id | What it allows |
+| --- | --- | --- |
+| Listings | `listing:manage` | Create and delete listings for accessible apps |
+| Evaluations | `evaluation:run` | Submit evaluation jobs, start workflows, cancel in-flight runs |
+| Evaluations | `evaluation:manage` | Delete evaluation records, change visibility on owned runs |
+| Evaluations | `evaluation:export` | Download evaluation outputs |
+| Assets | `asset:manage` | Manage prompts, schemas, evaluators, tags, and related assets |
+| Orchestration | `orchestration:manage` | Create, edit, publish, run, and archive workflows, connections, and datasets |
+| Reviews | `review:manage` | Open review surfaces, save drafts, finalize human review decisions |
+| Reports and insights | `report:run` | Create report runs and derived report artifacts |
+| Reports and insights | `insights:view` | Access analytics dashboards, summaries, and reporting views |
+| Configuration | `configuration:manage` | Edit app settings, rule catalogs, and configuration assets |
+| Configuration | `sherlock:manage` | Manage tenant-scoped Sherlock verified question→SQL pairs |
+| Cost & usage | `cost:view` | Access cost dashboards, request logs, and current pricing |
+| Cost & usage | `cost:manage` | Edit pricing, refresh the catalog, run cost rollup backfill |
+| Cost & usage | `analytics:manage` | Manage analytics population mappings and backfill jobs |
+| Scheduled jobs | `schedule:manage` | Create, edit, enable/disable, fire-now, and delete scheduled jobs |
+| Notifications | `notifications:manage` | Configure notification defaults, audit subscribers, inspect send log |
+| User management | `user:manage` | Create, edit, deactivate, delete, reset passwords for tenant users |
+| User management | `invite_link:manage` | Create, deactivate, and inspect invite links |
+| User management | `role:manage` | Assign existing roles to users |
+| Platform | `platform:manage` | Manage platform-default settings across every tenant (platform staff only) |
+
+A few things worth calling out:
+
+- **`platform:manage`** is cross-tenant and reserved for platform operators who manage defaults for every organization. You will not normally hold it.
+- **`sherlock:manage`** governs the verified question→SQL pairs that the Sherlock data assistant retrieves; system-seeded rows stay read-only.
+- The full set is exactly these ids, defined in the backend catalog and validated at boot. Adding a permission to a role uses one of these strings verbatim.
+
+You can fetch the live catalog (groups, labels, descriptions, and owner-only surfaces) from the admin API:
+
+```bash
+GET /api/admin/permission-catalog
+```
+
+See the [API Reference](/docs/api) — `GET /api/admin/permission-catalog`.
+
+## How a request gets checked
+
+When you call a protected endpoint, the platform:
+
+1. Resolves **who you are** and **which tenant** you belong to from your auth context.
+2. Confirms your role grants **access** to the app in the request.
+3. Confirms your role holds the **permission** the action requires.
+
+Every protected route enforces this; the only public routes live under `/api/auth/*`. Admin surfaces additionally require an admin-scoped permission, so a non-admin token gets a `403` on admin mutations. Admin mutations are also recorded to an audit log.
+
+```bash
+GET /api/admin/audit-log
+```
+
+## What to do next
+
+- Find out which apps you can work in: `GET /api/apps`.
+- If you're an admin setting up your team, review roles and the permission catalog: `GET /api/admin/roles` and `GET /api/admin/permission-catalog`.
+- Browse the full surface in the [API Reference](/docs/api).

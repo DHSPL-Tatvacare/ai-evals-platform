@@ -1,0 +1,150 @@
+---
+title: Data model
+description: The core entities behind every evaluation — how runs, their sources, and their detail rows fit together.
+---
+
+Everything you do on the platform — evaluating a call, scoring a chat thread, running an adversarial test — produces one kind of record: an **evaluation run**. This page walks through that record, where it comes from, and what hangs off it, so you can read a result and know exactly what you are looking at.
+
+If you remember one thing: **`EvaluationRun` is the center of the data model.** Almost everything else either feeds into it or branches off it.
+
+## EvaluationRun: one row per outcome
+
+An **evaluation run** is a single evaluation outcome. Whether the work ran instantly or as a long background job, the result lands in exactly one `evaluation_runs` row.
+
+The same table holds several shapes of result. The `eval_type` column tells you which shape a given row is — this is what "polymorphic" means here: one table, several behaviors discriminated by a type field.
+
+| `eval_type` | What it represents |
+| --- | --- |
+| `custom` | A single record scored by a custom evaluator you defined |
+| `full_evaluation` | A complete evaluation of one source record |
+| `call_quality` | A voice/call-quality evaluation |
+| `batch_thread` | A batch run scoring many conversation threads |
+| `batch_adversarial` | A batch of adversarial (stress-test) conversations |
+
+Every run carries the same core fields regardless of type:
+
+- **`status`** — `pending`, then running, then completed or failed.
+- **`config`** — a snapshot of the inputs (prompts, schemas, model settings) at run time, so a result stays reproducible even if the source changes later.
+- **`result`** — the full structured output (critique, transcript, scores).
+- **`summary`** — a compact version for list views (main score, verdict, counts).
+- **`llm_provider` / `llm_model`** — which model produced the result.
+
+Every run is also scoped to a tenant, a user, and an `app_id` — the platform is multi-tenant, so you only ever see runs that belong to your tenant and app.
+
+To read runs, see the [API Reference](/docs/api) — `GET /api/eval-runs` for the list and `GET /api/eval-runs/{run_id}` for one run.
+
+## Where a run comes from: its parent
+
+A run never appears from nowhere. It is created **from a source**, and that source is its parent. There are two parent types, and a run points at exactly one of them:
+
+- **A listing** (`EvaluationDataset`, the `evaluation_datasets` table) — an uploaded or API-sourced record such as a transcript, audio file, or structured payload. Set via `listing_id`.
+- **A chat session** (`ChatSession`, the `chat_sessions` table) — a conversation made up of chat messages. Set via `session_id`.
+
+Two more optional links round out a run's lineage:
+
+- **`evaluator_id`** — the custom **evaluator** (a reusable scoring definition: a prompt plus an output schema) used for a `custom` run.
+- **`job_id`** — the **background job** that produced the run, when the work ran asynchronously.
+
+## What hangs off a run: detail rows
+
+The single `evaluation_runs` row is the parent for several **detail tables** that hold the fine-grained results. The right detail table depends on the run's type:
+
+- **Thread results** (`evaluation_run_thread_results`) — one row per conversation thread in a `batch_thread` run, with per-thread scores like intent accuracy.
+- **Adversarial results** (`evaluation_run_adversarial_results`) — one row per adversarial conversation in a `batch_adversarial` run, with its goal flow, difficulty, traits, and verdict.
+- **API call logs** (`evaluation_run_api_call_logs`) — the raw LLM requests and responses made during the run (provider, model, prompt, tokens), useful for auditing and debugging.
+- **Reviews** (`evaluation_reviews`) — human reviews layered on top of a run; the run also tracks its `latest_review_id`.
+
+Fetch these through the run's sub-routes: `GET /api/eval-runs/{run_id}/threads`, `GET /api/eval-runs/{run_id}/adversarial`, and `GET /api/eval-runs/{run_id}/logs`. See the [API Reference](/docs/api).
+
+## The cascade chain
+
+Parents and children are wired together so deletes stay clean. Deleting a listing or a chat session cascades down to its evaluation runs, and deleting a run cascades down to its detail rows. You never have to clean up orphaned thread results or logs by hand.
+
+<Mermaid chart={`
+erDiagram
+    EvaluationDataset ||--o{ EvaluationRun : "produces"
+    ChatSession ||--o{ EvaluationRun : "produces"
+    ChatSession ||--o{ ChatMessage : "contains"
+    Evaluator ||--o{ EvaluationRun : "scores with"
+    BackgroundJob ||--o{ EvaluationRun : "creates"
+    EvaluationRun ||--o{ ThreadResult : "has"
+    EvaluationRun ||--o{ AdversarialResult : "has"
+    EvaluationRun ||--o{ ApiCallLog : "logs"
+    EvaluationRun ||--o{ Review : "reviewed by"
+
+    EvaluationRun {
+        uuid id PK
+        string app_id
+        string eval_type
+        uuid listing_id FK
+        uuid session_id FK
+        uuid evaluator_id FK
+        uuid job_id FK
+        string status
+        json config
+        json result
+        json summary
+    }
+    EvaluationDataset {
+        uuid id PK
+        string app_id
+        string source_type
+        json transcript
+        json audio_file
+    }
+    ChatSession {
+        uuid id PK
+        string app_id
+        string thread_id
+        string title
+    }
+    ThreadResult {
+        int id PK
+        uuid run_id FK
+        string thread_id
+        json result
+    }
+    AdversarialResult {
+        int id PK
+        uuid run_id FK
+        string verdict
+        json result
+    }
+    ApiCallLog {
+        int id PK
+        uuid run_id FK
+        string provider
+        string model
+    }
+`} />
+
+## How a run gets created
+
+Long-running evaluations are submitted as background jobs rather than blocking your request. You submit a job, poll it, and load the resulting run when it completes.
+
+```bash
+# 1. Submit the work as a background job
+POST /api/jobs
+{
+  "job_type": "evaluate-batch",
+  "params": { "...": "..." }
+}
+
+# 2. Poll the job until it finishes
+GET /api/jobs/{job_id}
+
+# 3. Load the evaluation run(s) it produced
+GET /api/eval-runs?app_id=voice-rx
+```
+
+Each background job is itself a tracked row (`background_jobs`) with its own `status`, `progress`, and `params`. The run it creates back-references it via `job_id`, so you can always trace a result to the job that produced it. See the [API Reference](/docs/api) — `POST /api/jobs`, `GET /api/jobs/{job_id}`.
+
+## Putting it together
+
+To read any result on the platform, you only need to follow the chain:
+
+1. Start at a **listing** or a **chat session** — the thing being evaluated.
+2. Find its **evaluation runs** — each one an outcome, typed by `eval_type`.
+3. Open the run's **detail rows** — thread results, adversarial results, or call logs — for the fine-grained data.
+
+That single shape covers every evaluation surface on the platform, which is why understanding `EvaluationRun` is the fastest way to understand the rest.

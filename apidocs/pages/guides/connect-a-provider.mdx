@@ -1,0 +1,146 @@
+---
+title: Connect a provider
+description: Add an encrypted WhatsApp or Voice connection so your workflows can send messages and place calls.
+---
+
+A **provider connection** is a saved, encrypted set of credentials for an outside service — a WhatsApp gateway like WATI or AiSensy, or a voice service like Bolna. Once a connection exists, your workflows reference it by id and the platform handles the rest: it decrypts the credentials at send time, dispatches the message or call, and receives status updates back.
+
+This guide walks you through creating a connection, understanding where credentials live, and wiring up inbound callbacks.
+
+## What a connection is (and why you need one)
+
+You never paste an API key into a workflow. Instead you create a connection once, and workflows point at it.
+
+- A connection is **owned by your tenant and a specific app**. It is not global and not shared across tenants.
+- Secrets in the connection are **encrypted at rest** (Fernet encryption) and are **never returned** by the API — reading a connection always redacts the secret fields.
+- Workflows reference a connection by its `connection_id` (a UUID), never by an API key or environment variable. Rotate or update the credential and every workflow using that connection keeps working.
+
+The supported providers and their credential fields are defined on the platform. The ones most teams start with:
+
+| Provider key | What it does | Required fields | Secret fields |
+|---|---|---|---|
+| `wati` | WhatsApp (templates) | `base_url`, `wati_tenant_id`, `api_token` | `api_token` |
+| `aisensy` | WhatsApp (campaigns) | `api_key`, `base_url`, `campaign_partner_id`, `from_number` | `api_key` |
+| `bolna` | AI voice calls | `api_key`, `base_url` (optional `from_phone`) | `api_key` |
+
+WATI and Bolna also accept optional fields: WATI has `channel_numbers` (your WhatsApp sender numbers in E.164), and Bolna has `from_phone` (a default caller ID). To see the exact field shape for any provider before building a form, call the schema endpoint — see the [API Reference](/docs/api), `GET /api/orchestration/connections/schema?provider=wati`.
+
+## The big picture
+
+<Mermaid chart={`
+flowchart TD
+  A[Create connection<br/>credentials encrypted at rest] --> B[Connection id]
+  B --> C[Workflow node references<br/>connection_id]
+  C --> D{Outbound}
+  D -->|WhatsApp| E[WATI / AiSensy send]
+  D -->|Voice| F[Bolna call]
+  E --> G[Inbound callback<br/>messaging webhook + token]
+  F --> H[Inbound callback<br/>voice webhook + token]
+  G --> I[Status: sent / delivered / read / replied]
+  H --> I
+`} />
+
+Outbound dispatch uses the credentials you stored. Inbound status updates (delivered, read, replied, call completed) come back over a **webhook** — a URL the provider POSTs to. Each connection gets its own secret token in that URL, so the platform knows which tenant and app the event belongs to.
+
+## Step 1 — Create the connection
+
+Send the provider key, a human-readable name, the target `app_id`, and the credential `config`. Secrets are encrypted before they are stored and are never echoed back.
+
+```bash
+curl -X POST https://<host>/api/orchestration/connections \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "appId": "inside-sales",
+    "provider": "wati",
+    "name": "Production WhatsApp",
+    "config": {
+      "base_url": "https://live-mt-server.wati.io/12345",
+      "wati_tenant_id": "12345",
+      "api_token": "<your-wati-token>"
+    }
+  }'
+```
+
+A Bolna voice connection follows the same shape:
+
+```json
+{
+  "appId": "voice-rx",
+  "provider": "bolna",
+  "name": "Outbound Voice",
+  "config": {
+    "api_key": "<your-bolna-key>",
+    "base_url": "https://api.bolna.ai",
+    "from_phone": "+919999999999"
+  }
+}
+```
+
+The response includes the new connection's `id`. That id is the `connection_id` your workflow nodes will reference.
+
+See the [API Reference](/docs/api), `POST /api/orchestration/connections`. A duplicate name within the same app returns `409`; an invalid or unknown-provider config returns `400`.
+
+## Step 2 — Test it
+
+Before you build a workflow on top of a connection, verify the stored credentials actually work. The test endpoint makes a lightweight live call to the provider and reports whether the connection is healthy — it does not throw if the provider is down, it returns a diagnostic message.
+
+```bash
+curl -X POST https://<host>/api/orchestration/connections/<connection_id>/test \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+See the [API Reference](/docs/api), `POST /api/orchestration/connections/{connection_id}/test`.
+
+## Step 3 — Reference it from a workflow
+
+Workflow nodes that send a WhatsApp template or place a voice call carry the `connection_id` in their config. The platform resolves the connection, decrypts the credentials, and dispatches. You do not handle the API key anywhere in the workflow.
+
+To populate the pickers in your workflow builder, the platform exposes per-connection listing endpoints:
+
+- `GET /api/orchestration/connections/{connection_id}/templates` — approved WhatsApp templates on a WATI connection.
+- `GET /api/orchestration/connections/{connection_id}/agents` — voice agents on a Bolna connection.
+- `GET /api/orchestration/connections/{connection_id}/phone-numbers` — from-numbers (Bolna) or channel numbers (WATI).
+- `GET /api/orchestration/connections/{connection_id}/agent-variables` — the variables a Bolna agent or WATI template expects, so a node can map values into them. Pass `agentId` (Bolna) or `templateName` (WATI) to scope the lookup.
+
+The first three are cached for 7 days; pass `refresh=true` to re-fetch live. All four return a soft-error envelope (HTTP 200 with an error field) when the upstream provider call fails. See the [API Reference](/docs/api) for each.
+
+## Inbound: webhooks and tokens
+
+Providers report back over webhooks. So that the platform can authenticate the callback and route it to the right tenant, **each inbound-capable connection gets its own secret webhook token** baked into the callback URL. WATI, AiSensy, and Bolna all support inbound webhooks.
+
+The token in the URL **is** the credential — there is no separate header. An unknown or mismatched token returns an opaque `404`. Configure these URLs in your provider's dashboard:
+
+| Channel | Callback URL pattern |
+|---|---|
+| WhatsApp | `POST /api/orchestration/webhooks/messaging/{vendor}/{token}` |
+| Voice | `POST /api/orchestration/webhooks/voice/{vendor}/{token}` |
+
+Here `{vendor}` is the provider key (`wati`, `aisensy`, `bolna`) and `{token}` is the connection's webhook token.
+
+Inbound events become canonical statuses — for WhatsApp: `sent`, `delivered`, `read`, `replied`, `failed`. A reply also resumes any workflow recipient that was waiting on it.
+
+> Webhooks are a real-time complement to dispatch polling, not a requirement. The platform also reconciles outcomes by polling the provider, so correctness never depends on a webhook arriving.
+
+### Rotating the webhook token
+
+If a token is exposed, rotate it. This issues a fresh token and returns the new callback URL; the old token stops working immediately, so update your provider's dashboard right after.
+
+```bash
+curl -X POST https://<host>/api/orchestration/connections/<connection_id>/rotate-token \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+See the [API Reference](/docs/api), `POST /api/orchestration/connections/{connection_id}/rotate-token`. Providers that do not use inbound webhooks return `400`.
+
+## Updating and archiving
+
+- **Update** with `PATCH /api/orchestration/connections/{connection_id}`. It is secret-preserving: any secret field you omit (or send blank) keeps its stored value, so you can rename a connection or change one field without re-entering every credential.
+- **Archive** with `DELETE /api/orchestration/connections/{connection_id}` (returns `204`). The connection can no longer be selected by new workflows; workflows already referencing it are not rewritten.
+- **List** with `GET /api/orchestration/connections`, filtered by app, provider, and visibility. Secrets are always redacted.
+
+See the full set in the [API Reference](/docs/api) under the orchestration tag.
+
+## Permissions and scope
+
+Every connection route requires a bearer token with the `orchestration:manage` permission, and you must have access to the connection's app. A connection is always scoped to your tenant — you can never read or write another tenant's connection, and existence is not revealed (you get a `404`, not a `403`, for connections outside your scope).

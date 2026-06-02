@@ -1,0 +1,125 @@
+---
+title: Evaluations
+description: What an evaluation is, the eval types, the EvaluationRun entity, and the submit-poll-load lifecycle.
+---
+
+An **evaluation** is how the platform measures the quality of an AI assistant. You point an evaluation at some conversation data — an uploaded transcript, a dataset, or a live chat session — and the platform scores it: was the assistant's intent correct, was the conversation efficient, did it pass your custom checks, did it hold up under adversarial pressure. Every evaluation produces a durable, queryable result you can open, share, chart, and report on later.
+
+This page explains the shape of that result, the kinds of evaluations you can run, and the simple three-step rhythm — **submit, poll, load** — that every evaluation follows.
+
+## The EvaluationRun: one row per outcome
+
+The platform records every evaluation outcome as a single **`EvaluationRun`** row. It is the central entity: analytics, reports, and reviews all read from it, and one run is the unit you open, share, or delete.
+
+A run is *polymorphic* — the same row shape is reused for different kinds of evaluation, and a `eval_type` field tells you which kind it is. A run links back to exactly one source (the data it evaluated) and fans out to detail rows (the per-conversation scores).
+
+Key fields on a run:
+
+| Field | Meaning |
+| --- | --- |
+| `evalType` | Which kind of evaluation this is (see the table below) |
+| `status` | `pending` → `running` → `completed` / `failed` / `cancelled` |
+| `appId` | The app this run belongs to |
+| `listingId` / `sessionId` | The source — exactly one is set per run |
+| `evaluatorId` | The evaluator used, for custom evaluations |
+| `jobId` | The background job that produced this run |
+| `summary` | Quick-access headline metrics for list views |
+| `result` | The full structured output (critique, transcript, scores) |
+| `durationMs` | How long the run took |
+| `visibility` | `private` or `shared` |
+
+Two things to know about how runs relate to other data:
+
+- **Source-linked.** A run is derived from either a **listing** (a dataset / uploaded conversation set, `listingId`) or a **chat session** (`sessionId`). When the source is deleted, its runs cascade away with it.
+- **Detail rows.** Batch and adversarial runs fan out into per-conversation detail rows — thread results and adversarial results — plus the raw LLM call logs (prompts, responses, token counts, latency). Deleting a run cascades and removes all of these.
+
+## Evaluation types
+
+The `evalType` field discriminates the run shape. The current types are:
+
+| `evalType` | What it evaluates |
+| --- | --- |
+| `custom` | A single conversation against one custom evaluator you authored |
+| `full_evaluation` | A complete evaluation pass over a source |
+| `call_quality` | Quality scoring for a voice / call transcript |
+| `batch_thread` | A batch of conversation threads, each scored for intent, correctness, and efficiency |
+| `batch_adversarial` | A batch of adversarial test cases — synthetic users probing the assistant against a goal |
+
+A `batch_thread` run drills down into **thread results**: per-conversation intent accuracy, a worst-case correctness verdict, and an efficiency verdict. A `batch_adversarial` run drills down into **adversarial results**: per-case verdict, whether the goal was achieved, the active traits, and the turn count.
+
+## The lifecycle: submit, poll, load
+
+Evaluations can take many seconds or minutes, so they never block your request. Instead they run as **background jobs**: you submit a job, poll it until it finishes, then load the result. This is the same rhythm for every long-running operation on the platform.
+
+<Mermaid chart={`
+flowchart TD
+  A["You: submit a job<br/>POST /api/jobs"] --> B["Job queued<br/>status: queued"]
+  B --> C["Worker claims it<br/>status: running"]
+  C --> D["You: poll on a timer<br/>GET /api/jobs/{id}"]
+  D -->|status: running| D
+  D -->|status: completed| E["Load the result<br/>GET /api/eval-runs"]
+  C --> F["EvaluationRun written<br/>status: completed / failed"]
+  F --> E
+`} />
+
+### 1. Submit
+
+POST a job, naming the `jobType` and its `params`. Your tenant, user, and app context are injected for you, so you only describe the work. You get back a job with `status: queued`.
+
+```bash
+curl -X POST https://<host>/api/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jobType": "evaluate-batch",
+    "params": { "data_path": "datasets/support-2026-05.csv", "thread_ids": ["t-42", "t-43"] }
+  }'
+```
+
+Retries are safe. Send an `Idempotency-Key` header and a repeat submission with the same key returns the *original* job (HTTP 200) instead of starting a duplicate.
+
+### 2. Poll
+
+Call the job endpoint on a timer. It returns the live `status`, a `progress` object (`current` / `total` / `message`), and — while the job is still waiting — its position in the queue. Stop polling once `status` reaches a terminal state: `completed`, `failed`, or `cancelled`.
+
+```bash
+curl https://<host>/api/jobs/b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "status": "running",
+  "progress": { "current": 7, "total": 12, "message": "scoring threads" }
+}
+```
+
+A job moves `queued → running → completed`. On a retryable failure it may pass through `retryable_failed` and try again up to its attempt limit before landing on `failed`. You can request cancellation at any time; the evaluation run the job created is marked cancelled too.
+
+### 3. Load the result
+
+When the job completes, its `EvaluationRun` is ready. List your runs (filter by app, type, source, status, or free-text search) or fetch one by id to read its `summary` and full `result`.
+
+```bash
+# List runs for an app, newest first
+curl "https://<host>/api/eval-runs?appId=support-assistant&evalType=batch_thread" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+From a run you can drill into its per-conversation detail and the raw LLM call logs that back it.
+
+## Sharing and cleanup
+
+A run starts **private** to you. Share it to make it (and any reports generated from it) readable across your tenant. Deleting a run permanently removes its thread results, adversarial results, call logs, and the originating job — a run that is still `running` must be cancelled first.
+
+## API reference
+
+See the [API Reference](/docs/api) for full request and response schemas. The endpoints for this flow:
+
+- Submit a job — `POST /api/jobs`
+- List your jobs — `GET /api/jobs`
+- Poll a job's status — `GET /api/jobs/{job_id}`
+- Cancel a job — `POST /api/jobs/{job_id}/cancel`
+- List evaluation runs — `GET /api/eval-runs`
+- Get one run — `GET /api/eval-runs/{run_id}`
+- Drill into a run — `GET /api/eval-runs/{run_id}/threads`, `GET /api/eval-runs/{run_id}/adversarial`, `GET /api/eval-runs/{run_id}/logs`

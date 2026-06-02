@@ -1,0 +1,140 @@
+---
+title: Upload a dataset
+description: Upload a list of contacts as a versioned dataset and reference it from a workflow's source node.
+---
+
+A **dataset** is a named list of contacts — patients, leads, or any recipients — that a workflow can draw from. You upload a file (CSV is the common case), and the platform parses it, validates it, and stores it so your workflows can send messages or place calls to everyone in it.
+
+Datasets are **versioned**. Each time you upload a file you create a new *version*; you then *publish* the version you want workflows to use. This guide walks you through the whole loop: create a dataset, import a version, publish it, and reference it from a workflow.
+
+## How datasets are scoped
+
+A dataset belongs to **your tenant and one app**. It is never shared across tenants. You can optionally mark a dataset as *shared* so other users in your app can see it, or keep it *private* to yourself.
+
+Every action below requires a Bearer token. Creating, importing, publishing, and deleting all require the `orchestration:manage` permission; listing and reading a dataset only require access to the app.
+
+## The big picture
+
+<Mermaid chart={`
+flowchart TD
+  A[Create dataset<br/>empty named container] --> B[Import a version<br/>upload CSV, parse + validate]
+  B --> C[Publish the version]
+  C --> D[Workflow source node<br/>references dataset.&lt;versionId&gt;]
+  D --> E[Run the workflow<br/>contacts flow into nodes]
+  B -.re-upload.-> F[New version v2<br/>v1 stays pinned for old workflows]
+`} />
+
+A dataset starts as an empty container. You import a version into it, publish that version, and then a workflow's **source node** points at the version. Re-uploading later creates a new version without disturbing workflows still pinned to the old one.
+
+## Step 1 — Create the dataset
+
+First create the empty container. You give it a name (unique within the app) and choose its visibility.
+
+```bash
+curl -X POST https://YOUR_HOST/api/orchestration/datasets \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "appId": "inside-sales",
+    "name": "June outreach list",
+    "description": "Leads to contact this month",
+    "visibility": "private"
+  }'
+```
+
+The response includes the new dataset's `id` (a UUID). You'll use it in the next step. A duplicate name for the same app returns `409`.
+
+See the [API Reference](/docs/api) — `POST /api/orchestration/datasets`.
+
+## Step 2 — Import a version (upload your file)
+
+Now upload your file as a version. This is a `multipart/form-data` request. Alongside the file you declare three things that tell the platform how to read each row:
+
+| Field | Meaning |
+|---|---|
+| `idStrategy` | How each row's stable id is derived — from a column, or generated |
+| `idColumn` | The column to use as the id (when `idStrategy` needs one) |
+| `communicationColumn` | The column holding the contact's phone or email — the **communication key** |
+
+The communication key is what the platform uses to actually reach the contact (the number to call, the WhatsApp recipient). It is required.
+
+```bash
+curl -X POST https://YOUR_HOST/api/orchestration/datasets/$DATASET_ID/versions \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@leads.csv" \
+  -F "idStrategy=column" \
+  -F "idColumn=lead_id" \
+  -F "communicationColumn=phone"
+```
+
+The platform detects the format from the file, parses and validates every row, and stores the version as **unpublished**. The response carries the new version's `id` and `versionNumber`.
+
+A few things to know:
+
+- Unsupported formats or rows that fail validation return `400`.
+- An upload over the size limit returns `413`.
+- To see which formats and size limits are accepted before you build an upload form, call the formats endpoint — `GET /api/orchestration/datasets/formats`.
+
+See the [API Reference](/docs/api) — `POST /api/orchestration/datasets/{dataset_id}/versions`.
+
+## Step 3 — Preview the version (optional)
+
+Before publishing, you can fetch the version and ask for a sample of its rows to sanity-check the parse. Pass `sampleRows` to control how many rows come back (the server clamps very large requests rather than rejecting them).
+
+```bash
+curl "https://YOUR_HOST/api/orchestration/datasets/$DATASET_ID/versions/$VERSION_ID?sampleRows=5" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+See the [API Reference](/docs/api) — `GET /api/orchestration/datasets/{dataset_id}/versions/{version_id}`.
+
+## Step 4 — Publish the version
+
+A freshly imported version is not yet usable by workflows. Publishing marks it as the one workflows can bind to. A dataset has **at most one published version at a time**.
+
+```bash
+curl -X POST \
+  https://YOUR_HOST/api/orchestration/datasets/$DATASET_ID/versions/$VERSION_ID/publish \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Re-publishing an already-published version returns `409`.
+
+See the [API Reference](/docs/api) — `POST /api/orchestration/datasets/{dataset_id}/versions/{version_id}/publish`.
+
+## What versioning means
+
+Versioning protects running workflows from surprise changes:
+
+- Each upload into a dataset creates a **new version** (v1, v2, v3 …).
+- A workflow that uses a dataset is **pinned to a specific version**. If you upload v2, a workflow still pinned to v1 keeps reading v1 — its contact list does not silently change underneath it.
+- The platform exposes **every** version as a source, not just the latest, precisely so pinned workflows stay authorable and runnable.
+
+This is why "publish" is a separate, deliberate step: it's how you say *this* version is the one new workflows should pick up.
+
+## Step 5 — Reference the dataset from a workflow
+
+Inside a workflow, the **source node** is where contacts enter the flow. To use your uploaded dataset, the source node references it by a stable key of the form:
+
+```
+dataset.<versionId>
+```
+
+That `<versionId>` is the UUID of the version you published. When the workflow runs, the platform resolves that key, confirms the version belongs to your tenant, and feeds each contact's row — including its communication key — into the rest of the flow.
+
+A couple of details worth knowing:
+
+- Dataset sources work across workflow types (CRM, clinical, etc.) — they aren't limited to one.
+- Alongside your uploaded datasets, your app may also offer **built-in sources** (for example, CRM leads or a patient roster) that the platform maintains for you. Those use keys like `crm.lead_record` instead of `dataset.<versionId>`. Either kind plugs into the same source node.
+
+## Listing and managing datasets
+
+- List the datasets you can see in an app, optionally filtered by sharing state — `GET /api/orchestration/datasets?appId=inside-sales&visibility=all`.
+- Fetch one dataset with its version list and which version is published — `GET /api/orchestration/datasets/{dataset_id}`.
+- Rename or change a dataset's description/visibility — `PATCH /api/orchestration/datasets/{dataset_id}`. (Shared datasets you don't own are read-only.)
+- Delete a version — `DELETE /api/orchestration/datasets/{dataset_id}/versions/{version_id}`.
+- Delete the whole dataset — `DELETE /api/orchestration/datasets/{dataset_id}`.
+
+Deletes are protected: if a version is still referenced by a workflow, the delete is blocked with `409` and the response names the workflows using it. Remove the reference from those workflows first, then delete.
+
+See the full [API Reference](/docs/api) for every dataset endpoint.

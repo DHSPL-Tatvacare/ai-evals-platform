@@ -1,0 +1,102 @@
+---
+title: The assistant (Sherlock)
+description: Ask questions about your data in plain language and get back charts, tables, and proposed workflow edits.
+---
+
+Sherlock is the platform's built-in assistant. You talk to it in plain English — "how many calls did we run last week?", "show win rate by rep" — and it figures out how to answer, queries your data safely, and replies with a short written answer plus a chart or table when one helps.
+
+It is **conversational** (it remembers what you asked earlier in the chat), **read-only** (it never changes your evaluation data), and **scoped to you** — it only ever sees data for your tenant, your app, and your account. You don't need to know SQL, table names, or anything about how the data is stored.
+
+This page explains what Sherlock can do and how it works, in plain terms.
+
+## What you can ask
+
+Sherlock is focused on the data and workflows inside the app you're currently using (for example a calling app or a chat-bot app). It is good at:
+
+- **Analytics questions** — counts, rates, breakdowns, trends, and comparisons over your evaluation results. "What's the average score this month?", "Break down outcomes by agent", "Compare this week to last week."
+- **Follow-ups in context** — you can say "now just the failed ones" or "those reps from before" and it understands what you mean, because it keeps track of the conversation.
+- **Workflow edits (in the builder)** — when you're editing a workflow on the canvas, Sherlock can *propose* changes to it. More on this below.
+
+If a question is unclear, Sherlock asks you one short clarifying question instead of guessing. If a question isn't about your data (just chit-chat, or something the data can't answer), it tells you so politely rather than inventing a number.
+
+## How an answer gets built
+
+Behind the scenes, Sherlock works as a small team: a **supervisor** that runs the conversation, and focused **specialists** it hands work to. You don't manage any of this — it's automatic — but it helps to know the shape of it.
+
+<Mermaid chart={`
+flowchart TD
+    U[You ask a question] --> S[Supervisor]
+    S --> P[Plan: understand & break down the question]
+    P -->|analytics| D[Data specialist: write a safe query, build a chart]
+    P -->|workflow edit| A[Authoring specialist: propose canvas changes]
+    D --> R[Answer: text + chart/table]
+    A --> R
+    R --> U
+`} />
+
+1. **Understand** — Sherlock first rewrites your question so it stands on its own (resolving "those", "last week", and so on), and decides whether it's answerable, needs clarification, or is off-topic.
+2. **Plan** — it breaks the request into one or more sub-questions and routes each to the right specialist.
+3. **Query safely** — for analytics, the **data specialist** writes a database query, which is checked by a safety validator (see below) *before* it runs.
+4. **Visualize** — results are turned into a chart, KPI, table, or summary automatically. The right chart type is chosen for you.
+5. **Answer** — you get a concise written answer with the chart or table attached, and the numbers always come from the real result — never made up.
+
+You'll see this happen live as you watch: Sherlock streams its steps (planning, querying, charting) into the chat as it goes.
+
+## Read-only and safely scoped
+
+Two guarantees matter most:
+
+- **Read-only.** Sherlock can look at your data but never edits or deletes it. Every query it runs is checked to be a read, restricted to the tables it's allowed to see, and filtered to your tenant and app. A query that doesn't meet these rules is rejected before it ever touches the database.
+- **Per-tenant, per-user.** Sherlock only sees what you can see. It can't reach another tenant's or another user's data.
+
+Sherlock can also only query a **curated set of fields** that have been described for your app — not the entire raw database. This keeps answers reliable and meaningful, and means it won't surface half-empty or confusing columns.
+
+## Charts you can trust
+
+When a result is best shown visually, Sherlock builds the chart for you and picks the type — bar, grouped/stacked bar, line, area, or pie — based on the shape of the data. Some results are better as a single KPI number, a table, or a short summary, and Sherlock chooses that too. You never have to configure a chart; you just get the one that fits.
+
+## Editing workflows with Sherlock
+
+When you're **editing a workflow** in the builder canvas, Sherlock gains an extra ability: it can suggest changes to that workflow from a plain-English request, like "add a follow-up message two days later."
+
+Two things are always true here:
+
+- It only appears when you're actually in edit mode and you have permission to manage workflows.
+- It **proposes** edits — it never saves or publishes on its own. You review the suggested change and apply it yourself.
+
+## Remembering the conversation
+
+Sherlock keeps the thread of your conversation across turns, so you can keep refining without repeating yourself. Long conversations are automatically condensed in the background so context isn't lost — you'll occasionally see a small "summarized earlier messages" marker in the chat when this happens. There's nothing to manage; it just keeps working.
+
+## Using it through the API
+
+In the product you simply type in the chat panel. If you're integrating programmatically, the assistant is served by the report-builder v2 endpoints (the route group the assistant runs under). Messages stream back as you'd see them in the UI.
+
+```bash
+POST /api/report-builder/v2/chat/stream
+```
+
+To load or re-open a past conversation and its messages:
+
+```bash
+GET /api/report-builder/v2/sessions/{session_id}
+GET /api/report-builder/v2/sessions/{session_id}/parts
+```
+
+To stop a turn that's still running:
+
+```bash
+POST /api/report-builder/v2/sessions/{session_id}/turns/{turn_id}/cancel
+```
+
+See the [API Reference](/docs/api) for full request and response details — `POST /api/report-builder/v2/chat/stream`, `GET /api/report-builder/v2/sessions/{session_id}`, and `GET /api/report-builder/v2/sessions/{session_id}/parts`.
+
+## In short
+
+| You do | Sherlock does |
+|---|---|
+| Ask in plain English | Understands and plans the question |
+| Refine with follow-ups | Remembers the conversation |
+| Read the answer | Queries safely, read-only, scoped to you |
+| Glance at the chart | Picks and builds the right visual |
+| Edit a workflow | Proposes canvas changes for you to apply |

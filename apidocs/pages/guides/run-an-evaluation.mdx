@@ -1,0 +1,169 @@
+---
+title: Run an evaluation
+description: From picking an app to reading results — submit an evaluation job, poll it, and load the outcome.
+---
+
+An **evaluation** scores how well an AI application behaves — for example, how accurately a support assistant handles a batch of conversations, or how a voice agent performs against a set of test cases. On this platform an evaluation runs as a **background job**: you submit it, the system works on it asynchronously, and you poll until it finishes. This guide walks you through that flow end to end, with the exact API calls at each step.
+
+A few terms you'll meet along the way:
+
+- **App** — the AI application you're evaluating (for example a support assistant or a voice agent). Most data on the platform is scoped to one app.
+- **Job** — a long-running operation the platform executes in the background. Evaluations, reports, and backfills are all jobs.
+- **Evaluation run** — the record that holds an evaluation's outcome: status, scores, and the full structured result. One run per evaluation.
+- **Evaluator** — a reusable scoring definition (a prompt, an output schema, and the model to score with) used by custom evaluations.
+
+## The flow at a glance
+
+<Mermaid chart={`
+flowchart TD
+    A[Pick an app] --> B[Choose what to evaluate]
+    B --> C[POST /api/jobs<br/>submit job]
+    C --> D[Job queued]
+    D --> E[GET /api/jobs/&#123;id&#125;<br/>poll on a timer]
+    E -->|status: running| E
+    E -->|status: completed| F[GET /api/eval-runs/&#123;run_id&#125;<br/>read the result]
+    E -->|status: failed / cancelled| G[Read errorMessage]
+`} />
+
+## Step 1 — Pick an app
+
+Most evaluation calls require an `appId`. List the apps you have access to:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://your-host/api/apps
+```
+
+Each app returns its slug (the `appId` you'll use elsewhere), name, and description. See the [API Reference](/docs/api) — `GET /api/apps`.
+
+## Step 2 — Choose what to evaluate
+
+Decide the **eval type** — the shape of evaluation you want. The platform stores the outcome with one of these `evalType` values on the run:
+
+| eval type | What it covers |
+|---|---|
+| `custom` | A single item scored by an evaluator you select. |
+| `full_evaluation` | A complete evaluation pass for an app. |
+| `call_quality` | Quality scoring for a voice/call interaction. |
+| `batch_thread` | A batch of conversation threads scored together. |
+| `batch_adversarial` | A batch of adversarial test cases. |
+
+For a **custom** evaluation, you'll also pick an evaluator. List the evaluators available to you:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://your-host/api/evaluators?app_id=support-assistant"
+```
+
+See the [API Reference](/docs/api) — `GET /api/evaluators`. Note the `id` of the evaluator you want; you'll pass it in the job params.
+
+## Step 3 — Submit the evaluation job
+
+You start an evaluation by submitting a job to `POST /api/jobs`. The request body has two key fields:
+
+- `jobType` — the registered operation to run. For evaluations this is one of: `evaluate-batch`, `evaluate-adversarial`, `evaluate-custom`, `evaluate-custom-batch`, `evaluate-voice-rx`, or `evaluate-inside-sales`.
+- `params` — the inputs that job type expects (for example which dataset or evaluator to use).
+
+You do **not** send tenant, user, or app identity in the body — the platform injects your authenticated context automatically.
+
+```bash
+curl -X POST https://your-host/api/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: batch-2026-05-20-001" \
+  -d '{
+    "jobType": "evaluate-batch",
+    "params": { "listingIds": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"] }
+  }'
+```
+
+A successful submission returns **HTTP 201** with the new job:
+
+```json
+{
+  "id": "b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f",
+  "appId": "support-assistant",
+  "jobType": "evaluate-batch",
+  "status": "queued",
+  "progress": { "current": 0, "total": 12, "message": "queued" },
+  "queuePosition": 3,
+  "createdAt": "2026-05-20T09:20:00Z"
+}
+```
+
+Keep the `id` — that's the job you'll poll in Step 4.
+
+A few things worth knowing:
+
+- **Permissions.** Your bearer token must hold the permission the chosen `jobType` requires (for evaluation jobs, that's `evaluation:run`). Without it the request is rejected.
+- **Idempotency.** The optional `Idempotency-Key` header (≤120 characters) makes retries safe. Resubmitting with the same key returns the **original** job with **HTTP 200** instead of starting a duplicate.
+- **Unknown job type.** Submitting a `jobType` with no registered handler returns **HTTP 422** with the detail `Unknown job_type: '...'`.
+
+See the [API Reference](/docs/api) — `POST /api/jobs`.
+
+## Step 4 — Poll the job until it finishes
+
+After submitting, poll the job on a timer until it reaches a terminal state. Call `GET /api/jobs/{job_id}`:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://your-host/api/jobs/b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f
+```
+
+The response carries the live `status`, a `progress` counter the worker updates as it goes, and — while the job is still waiting — its `queuePosition`. Statuses you'll see:
+
+| status | Meaning |
+|---|---|
+| `queued` | Waiting for a worker. |
+| `running` | In progress; watch `progress`. |
+| `completed` | Done — go read the result. |
+| `failed` | Errored; check `errorMessage`. |
+| `cancelled` | Cancelled before finishing. |
+
+Stop polling once `status` is `completed`, `failed`, or `cancelled`. Only your own jobs are visible — fetching another user's job returns **HTTP 404**.
+
+See the [API Reference](/docs/api) — `GET /api/jobs/{job_id}`.
+
+To cancel a job that's still `queued` or `running`, call `POST /api/jobs/{job_id}/cancel`. Any evaluation run the job created is cancelled alongside it. (Jobs already `completed` or `failed` cannot be cancelled.)
+
+## Step 5 — Read the result
+
+When the job completes, the evaluation outcome lives in an **evaluation run**. Read it with `GET /api/eval-runs/{run_id}`:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://your-host/api/eval-runs/e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809
+```
+
+```json
+{
+  "id": "e1d2c3b4-a5f6-7081-92a3-b4c5d6e7f809",
+  "appId": "support-assistant",
+  "evalType": "batch_thread",
+  "status": "completed",
+  "jobId": "b7d3f0a1-2c4e-4a6b-8d0f-1a2b3c4d5e6f",
+  "summary": { "completed": 12, "errors": 0, "avg_intent_accuracy": 0.92 },
+  "durationMs": 84210,
+  "llmProvider": "azure-openai",
+  "llmModel": "gpt-4.1",
+  "createdAt": "2026-05-20T09:25:00Z",
+  "completedAt": "2026-05-20T09:26:24Z"
+}
+```
+
+What the run gives you:
+
+- `summary` — a quick-access digest for list views: a headline score, a verdict, and counts.
+- `status`, `durationMs`, `completedAt` — execution details.
+- `llmProvider` / `llmModel` — the model that ran the evaluation.
+- `jobId` — links back to the job you polled.
+
+For batch evaluations, the per-item detail is exposed through companion endpoints — `GET /api/eval-runs/{run_id}/threads` for conversation-thread results and `GET /api/eval-runs/{run_id}/adversarial` for adversarial test-case results.
+
+To find runs you don't have the id for, list them with `GET /api/eval-runs` (filterable by app and run type). See the [API Reference](/docs/api) — `GET /api/eval-runs` and `GET /api/eval-runs/{run_id}`.
+
+## What's next
+
+- Browse all evaluation jobs you've submitted with `GET /api/jobs`.
+- Compare runs over time with the trends and summary endpoints under `GET /api/eval-runs/trends` and `GET /api/eval-runs/stats/summary`.
+- Explore the full surface in the [API Reference](/docs/api).

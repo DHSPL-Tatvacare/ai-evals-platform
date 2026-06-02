@@ -1,0 +1,117 @@
+---
+title: Connect a CRM / event source
+description: Let an external system trigger a workflow by POSTing events to a secure per-trigger webhook URL.
+---
+
+Some of your workflows should run on their own — the moment a lead is created in your CRM, the second a patient enrols in a program, or whenever any external system has something to say. This guide shows you how to wire that up.
+
+The pattern is simple: you give one external system a private URL. When something happens over there, it sends an event to that URL, and the matching workflow fires automatically. No polling, no manual kick-off.
+
+## How it works
+
+An **event** is a small JSON message describing something that happened — for example, "a lead was created." A **workflow** is the automation you want to run in response. A **trigger** is the bridge between them: it listens for one kind of event and starts the workflow when that event arrives.
+
+Each trigger has its own **webhook token** — a long, unguessable string baked into a URL. That token is the credential. It resolves to exactly one trigger, which means one workflow and one tenant. There is no shared secret and no "default tenant" fallback: a token either matches one trigger or it matches nothing.
+
+<Mermaid chart={`
+flowchart LR
+  CRM[External system\nCRM / clinical / app] -->|POST event JSON| URL[Webhook URL\n/event/vendor/token]
+  URL -->|token resolves| TRIG[One trigger\none workflow + tenant]
+  TRIG -->|adapter maps\nnative to canonical| EV[Canonical event\ne.g. crm.lead.created]
+  EV -->|fire| RUN[Workflow runs\nfor each recipient]
+  EV -.->|also resume| WAIT[Recipients already\nwaiting on this event]
+`} />
+
+When an event arrives, the platform does the work for you:
+
+1. The **vendor adapter** verifies the request and reads the native payload.
+2. It maps the vendor's own event name to a **canonical event** name the platform understands (for example, LeadSquared's `LeadCreation` becomes `crm.lead.created`).
+3. It fires the workflow once for each **recipient** named in the event (a lead, a patient, a contact).
+4. As a bonus, any recipients already parked at a "wait for this event" step in a running workflow are resumed too.
+
+The endpoint always answers `200 OK` once the event is accepted, even if it maps to nothing — so the sending system stops retrying instead of hammering the URL.
+
+## Supported event sources
+
+The `{vendor}` slot in the URL selects which adapter handles the payload. The platform ships with:
+
+| Vendor key | Source | Canonical events |
+| --- | --- | --- |
+| `lsq` | LeadSquared CRM | `crm.lead.*`, `crm.activity.logged`, `crm.landing_page.submitted` |
+| `frappe` | Frappe / Frappe CRM | `crm.lead.*`, `crm.deal.*`, `crm.task.*`, `crm.contact.created`, `crm.call.logged` |
+| `mytatva` | Clinical patient journey | `clinical.program.enrolled`, `clinical.appointment.booked`, `clinical.refill.due`, and more |
+| `webhook` | Generic identity passthrough | Whatever canonical `event_name` you send |
+
+Use `webhook` when you control the sending system and can format the payload yourself. The other adapters translate a vendor's native shape so you don't have to.
+
+## Step 1 — Create a trigger on your workflow
+
+In the workflow builder, add an **event trigger** to the workflow you want to automate and choose the vendor and the event to listen for (for example, `crm.lead.created`). Saving the trigger generates its webhook token and full URL. Copy that URL — it is the only place the token is shown in plain form.
+
+The URL looks like this:
+
+```
+https://<your-platform-host>/api/orchestration/webhooks/event/{vendor}/{token}
+```
+
+## Step 2 — Register the URL in your source system
+
+Paste the URL into your CRM or clinical system's outgoing-webhook settings.
+
+- **LeadSquared:** add it as a webhook action on the lead/activity events you care about.
+- **Frappe:** add it as an outgoing webhook on the doctype + doc-event you want (e.g. Lead `after_insert`). Frappe sends the bound event in the `X-Frappe-Event` header.
+- **Generic (`webhook`):** point any system at the URL and send the canonical payload shown below.
+
+## Step 3 — Send a test event
+
+Fire a sample event to confirm the wiring. For the generic `webhook` vendor, the body is already in canonical form:
+
+```bash
+curl -X POST \
+  "https://<your-platform-host>/api/orchestration/webhooks/event/webhook/<token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_name": "crm.lead.created",
+    "recipients": [
+      { "recipient_id": "lead-123", "payload": { "phone": "+91...", "name": "Asha" } }
+    ]
+  }'
+```
+
+A successful response tells you how many workflow runs were created:
+
+```json
+{
+  "status": "ok",
+  "runsCreated": 1,
+  "deduped": false,
+  "runIds": ["c1a2b3d4-e5f6-7081-92a3-b4c5d6e7f809"]
+}
+```
+
+If `runsCreated` is `0`, the event was accepted but matched no canonical event for that trigger — check that the event name you sent matches the one the trigger listens for.
+
+## Reading the response
+
+| Field | Meaning |
+| --- | --- |
+| `status` | Always `ok` once the event is accepted. |
+| `runsCreated` | How many workflow runs this event started. |
+| `deduped` | `true` when a duplicate event was suppressed (the same event arriving twice creates one run, not two). |
+| `runIds` | The IDs of the runs created — use these to look up progress. |
+
+## When something goes wrong
+
+The endpoint returns a plain `404 not found` for any token problem — unknown token, inactive trigger, wrong vendor, or a failed signature check. This is deliberate: it never reveals which condition failed, so a bad token can't be probed. If you get a `404`, re-copy the URL from the trigger and confirm the vendor in the URL matches the trigger.
+
+Other responses:
+
+- **`400`** — the event payload breaks the trigger's contract — most often it names no recipients at all.
+- **`409`** — the trigger exists but isn't configured for the event you sent.
+- **`413`** — the body is too large, or one event names too many recipients.
+
+## API reference
+
+See the [API Reference](/docs/api) — `POST /api/orchestration/webhooks/event/{vendor}/{token}`.
+
+This endpoint is **public**: it takes no auth header. The token in the URL path is the only credential, so treat the full URL as a secret and regenerate the trigger if it leaks.

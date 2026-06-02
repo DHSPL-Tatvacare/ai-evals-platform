@@ -1,0 +1,93 @@
+---
+title: Getting started
+description: A first-run orientation — what you can do, how to sign in, and how to run your first evaluation.
+---
+
+Welcome. The TatvaCare AI Platform is where product, QA, and operations teams measure and improve their production AI workflows. You can score model outputs, review the evidence behind each score, compare runs over time, generate reports, run outbound messaging and voice campaigns, and ask questions of your results in plain language.
+
+This page gets you oriented in a few minutes: what the platform does, how to sign in, how it is organized, and where to go to run your first evaluation.
+
+## What you can do here
+
+The platform brings several jobs under one roof:
+
+- **Run evaluations** — score AI outputs (transcripts, chat replies, call quality) against evaluators you configure.
+- **Review evidence** — open any result to see the inputs, the output, and the reasoning behind each score.
+- **Compare runs** — track quality across versions and spot regressions or drift.
+- **Generate reports** — turn evaluation results into shareable, formatted reports.
+- **Orchestrate workflows** — build messaging (WhatsApp / SMS), voice, and CRM workflows that run as background jobs.
+- **Ask in plain language** — use the built-in assistant (Sherlock) to query your results conversationally.
+
+## Signing in
+
+You sign in with an **email and password**. If you are joining an existing team, an administrator sends you an **invite link** — open it, set your password, and your account is created with the role they chose for you.
+
+When you log in, the platform issues a short-lived **access token** (valid for 15 minutes) and a long-lived refresh token stored as a secure cookie. The app refreshes the access token for you automatically, so you stay signed in without re-entering your password.
+
+Your profile carries everything that shapes what you see:
+
+| Field | What it means |
+| --- | --- |
+| `tenantName` | Your organization (your tenant). |
+| `roleName` | Your role, e.g. Owner or Analyst. |
+| `permissions` | What you are allowed to *do* (run, view, export, manage). |
+| `appAccess` | Which apps (workspaces) you can open. |
+
+Passwords must be at least 8 characters with an uppercase letter, a lowercase letter, a number, and a special character.
+
+See the [API Reference](/docs/api) — `POST /api/auth/login` to authenticate, and `GET /api/auth/me` to load your profile.
+
+```bash
+curl -X POST https://<your-host>/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "<your-password>"}'
+```
+
+A successful response returns your access token and profile:
+
+```json
+{
+  "accessToken": "<jwt>",
+  "user": {
+    "email": "you@example.com",
+    "tenantName": "Acme Health",
+    "roleName": "Analyst",
+    "permissions": ["evaluation:run", "report:run"],
+    "appAccess": ["voice-rx", "kaira-bot"]
+  }
+}
+```
+
+## How the platform is organized
+
+Your work is grouped into **apps** — think of an app as a workspace dedicated to one AI use case. You pick an app first, and everything you do (datasets, evaluations, reports, workflows) lives inside it. Your `appAccess` decides which ones you can open.
+
+| App | Use case |
+| --- | --- |
+| `voice-rx` | Medical transcription and structured extraction quality. |
+| `kaira-bot` | Chat quality, custom evaluators, batch and adversarial testing. |
+| `inside-sales` | Call-quality evaluation, reporting, and outbound orchestration. |
+
+Two ideas sit underneath every app:
+
+- **Tenant** — your organization. All your data is scoped to your tenant; you never see another organization's work.
+- **Role and permissions** — your role grants permissions using four verbs: **view**, **run**, **export**, and **manage**. Admin screens stay admin-only.
+
+Here is the path from signing in to seeing a result:
+
+<Mermaid chart={`
+flowchart LR
+  A[Sign in] --> B[Load profile<br/>tenant · role · apps]
+  B --> C[Choose an app<br/>workspace]
+  C --> D[Run an evaluation]
+  D --> E[Review scores<br/>+ evidence]
+  E --> F[Compare · report · ask]
+`} />
+
+## Your first evaluation
+
+Once you have signed in and opened an app, you are ready to run something. An **evaluation** takes your AI outputs and an **evaluator** (the rule or model that assigns a score), runs them, and gives you per-result scores with the evidence attached. Longer evaluations run as **background jobs** — you submit them, the platform works in the background, and the results load when they are ready.
+
+For the full, step-by-step walkthrough, head to the **Running your first evaluation** guide in the Documentation tab. To explore the endpoints directly, the [API Reference](/docs/api) has an interactive playground for every route.
+
+> More guides — connecting providers and CRMs, building workflows, uploading datasets, and using the assistant — are being migrated into this portal and will appear in the Documentation tab.

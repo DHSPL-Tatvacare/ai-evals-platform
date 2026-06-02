@@ -1,0 +1,117 @@
+---
+title: Use the assistant
+description: Ask the in-app analytics assistant questions, read its answers and charts, follow up, and propose workflow edits.
+---
+
+The assistant (codename **Sherlock**) is a built-in analyst you can talk to in plain English. Ask a question about your evaluation data and it writes the query for you, runs it, and replies with a short written answer plus a chart or table when the numbers call for one.
+
+You never write SQL. You never pick a chart type. You ask a question the way you'd ask a teammate, and the assistant does the rest — grounded only in your data, for the app you're currently in.
+
+## What it can do
+
+The assistant is **scoped to one app at a time** (for example your voice, bot, or sales app) and is **read-only** — it looks at your evaluation results but never changes them. Within that scope it can:
+
+- **Answer analytics questions** — counts, trends, breakdowns, comparisons over your evaluation data.
+- **Show the answer as a chart or table** — it decides the right shape (bar, line, pie, KPI number, or a plain table) for you.
+- **Hold a conversation** — it remembers what you just asked, so follow-ups like "now break that down by week" work without repeating yourself.
+- **Propose workflow edits** — when you're inside the workflow builder in edit mode and have permission to manage workflows, you can ask it to draft changes to the canvas. It only *proposes*; you review and save.
+
+It will politely decline questions that aren't about your data, and it will ask one clarifying question if your request is ambiguous rather than guessing.
+
+## How a turn works
+
+When you send a message, the assistant runs a short, predictable cycle behind the scenes. You don't need to manage any of this — it's shown here so you know what the streaming updates in the chat mean.
+
+<Mermaid chart={`
+flowchart TD
+  A[You ask a question] --> B[Understand and rephrase it]
+  B --> C{Is it answerable<br/>from your data?}
+  C -- No, unclear --> D[Asks you one<br/>clarifying question]
+  C -- No, off-topic --> E[Polite decline]
+  C -- Yes --> F[Writes and checks a query]
+  F --> G[Runs it on your data]
+  G --> H[Picks a chart or table]
+  H --> I[Written answer + chart/table + sources]
+`} />
+
+As the turn runs, you'll see live status lines (the assistant thinking, querying, building a chart). The final reply lands as a short written answer, with a chart or table card and source references attached when relevant.
+
+## Asking a good question
+
+Be specific about **what**, **how to group it**, and **over what period**. The more concrete the ask, the tighter the answer.
+
+Example questions you can paste in as-is:
+
+```text
+How many evaluations did we run last week?
+Show me the average score by evaluator over the last 30 days.
+Which days had the most failed runs this month?
+Break down evaluation outcomes by status as a pie chart.
+What's the trend in pass rate week over week?
+Compare this week's volume to last week's.
+```
+
+Tips:
+
+- **Name a time window** ("last 7 days", "in May") so the assistant doesn't have to guess.
+- **Say how to slice it** ("by evaluator", "by status", "by day").
+- If you only care about the top results, say so ("top 10 by volume"). The assistant is honest about cardinality — if there's more data than it showed, it'll tell you "top N of more".
+
+## Reading the answer
+
+Every reply has up to three parts:
+
+| Part | What it is |
+|---|---|
+| **Written answer** | A direct 1–3 sentence summary. Key numbers are bolded. |
+| **Chart or table** | A rendered card the assistant chose for the data — a bar/line/pie chart, a single KPI number, or a plain table. |
+| **Sources** | References to the underlying rows, shown separately so the prose stays clean. |
+
+The numbers in the written answer always come from the chart or table — the assistant never invents figures. If a question genuinely has no data, it says so plainly instead of showing an empty chart.
+
+## Following up
+
+The assistant remembers the current conversation, so you can keep refining without re-stating context. Each of these works as a follow-up to an earlier question:
+
+```text
+Now group that by week instead of by day.
+Just the top 5.
+Show that as a line chart.
+What about for the previous month?
+And for the failed ones only?
+```
+
+References like "those reps", "that period", or "the same chart but..." are resolved automatically from the conversation so far.
+
+If a thread gets long, you may occasionally see a short "summary" separator in the chat — that's the assistant compacting older context to stay fast. Your conversation continues seamlessly; nothing is lost.
+
+## Proposing workflow changes (edit mode)
+
+When you're in the **workflow builder**, viewing a workflow in **edit mode**, and you have permission to manage workflows, the assistant gains an extra ability: it can **propose edits to the canvas**.
+
+Ask in plain English, for example:
+
+```text
+Add a step that waits 3 days before the next message.
+Insert a WhatsApp message after the call step.
+Change the wait on this node to 15 minutes.
+```
+
+The assistant returns the change as a **proposed canvas patch** for you to review. It will **never** save or publish on its own — you apply the change manually after looking it over. If a workflow is very large, the assistant may ask you to open the specific node you want to edit and try again.
+
+This ability only appears when all three conditions are met (builder open, edit mode, manage permission). Outside the builder, the assistant stays focused on answering questions about your data.
+
+## Where to find it
+
+The assistant lives as a chat panel inside your app's workspace. Admin pages don't show it, since they have no app data context.
+
+## For developers
+
+The chat is powered by a streaming API. Your messages post to a streaming endpoint, and the conversation is rebuilt from a stored event log so a refresh never loses the thread.
+
+See the [API Reference](/docs/api):
+
+- `POST /api/report-builder/v2/chat/stream` — send a message and stream the assistant's reply.
+- `GET /api/report-builder/v2/sessions/{session_id}` — load a chat session.
+- `GET /api/report-builder/v2/sessions/{session_id}/parts` — replay a session's event stream (used to rehydrate the conversation).
+- `POST /api/report-builder/v2/sessions/{session_id}/turns/{turn_id}/cancel` — cancel an in-progress reply.

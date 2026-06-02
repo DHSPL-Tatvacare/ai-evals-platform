@@ -1,0 +1,15 @@
+{
+  "name": "tatvacare-apidocs",
+  "private": true,
+  "type": "module",
+  "description": "TatvaCare AI Platform — documentation + API reference (Zudoku).",
+  "scripts": {
+    "gen-spec": "cd .. && PYTHONPATH=backend python -c \"import json; from app.main import app; open('apidocs/apis/openapi.json','w').write(json.dumps(app.openapi(), indent=2))\"",
+    "dev": "zudoku dev",
+    "build": "zudoku build",
+    "preview": "zudoku preview"
+  },
+  "dependencies": {
+    "zudoku": "latest"
+  }
+}

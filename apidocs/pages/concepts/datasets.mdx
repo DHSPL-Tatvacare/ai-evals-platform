@@ -1,0 +1,184 @@
+---
+title: Datasets & cohorts
+description: How audiences are uploaded, versioned, and fed into a workflow.
+---
+
+A workflow has to know *who* it runs for — which contacts to message, call, or
+enroll. On this platform, that "who" comes from one of two audience sources: a
+**dataset** or a **cohort**. This page explains what each is, how you upload and
+version them, and how a workflow draws contacts from them.
+
+If you are new here, the short version is: a **dataset** is a file you upload (a
+list of contacts), and a **cohort** is a saved set of rules that selects
+contacts from an existing system (like your CRM or patient roster). Both end up
+feeding the same place — the **source node** at the start of a workflow.
+
+## Datasets vs. cohorts at a glance
+
+| | Dataset | Cohort |
+|---|---|---|
+| What it is | An uploaded file of contacts | A saved, rule-based audience definition |
+| Where the data lives | Rows you imported | An existing table (CRM leads, patient roster) |
+| You provide | The actual contacts | The rules that select contacts |
+| Source node | `source.dataset` | `source.cohort` |
+| Versioned | Yes — each upload is a version | Yes — each edit is a version |
+
+Both are **tenant-owned** and **app-scoped**: they belong to your organization
+and to a specific app (workspace), and you only ever see the ones you have
+access to.
+
+## Datasets — upload your own contacts
+
+A **dataset** is a named container. By itself it holds nothing; you fill it by
+importing **versions**, where each version is one uploaded file (for example, a
+CSV of leads). This container-and-versions shape is what lets you re-upload a
+fresh list next month without losing the one a workflow is already using.
+
+### The lifecycle of a dataset
+
+1. **Create** the dataset — give it a name and description.
+2. **Import a version** — upload a file. The new version starts *unpublished*.
+3. **Publish** the version you want workflows to use.
+4. **Re-import later** — uploading again creates the next version (v2, v3, …).
+   Workflows pinned to v1 keep working; you publish v2 only when you are ready.
+
+<Mermaid chart={`
+flowchart LR
+  A[Create dataset] --> B[Import version<br/>upload file]
+  B --> C{Publish?}
+  C -->|yes| D[Published version]
+  C -->|not yet| E[Unpublished draft]
+  D --> F[Workflow binds<br/>via source.dataset]
+  B -.re-upload.-> G[Next version v2]
+`} />
+
+### What you declare when importing
+
+When you import a version you tell the platform how to read each row:
+
+- **Identity** (`id_strategy`, and `id_column` when needed) — how each row's
+  stable id is derived: from a column in your file (`id_strategy=column`), or
+  generated automatically.
+- **Communication key** (`communication_column`) — which column holds the
+  contact's phone or email. This is how a workflow knows where to send a
+  message or place a call.
+
+These are sent as `multipart/form-data` fields alongside the uploaded file.
+
+The file format is detected automatically. To see what's accepted —
+extensions, MIME types, and the upload size limit — call the formats endpoint.
+A version is parsed and validated *before* it is stored, so a bad file fails
+fast with a clear error instead of breaking a run later.
+
+### Versioning, in one sentence
+
+A dataset has **at most one published version at a time**; re-uploading creates
+a new unpublished version, and workflows stay pinned to whatever version they
+were bound to until you publish a newer one.
+
+See the [API Reference](/docs/api) for the dataset surface:
+
+- `POST /api/orchestration/datasets` — create a dataset
+- `GET /api/orchestration/datasets` — list datasets for an app
+- `GET /api/orchestration/datasets/formats` — supported import formats
+- `POST /api/orchestration/datasets/{dataset_id}/versions` — import a version (`multipart/form-data`)
+- `POST /api/orchestration/datasets/{dataset_id}/versions/{version_id}/publish` — publish a version
+- `GET /api/orchestration/datasets/{dataset_id}/versions/{version_id}` — preview a version's rows
+
+```bash
+# Import a CSV as a new dataset version
+curl -X POST \
+  "$BASE/api/orchestration/datasets/$DATASET_ID/versions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@leads.csv" \
+  -F "id_strategy=column" \
+  -F "id_column=lead_id" \
+  -F "communication_column=phone"
+```
+
+## Cohorts — rule-based audiences
+
+A **cohort** is a reusable, versioned audience *definition*. Instead of
+uploading rows, you save a set of rules that select contacts from data the
+platform already knows about — for example, "CRM leads created in the last 7
+days" or "patients with a primary condition of X". The actual contacts are
+resolved at run time from the underlying system, so a cohort always reflects the
+current state of that data.
+
+### The lifecycle of a cohort
+
+Cohorts version the same way datasets do, but you edit *rules* rather than
+upload files:
+
+1. **Create** the cohort — give it a slug, name, and an initial set of rules.
+   This becomes the first **draft** version.
+2. **Edit the draft** as you refine the rules. Drafts are editable.
+3. **Publish** a version to make it the cohort's active definition. Published
+   versions are **immutable** — to change them, you create a new draft.
+
+<Mermaid chart={`
+flowchart LR
+  A[Create cohort<br/>initial rules] --> B[Draft version]
+  B -->|edit rules| B
+  B -->|publish| C[Published version<br/>immutable]
+  C --> D[Workflow binds<br/>via source.cohort]
+  C -.refine.-> E[New draft]
+`} />
+
+### Where a cohort's contacts come from
+
+A cohort points at a **registered source** by a stable key (`source_ref`) such
+as `crm.lead_record` (CRM leads) or `clinical.dim_patient` (patient roster).
+These sources are defined by engineering, not by you — that keeps "what fields
+exist on a contact" a stable contract rather than a free-form string in every
+workflow. When you author cohort rules, the builder offers you exactly the
+fields that source exposes for filtering and for carrying into the message
+payload.
+
+Every cohort query is automatically filtered to your tenant and app, so a cohort
+can never select contacts outside your scope.
+
+See the [API Reference](/docs/api) for the cohort surface:
+
+- `POST /api/orchestration/cohorts` — create a cohort
+- `GET /api/orchestration/cohorts` — list cohorts for an app
+- `POST /api/orchestration/cohorts/{cohort_id}/versions` — add a draft version
+- `PATCH /api/orchestration/cohorts/{cohort_id}/versions/{version_id}` — edit a draft
+- `POST /api/orchestration/cohorts/{cohort_id}/versions/{version_id}/publish` — publish a version
+- `GET /api/orchestration/cohorts/{cohort_id}/used-by` — see which workflows use it
+
+## How a workflow consumes them
+
+Every workflow begins with a **source node** — the step that produces the
+contacts the rest of the flow acts on. The source node comes in two flavors that
+map directly to the two audience types:
+
+- **`source.dataset`** — draws contacts from a published dataset version.
+- **`source.cohort`** — draws contacts from a published cohort version (which in
+  turn resolves rows from its registered source).
+
+At run time, the platform resolves whichever source the node references, applies
+the tenant + app filter, and hands the resulting contacts — each carrying its
+identity and communication key — to the next node in the workflow.
+
+<Mermaid chart={`
+flowchart LR
+  DS[Dataset<br/>published version] --> SN1[source.dataset]
+  CO[Cohort<br/>published version] --> SN2[source.cohort]
+  SN1 --> WF[Workflow steps:<br/>message · call · wait · branch]
+  SN2 --> WF
+`} />
+
+## Safe edits and deletes
+
+Because workflows bind to a specific version, the platform protects you from
+pulling the rug out from under a running flow:
+
+- Deleting a **dataset**, dataset **version**, or **cohort** that is still
+  referenced by a workflow is blocked. The error lists which workflows are using
+  it so you can resolve the dependency first.
+- Use `GET /api/orchestration/cohorts/{cohort_id}/used-by` to check the impact
+  *before* you edit or delete a cohort.
+
+This way, your audiences stay versioned, traceable, and safe to change — even
+while live workflows depend on them.

@@ -1,0 +1,149 @@
+---
+title: Workflows & orchestration
+description: How a workflow turns a list of contacts into automated, multi-step outreach across WhatsApp, voice, and APIs.
+---
+
+A **workflow** is an automated journey you design once and run many times. It pulls in a set of contacts, decides who should continue, takes actions on their behalf (a WhatsApp message, an AI voice call, an API request), waits when it needs to, and finishes. You build it visually on a canvas, publish it, and the platform runs it for you in the background.
+
+This page explains the pieces — nodes, triggers, runs — and the one idea that makes outreach reliable: **dispatch and reconcile**. By the end you'll know how to read a workflow and how to launch one.
+
+## A workflow is a graph of nodes
+
+Every workflow is a **graph**: a set of boxes (nodes) connected by arrows (edges). Each node does one job, then hands the contact to the next node along an edge. There is always a beginning (a source) and an end (a sink).
+
+Nodes fall into a few neutral categories. These are the building blocks you'll see in the palette:
+
+| Category | Example node | What it does |
+| --- | --- | --- |
+| Ingress (source) | Cohort, Dataset, Event Trigger | Brings contacts into the run |
+| Qualification (filter) | Eligibility Filter | Continues only with contacts that match a rule |
+| Routing (logic) | Conditional Branch, Segment Split | Sends contacts down different paths |
+| Suspension | Wait Condition | Pauses until a delay elapses or an event arrives |
+| Synchronization | Path Merge | Reconverges split branches back into one path |
+| Dispatch (action) | Send WhatsApp template, Place voice call, Webhook Dispatch | Takes a real-world action via a connected provider |
+| AI | AI Agent | Runs a prompt per contact and saves structured fields back |
+| Termination (sink) | Workflow Complete | Ends the run for that contact |
+
+A typical workflow reads left to right: **source → filter / logic → action → sink.**
+
+- A **source** node starts the journey. It can pull from a saved cohort, a specific uploaded dataset, or fire on an external event. A source needs no incoming arrow and exactly one outgoing arrow.
+- **Filter** and **logic** nodes shape the audience — keep only eligible contacts, branch on a condition, or split by percentage.
+- **Action (dispatch)** nodes do the real work: send a templated WhatsApp message, place an AI voice call, or call an external API with a JSON body built from each contact's attributes.
+- A **sink** node ends the run. It is *terminal* — it has no outgoing arrow.
+
+Each action node exposes labelled outgoing edges (for example **Sent** / **Failed**, or **Success** / **Exhausted**) so you can route success and failure to different next steps.
+
+<Mermaid chart={`
+flowchart LR
+    Src["Source<br/>(cohort / dataset / event)"] --> Filt["Eligibility Filter"]
+    Filt -->|Passed| Cond["Conditional Branch"]
+    Filt -->|Skipped| EndA["Workflow Complete"]
+    Cond -->|Branch A| WA["Send WhatsApp template"]
+    Cond -->|Branch B| Call["Place voice call"]
+    WA -->|Sent| Wait["Wait Condition"]
+    WA -->|Failed| EndB["Workflow Complete"]
+    Call -->|Placed| Wait
+    Wait -->|Event / Wake-up| EndC["Workflow Complete"]
+`} />
+
+## How a workflow runs: trigger → run → steps
+
+You build a workflow as a **draft**, then **publish** it to create an immutable **version**. Publishing freezes the graph so a workflow already in flight never changes underneath you. Each launch is a **run**, always tied to the exact published version it executed.
+
+A run starts from a **trigger**. There are three kinds:
+
+- **Manual** — you press Run Now and pick the version to execute.
+- **Cron** — the run fires on a schedule (a cron expression).
+- **Event** — an external system (for example a new CRM lead) posts to a per-trigger webhook URL, and that single token resolves exactly one workflow for one tenant.
+
+When a run begins, the platform **freezes the audience** at that moment — the set of contacts (the cohort size at entry) is recorded so the run is reproducible. From there each contact moves through the graph independently. The platform tracks progress at three levels:
+
+- **Run** — the whole launch: `pending → running → waiting → completed` (or `failed` / `cancelled`).
+- **Node step** — one node's execution within the run.
+- **Recipient state** — where each individual contact currently sits in the graph, including whether it's `waiting` and when it should wake up.
+
+Long-running work never blocks a request. A run executes as a background job — you submit it, then poll or stream its progress.
+
+## Dispatch and reconcile, in plain terms
+
+When a workflow takes an external action — sending a WhatsApp message or placing a voice call — two things have to happen, and they happen at different times:
+
+1. **Dispatch.** The platform hands the action to the provider and writes down a record with the provider's reference id (the *correlation id*). At this point the message is *sent*, but its real-world fate (delivered? answered? failed?) isn't known yet.
+2. **Reconcile.** Later, the platform learns the true outcome and records it. This is the *reconcile* step, and it arrives by two independent paths:
+   - **Polling (primary)** — the platform periodically asks the provider "what happened to this action?" wherever the provider offers a status API.
+   - **Webhook (secondary / real-time)** — the provider pushes the outcome to the platform as it happens. For providers with no status API, the webhook is the *only* path.
+
+Both paths converge on the **same** record using that correlation id, so they can't disagree, and the same outcome applied twice is harmless (it's idempotent). The practical guarantee: **correctness never depends on a webhook arriving** — if a push is missed, polling still closes the loop.
+
+This is what lets a **Wait Condition** work safely. A wait can pause a contact until a delay passes *or* until an awaited event arrives (for example, a WhatsApp reply or a completed call). Because the outcome is reconciled reliably, the contact wakes up and continues down the correct edge.
+
+<Mermaid chart={`
+sequenceDiagram
+    participant WF as Workflow run
+    participant PR as Provider (WhatsApp / Voice)
+    WF->>PR: Dispatch action (send / place call)
+    PR-->>WF: Accepted + correlation id
+    Note over WF,PR: Action recorded as "sent", outcome unknown
+    par Polling (primary)
+        WF->>PR: Poll status by correlation id
+        PR-->>WF: Terminal outcome
+    and Webhook (secondary)
+        PR->>WF: Push outcome (real-time)
+    end
+    Note over WF: Both converge on the same record (idempotent)
+    WF->>WF: Wake waiting contact, route to next node
+`} />
+
+## Putting it together
+
+A complete, runnable workflow needs, at minimum, a **source**, at least one **action**, and a **sink**, wired into one connected graph. Before you can publish, the platform validates the graph — every node that requires an incoming or outgoing edge must have one, and terminal nodes must not dangle anything after them.
+
+A good first workflow looks like this:
+
+1. **Source** — pick a cohort or dataset of contacts.
+2. **Eligibility Filter** — keep only the contacts you want to reach.
+3. **Send WhatsApp template** — the action, via a connected provider.
+4. **Wait Condition** — pause for a reply or a timeout.
+5. **Workflow Complete** — end the journey.
+
+Publish it, attach a trigger, and launch.
+
+## Using the API
+
+Everything above is available through the API under the **orchestration** tag. See the [API Reference](/docs/api) for full request and response shapes. The core lifecycle:
+
+```bash
+# 1. Create a workflow (draft)
+POST /api/orchestration/workflows
+
+# 2. Save edits to the draft graph
+PUT  /api/orchestration/workflows/{workflow_id}/draft
+
+# 3. Validate the graph before publishing
+POST /api/orchestration/workflows/validate
+
+# 4. Publish — freezes an immutable version
+POST /api/orchestration/workflows/{workflow_id}/publish
+
+# 5. Attach a trigger (manual / cron / event)
+POST /api/orchestration/workflows/{workflow_id}/triggers
+
+# 6. Launch a run
+POST /api/orchestration/runs
+```
+
+To watch a run after launch:
+
+- Poll the run — `GET /api/orchestration/runs/{run_id}`
+- Stream live progress — `GET /api/orchestration/runs/{run_id}/stream`
+- See per-contact actions — `GET /api/orchestration/runs/{run_id}/actions`
+- Cancel in flight — `POST /api/orchestration/runs/{run_id}/cancel`
+
+The palette of node types your tenant can use is served by `GET /api/orchestration/node_types`. Sources (cohorts and datasets) and provider connections are managed under `GET /api/orchestration/cohorts`, `GET /api/orchestration/datasets`, and `GET /api/orchestration/connections` respectively.
+
+Workflows are scoped to your tenant and application — you only ever see and run your own.
+
+## Next steps
+
+- **[Configure nodes →](/docs/guides/configure-nodes)** — the full node catalog with a per-node settings table for every node type.
+- **[Build a workflow →](/docs/guides/build-a-workflow)** — a step-by-step walkthrough on the canvas.

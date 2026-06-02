@@ -1,0 +1,445 @@
+---
+title: Configure nodes
+description: The per-node reference for the orchestration builder — every node's config fields, what to put in each, and its output edges.
+---
+
+A **workflow** is a graph of nodes. Each node does one job — pull a list of contacts, check a rule, wait, send a message, place a call, run an AI step, or end the run — and passes the surviving contacts down an outgoing edge to the next node. This page is the per-node reference: for every node type it lists the real config fields, what to put in each, and the named outputs you wire to the next step.
+
+> New to workflows? Start with [Workflows & orchestration](/docs/concepts/workflows) for the big picture, then use this page as the per-node reference. When you are ready to assemble one end to end, follow [Build a workflow](/docs/guides/build-a-workflow).
+
+A few terms used throughout, defined once:
+
+- **Contact / recipient** — one person flowing through the workflow (a lead, a patient). Node config never hardcodes a phone number; it points at a *field* on the contact's record.
+- **Edge** — a connection from one node's named output to another node's input. Most nodes have more than one output (for example a dispatch node has `success` and `failed`) so you can route different outcomes to different next steps.
+- **Connection** — a saved, encrypted link to an external provider (WhatsApp, voice, CRM). You pick a connection by its id; you never paste credentials into a node.
+
+The internal node type (like `messaging.send_whatsapp_template`) is stable; the category is just how the node is grouped in the builder palette. The builder fetches the live catalog — node types, their config schema, and their output edges — from the backend, so what you see always matches what the server can run. See the [API Reference](/docs/api) — `GET /api/orchestration/node_types`.
+
+<Mermaid chart={`
+flowchart LR
+  Source["Source<br/>(who flows in)"] --> Filter["Filter<br/>(who qualifies)"]
+  Filter --> Logic["Logic<br/>(route / wait / merge)"]
+  Logic --> Action["Messaging / Voice / AI / Webhook<br/>(do something)"]
+  Action --> Sink["Sink<br/>(end the run)"]
+`} />
+
+## The node catalog
+
+| Category | Node (`node.type`) | What it does |
+| --- | --- | --- |
+| Source | Cohort (`source.cohort`) | Pull contacts — build the query inline, or reuse a saved cohort. |
+| Source | Dataset (`source.dataset`) | Run against a fixed uploaded list — same contacts every run. |
+| Source | Event Trigger (`source.event_trigger`) | Start a run when an external event fires (e.g. a new CRM lead). |
+| Filter | Eligibility Filter (`filter.eligibility`) | Continue only with contacts that match an eligibility rule. |
+| Filter | Consent Gate (`filter.consent_gate`) | Continue only with contacts that have valid consent. *(Hidden — see below.)* |
+| Logic | Conditional Branch (`logic.conditional`) | Route each contact to the first matching criteria branch, or a default. |
+| Logic | Segment Split (`logic.split`) | Split contacts into branches by field value, random weight, or percentage. |
+| Logic | Wait Condition (`logic.wait`) | Pause until a delay elapses, a timestamp arrives, or an event fires. |
+| Logic | Path Merge (`logic.merge`) | Reconverge several branches back into one downstream path. |
+| Messaging | Send WhatsApp template (`messaging.send_whatsapp_template`) | Send a templated WhatsApp message via your connected provider. |
+| Voice | Place voice call (`voice.place_call`) | Place an AI voice call via your connected provider. |
+| AI | AI Agent (`llm.extract`) | Run a prompt over each contact and save structured fields back to the record. |
+| Core | Webhook Dispatch (`core.webhook_out`) | Call an external API with a JSON body built from contact attributes. |
+| Sink | Workflow Complete (`sink.complete`) | End the workflow run for the contact. |
+
+> **Consent Gate** is part of the catalog but hidden from the palette until consent ingestion ships. Existing workflows that reference it still run.
+
+## Shared picker fields
+
+A handful of fields appear across many nodes. They all work the same way — you pick from a list the platform fetches for you, never a free-typed id.
+
+| Field | Appears on | What you pick |
+| --- | --- | --- |
+| **Connection** (`connection_id`) | WhatsApp, Voice, Webhook | Which provider account to use. The picker only lists connections of the right type — a WhatsApp node lists `wati` / `aisensy`; a voice node lists `bolna`. The platform resolves the vendor and credentials at run time. |
+| **Phone Number Field** (`phone_field`) | WhatsApp, Voice | Which field on each contact's record holds their phone number. Read and normalized per contact; contacts whose field is missing or invalid are skipped, not failed. |
+| **WhatsApp Template** (`template_name`) | WhatsApp | The live approved template the contacts receive. Listed from the chosen connection. |
+| **Channel Number** (`channel_number`) | WhatsApp | The WhatsApp sender number the campaign goes out from. |
+| **Agent** (`agent_id`) | Voice | Which AI voice agent handles the conversation. |
+| **Variable mappings** (`variable_mappings`) | WhatsApp, Voice | Each template placeholder / agent variable, bound either to a static value or to a contact field — how `Hi {{name}}` gets filled per contact. |
+
+A variable-mapping row has this shape:
+
+```json
+{ "agent_variable": "name", "source_kind": "payload", "payload_field": "first_name" }
+```
+
+`source_kind` is `payload` (read `payload_field` off each contact) or `static` (use a fixed `static_value`). The builder fetches the option lists for these pickers from the connection:
+
+- Templates → `GET /api/orchestration/connections/{connection_id}/templates`
+- Voice agents → `GET /api/orchestration/connections/{connection_id}/agents`
+- Sender / caller numbers → `GET /api/orchestration/connections/{connection_id}/phone-numbers`
+- Agent / template variables → `GET /api/orchestration/connections/{connection_id}/agent-variables`
+
+See the [API Reference](/docs/api) for the full request and response shapes.
+
+## Source
+
+Source nodes are entry nodes: they have no incoming edge and produce the initial set of contacts. All three emit a single output, `default`.
+
+### Cohort (`source.cohort`)
+
+Pulls contacts from a data source. Runs in one of two modes: define the query inline, or reuse a saved, versioned cohort.
+
+<Framed size="lg" caption="On the canvas">![Cohort node](/nodes/cards/source.cohort.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `mode` | `"inline"` \| `"saved"`, required at publish | Which mode the node runs in. |
+| `cohort_definition_version_id` | UUID, required when `mode="saved"` | The saved cohort version to reuse. The saved version is the source of truth for the query. |
+| `source_ref` | string, required when `mode="inline"` | The data source to query. |
+| `payload_fields` | list of strings, optional (default `[]`) | Contact fields carried forward into the run. |
+| `filters` | list, optional (default `[]`) | Conditions that narrow the list (field / op / value). |
+| `lookback_hours` | int, optional | Only include contacts within this recency window. |
+| `lookback_column` | string, optional | The timestamp column the lookback applies to. |
+| `consent_gate_channel` | string, optional | Restrict to contacts with consent on this channel. |
+| `sample_limit` | int 1–10000, optional | Cap the list for a test run. |
+| `sample_strategy` | `"random"` \| `"first"`, default `"random"` | How to pick the sample when `sample_limit` is set. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Cohort config panel](/nodes/forms/source.cohort.png)</Framed>
+
+</details>
+
+Outputs: `default`.
+
+### Dataset (`source.dataset`)
+
+Runs against one pinned uploaded list. Re-running the same workflow against the same dataset version produces an identical recipient set.
+
+<Framed size="lg" caption="On the canvas">![Dataset node](/nodes/cards/source.dataset.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `dataset_version_id` | UUID, **required** | The dataset version to run against. |
+| `sample_limit` | int 1–10000, optional | Cap the list for a test run. |
+| `sample_strategy` | `"random"` \| `"first"`, default `"random"` | How to pick the sample when `sample_limit` is set. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Dataset config panel](/nodes/forms/source.dataset.png)</Framed>
+
+</details>
+
+Outputs: `default`.
+
+### Event Trigger (`source.event_trigger`)
+
+Starts a run when an external webhook event arrives. Its config is empty in the builder — the contact payload comes from the trigger, not a query. The successor node is taken from the wired `default` edge.
+
+<Framed size="lg" caption="On the canvas">![Event Trigger node](/nodes/cards/source.event_trigger.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `next_node_id` | string, optional | Legacy back-compat only. Leave unset; the executor uses the wired `default` edge. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Event Trigger config panel](/nodes/forms/source.event_trigger.png)</Framed>
+
+</details>
+
+Outputs: `default`.
+
+## Filter
+
+Filter nodes split the incoming contacts into two edges by a rule. Wire at least one edge.
+
+### Eligibility Filter (`filter.eligibility`)
+
+Keeps only the contacts matching a predicate; everyone else is set aside.
+
+<Framed size="lg" caption="On the canvas">![Eligibility Filter node](/nodes/cards/filter.eligibility.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `predicate` | predicate object, **required** | The eligibility rule. Matching contacts go out `passed`, the rest out `skipped`. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Eligibility Filter config panel](/nodes/forms/filter.eligibility.png)</Framed>
+
+</details>
+
+A predicate is a JSON rule. A leaf is `{ "field": ..., "op": ..., "value": ... }`; ops are `eq`, `neq`, `gte`, `gt`, `lte`, `lt`, `in`, `not_in`, `contains`, `exists`, `missing`. Combine with `{"and": [...]}`, `{"or": [...]}`, `{"not": ...}`.
+
+```json
+{ "field": "stage", "op": "eq", "value": "new" }
+```
+
+Outputs: `passed`, `skipped`.
+
+### Consent Gate (`filter.consent_gate`)
+
+Hidden from the palette until consent ingestion ships; existing definitions still execute. Continues only with contacts that have valid consent on the chosen channel.
+
+<Framed size="lg" caption="On the canvas">![Consent Gate node](/nodes/cards/filter.consent_gate.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `channel` | `"wa"` \| `"voice"` \| `"sms"` \| `"email"`, **required** | Which consent channel to check. |
+| `consent_policy` | `"permissive"` \| `"explicit_optin"`, default `"permissive"` | `permissive`: only `opted_out` is blocked, `unknown` allows. `explicit_optin`: only `opted_in` allows, everything else blocks. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Consent Gate config panel](/nodes/forms/filter.consent_gate.png)</Framed>
+
+</details>
+
+Outputs: `allowed`, `blocked`.
+
+## Logic
+
+Logic nodes route, split, pause, or reconverge contacts. They take no provider action.
+
+### Conditional Branch (`logic.conditional`)
+
+An N-way router. Each contact takes the **first** branch whose predicate matches; anyone unmatched falls to the implicit `default` output.
+
+<Framed size="lg" caption="On the canvas">![Conditional Branch node](/nodes/cards/logic.conditional.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `branches` | list of branch objects, **required** (min 1) | Ordered list. Each branch has `id` (stable routing key, unique, `default` is reserved), `label` (display only), and `predicate` (same rule shape as the Eligibility Filter). |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Conditional Branch config panel](/nodes/forms/logic.conditional.png)</Framed>
+
+</details>
+
+```json
+{
+  "branches": [
+    { "id": "high_value", "label": "High value", "predicate": { "field": "ltv", "op": "gte", "value": 5000 } },
+    { "id": "new_lead",   "label": "New lead",   "predicate": { "field": "stage", "op": "eq", "value": "new" } }
+  ]
+}
+```
+
+Outputs: one edge per branch `id`, plus an implicit `default` for unmatched contacts.
+
+### Segment Split (`logic.split`)
+
+Routes contacts into disjoint branches by field value, random weight, or percentage. Needs at least two branches.
+
+<Framed size="lg" caption="On the canvas">![Segment Split node](/nodes/cards/logic.split.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `mode` | `"by_field"` \| `"random"` \| `"percentage"`, **required** | How contacts are assigned to branches. |
+| `field` | string, required when `mode="by_field"` | The contact field whose value selects a branch. |
+| `branches` | list of branch objects, **required** (min 2) | Each branch has `id`, `label`, and one of: `match` (the field value, `by_field`), `weight` (positive int, `random`), `percent` (int, `percentage`). |
+| `default_branch_id` | string, optional (`by_field` only) | Branch for contacts whose value matched nothing. Must be one of the branch ids. |
+| `drop_unmatched` | bool, default `false` (`by_field` only) | Drop unmatched contacts instead of sending them to the default branch. |
+| `holdout_percent` | int, optional (`percentage` only) | Reserve a holdout slice; routes to the reserved `control` edge. Branch percents plus holdout must sum to 100. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Segment Split config panel](/nodes/forms/logic.split.png)</Framed>
+
+</details>
+
+```json
+{
+  "mode": "percentage",
+  "branches": [
+    { "id": "variant_a", "label": "Variant A", "percent": 50 },
+    { "id": "variant_b", "label": "Variant B", "percent": 40 }
+  ],
+  "holdout_percent": 10
+}
+```
+
+Outputs: one edge per branch `id`, plus `control` when `holdout_percent` is set.
+
+### Wait Condition (`logic.wait`)
+
+Pauses each contact. The `mode` decides what it waits for, and the outgoing edges must match the mode.
+
+<Framed size="lg" caption="On the canvas">![Wait Condition node](/nodes/cards/logic.wait.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `mode` | `"duration"` \| `"until_datetime"` \| `"event"` \| `"event_or_timeout"`, default `"duration"` | What the wait releases on. |
+| `duration_value` | float, required for `duration` | How long to wait. |
+| `duration_unit` | `"minutes"` \| `"hours"` \| `"days"`, with `duration_value` | The unit for `duration_value`. |
+| `until_datetime` | timestamp, required for `until_datetime` | A specific wake time (must be in the future at publish). |
+| `event_name` | string, required for `event` / `event_or_timeout` | The awaited event name. |
+| `correlation` | object `{ "recipient_id_field": ... }`, required for `event` / `event_or_timeout` | How an inbound event row is matched back to the parked contact. |
+| `event_match` | predicate object, optional | An extra rule the inbound event payload must satisfy. |
+| `timeout_hours` | float, required for `event_or_timeout` | Fall through to `timeout` if the event has not arrived by then. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Wait Condition config panel](/nodes/forms/logic.wait.png)</Framed>
+
+</details>
+
+Output edges follow the mode: `duration` and `until_datetime` → `wakeup`; `event` → `event`; `event_or_timeout` → `event` and `timeout`. Wire exactly the edges the mode requires.
+
+### Path Merge (`logic.merge`)
+
+Reconverges several inbound branches into one continuation path, deduplicating contacts.
+
+<Framed size="lg" caption="On the canvas">![Path Merge node](/nodes/cards/logic.merge.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `merge_policy` | `"dedupe"` \| `"first_wins"` \| `"last_wins"`, default `"dedupe"` | How repeat arrivals of the same contact are handled. |
+| `payload_policy` | `"first_wins"` \| `"last_wins"` \| `"shallow_merge"`, default `"last_wins"` | Which arrival's payload survives. `shallow_merge` merges keys, later arrivals winning collisions. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Path Merge config panel](/nodes/forms/logic.merge.png)</Framed>
+
+</details>
+
+Outputs: `default`.
+
+## Messaging
+
+### Send WhatsApp template (`messaging.send_whatsapp_template`)
+
+Sends a templated WhatsApp message to each contact via the connected provider. A provider `200` is **not** treated as delivery — a rejected send (invalid number, receiver error) is recorded as `failed` with the reason, never `success`.
+
+<Framed size="lg" caption="On the canvas">![Send WhatsApp template node](/nodes/cards/messaging.send_whatsapp_template.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `connection_id` | UUID, **required** | WhatsApp connection to send through (`wati` / `aisensy`). |
+| `phone_field` | string, required at publish (default `""`) | Contact field holding the recipient's number. |
+| `template_name` | string, required at publish (default `""`) | The live template to send. |
+| `channel_number` | string, required at publish (default `""`) | The WhatsApp sender number to send from. |
+| `broadcast_name` | string, optional (default `""`) | Campaign label sent to the provider. |
+| `variable_mappings` | list of mapping rows, optional (default `[]`) | Each template placeholder, bound to a value or a contact field. |
+| `webhook_ttl_seconds` | int ≥ 60, default `259200` (3 days) | Ignore replies arriving after this window. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="md" caption="Config panel">![Send WhatsApp template config panel](/nodes/forms/messaging.send_whatsapp_template.png)</Framed>
+
+</details>
+
+Outputs: `success` (labelled *Sent*), `failed`.
+
+## Voice
+
+### Place voice call (`voice.place_call`)
+
+Places an AI voice call to each contact via the connected voice provider.
+
+<Framed size="lg" caption="On the canvas">![Place voice call node](/nodes/cards/voice.place_call.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `connection_id` | UUID, **required** | Voice connection to call through (`bolna`). |
+| `agent_id` | string, **required** | The AI voice agent handling the call. |
+| `phone_field` | string, required at publish (default `""`) | Contact field holding the recipient's number. |
+| `variable_mappings` | list of mapping rows, optional (default `[]`) | Agent call variables, bound to values or contact fields. |
+| `from_phone` | string, optional | Caller-id override; falls back to the connection default, then the agent default. |
+| `webhook_ttl_seconds` | int ≥ 60, default `259200` (3 days) | Ignore voice callbacks after this window. |
+| `mode` | `"auto"` \| `"single"` \| `"batch"`, default `"auto"` | Dispatch path. Leave on `auto` — the adapter chooses single vs. batch by cohort size. |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="md" caption="Config panel">![Place voice call config panel](/nodes/forms/voice.place_call.png)</Framed>
+
+</details>
+
+Outputs: `success` (labelled *Placed*), `failed`.
+
+## AI
+
+### AI Agent (`llm.extract`)
+
+Runs a prompt over each contact and writes structured fields back to that contact's record, so later nodes can branch on them. The LLM is resolved through the `workflow_llm_extract` call site (tenant defaults + capability gating), never a direct provider SDK.
+
+<Framed size="lg" caption="On the canvas">![AI Agent node](/nodes/cards/llm.extract.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `prompt` | string, required at publish (default `""`) | Instruction sent to the model per contact. Reference fields with `{{field}}`. |
+| `output_schema` | list of field objects, optional (default `[]`) | Structured fields the model must return; enforced as JSON Schema. Each field has `key`, `type` (`number` / `text` / `boolean` / `array` / `enum`), `description`, and `enumValues` for enums. |
+| `input_template` | string, optional | Per-contact context rendered from `{{field}}` placeholders. Falls back to the whole payload as JSON. |
+| `output_namespace` | string, optional (default `""`) | Payload key the extracted object is written under. Defaults to the node id. |
+| `provider_override` | string, optional | Pin a provider for this node (clinical workflows must use an approved in-region provider). |
+| `model_override` | string, optional | Pin a model, resolved against the tenant's deployments. |
+| `concurrency` | int 1–20, default `1` | How many contacts to process in parallel. |
+| `inter_call_delay` | float ≥ 0, default `0.0` | Seconds to stagger between contacts (rate limiting). |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="md" caption="Config panel">![AI Agent config panel](/nodes/forms/llm.extract.png)</Framed>
+
+</details>
+
+You can dry-run it from the builder via `POST /api/orchestration/nodes/llm-extract/test`, and inspect available upstream fields via `POST /api/orchestration/nodes/upstream-variables`. See the [API Reference](/docs/api).
+
+Outputs: `success`, `error`.
+
+## Core
+
+### Webhook Dispatch (`core.webhook_out`)
+
+Calls an external API once per contact with a JSON body assembled from contact attributes. Per-attempt HTTP retries happen inside the node under the attempt policy; the graph only sees the final `success` / `exhausted` outcome.
+
+<Framed size="lg" caption="On the canvas">![Webhook Dispatch node](/nodes/cards/core.webhook_out.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `url` | string, **required** | Target URL. Must be absolute unless a webhook connection supplies a base URL. |
+| `connection_id` | UUID, optional | A reusable `webhook` connection that can contribute a base URL and one auth header. |
+| `method` | `"POST"` \| `"PUT"`, default `"POST"` | HTTP method. |
+| `headers` | object, optional (default `{}`) | Extra request headers. |
+| `body` | JSON value, optional (default `{}`) | The request body. Leaves are JSON literals or `{"$payload": "field"}` references to contact attributes. |
+| `timeout_seconds` | float, default `10.0` | Per-request timeout. |
+| `attempt_policy` | object, optional | Retry policy (attempts, backoff, which errors retry, and the exhausted output id). |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Webhook Dispatch config panel](/nodes/forms/core.webhook_out.png)</Framed>
+
+</details>
+
+Outputs: `success`, `exhausted`.
+
+## Sink
+
+### Workflow Complete (`sink.complete`)
+
+Terminal node — ends the run for the contact and has no outgoing edge. Every path through the workflow should reach one.
+
+<Framed size="lg" caption="On the canvas">![Workflow Complete node](/nodes/cards/sink.complete.png)</Framed>
+
+| Field | Type / required | Meaning |
+| --- | --- | --- |
+| `reason` | string, optional | A note recorded on the completed contact (e.g. why the run ended here). |
+
+<details>
+<summary>View config panel</summary>
+
+<Framed size="sm" caption="Config panel">![Workflow Complete config panel](/nodes/forms/sink.complete.png)</Framed>
+
+</details>
+
+Outputs: none (terminal).
+
+## Validating your graph
+
+Before a workflow can run, the graph must be valid: entry nodes have no incoming edge, terminal nodes have no outgoing edge, and dispatch / wait outputs are wired to match the node's contract. The builder checks this for you.
+
+See the [API Reference](/docs/api) — `POST /api/orchestration/workflows/validate`, then `POST /api/orchestration/workflows/{workflow_id}/publish` once it passes.

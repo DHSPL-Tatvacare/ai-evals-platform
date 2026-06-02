@@ -1,0 +1,139 @@
+---
+title: System overview
+description: How the platform fits together — a thin web app, a FastAPI backend, PostgreSQL, background jobs, and LLM providers.
+---
+
+Welcome. This page is the big-picture map of the TatvaCare AI Platform — a multi-tenant tool that product, QA, and operations teams use to score AI outputs, review evidence, compare runs, generate reports, orchestrate outbound campaigns, and ask ad-hoc questions of their data.
+
+Read it top to bottom and you'll understand the moving parts well enough to start using the platform with confidence. Each piece is small and does one job; the value is in how they connect.
+
+## The five pieces
+
+The platform is built from five parts that each have a clear responsibility.
+
+| Part | What it is | Its job |
+| --- | --- | --- |
+| Frontend | A React web app (the screens you click) | Show data and collect input. Nothing more. |
+| Backend | A FastAPI service (the API) | Business logic, LLM calls, persistence, auth. |
+| Database | PostgreSQL | The single source of truth for everything. |
+| Worker | A background job loop | Run slow work without blocking your clicks. |
+| LLM providers | Gemini, OpenAI, Azure OpenAI, Anthropic | The AI models that do the scoring and generation. |
+
+A few terms used throughout the docs, defined once here:
+
+- **Tenant** — your organization. Every piece of data belongs to a tenant, and the platform never mixes one tenant's data with another's.
+- **App (workspace)** — a focused area of work inside a tenant, such as `voice-rx`, `kaira-bot`, or `inside-sales`. Most screens and most API calls are scoped to one app.
+- **Job** — a unit of slow work (an evaluation, a report) that runs in the background. You submit it, then watch its progress.
+
+## Architecture at a glance
+
+This diagram, adapted from the in-app guide, shows how a request flows through the system. Your browser talks only to the backend over `/api/*`; the backend owns the database, the background worker, and every call out to an AI model.
+
+<Mermaid chart={`
+graph TB
+    Browser["Browser — React web app"] -->|"/api/* requests"| FastAPI["FastAPI backend :8721"]
+    FastAPI -->|"async SQLAlchemy"| PG[("PostgreSQL — source of truth")]
+    FastAPI -->|"submit job"| Worker["Background job worker"]
+    Worker -->|"polls for work"| PG
+    Worker -->|"runs evaluations + reports"| Runners["Runners (evaluate / report / orchestrate)"]
+    Runners -->|"API calls"| LLM["LLM providers — Gemini · OpenAI · Azure OpenAI · Anthropic"]
+    Runners -->|"write results"| PG
+
+    style Browser fill:#6366f1,color:#fff
+    style FastAPI fill:#10b981,color:#fff
+    style PG fill:#f59e0b,color:#fff
+    style Worker fill:#8b5cf6,color:#fff
+    style LLM fill:#ec4899,color:#fff
+`} />
+
+## The frontend is a thin client
+
+The web app is intentionally simple. It renders screens and collects what you type or upload, then hands everything to the backend. It holds no business rules, makes no AI calls of its own, and stores nothing permanently in the browser.
+
+This matters for you in one practical way: anything that takes real work — judging a transcript, comparing runs, building a report — happens on the server, so you can navigate away or refresh the page and the work keeps going.
+
+## The backend is where the work lives
+
+The backend is a FastAPI service. It is the only thing the browser talks to, and it owns all of the consequential behavior:
+
+- **Business logic** — scoring rules, comparisons, report assembly.
+- **LLM calls** — every request to an AI model is made here, never from your browser.
+- **Persistence** — reading and writing the database.
+- **Security** — checking who you are and what you're allowed to do on every request.
+
+Every protected request carries your identity, and the backend filters all data by your tenant (and, where relevant, your app and user) so you only ever see what belongs to you.
+
+You can browse the full set of endpoints in the [API Reference](/docs/api). A simple health check confirms the backend is up:
+
+```bash
+curl http://localhost:8721/api/health
+# {"status":"ok","database":"connected"}
+```
+
+See the [API Reference](/docs/api) — `GET /api/health`.
+
+## PostgreSQL is the source of truth
+
+Every durable fact lives in PostgreSQL. If it isn't in the database, it didn't happen. The database is organized into three areas (schemas):
+
+- `platform` — accounts, apps, evaluations, sessions, settings.
+- `analytics` — usage and cost facts, plus the rollups that power dashboards.
+- `orchestration` — workflows, provider connections, and campaign runs.
+
+A central record called an **evaluation run** captures the outcome of each evaluation. Dashboards, reports, and reviews read these records; they never write their own copies of the truth, which keeps every screen consistent with every other.
+
+## Slow work runs as background jobs
+
+Some operations — running an evaluation across many cases, generating a report, comparing runs — take seconds or minutes. The platform never makes you wait on an open request for these. Instead it uses a simple, reliable pattern:
+
+1. **Submit** the work as a job.
+2. **Poll** the job to watch it move from queued to running to done.
+3. **Load** the result when it's ready.
+
+A background **worker** continuously picks up queued jobs from the database, runs them, and writes the results back. Because the job lives in the database, it survives page refreshes and keeps running on its own. The worker also caps how many jobs run at once per tenant, per app, and per user, so one heavy run can't starve everyone else.
+
+The same three endpoints back this flow:
+
+```bash
+# 1. Submit a job (the body specifies the job type + its parameters)
+POST /api/jobs
+
+# 2. Poll for status + result
+GET /api/jobs/{job_id}
+
+# 3. Cancel if needed
+POST /api/jobs/{job_id}/cancel
+```
+
+See the [API Reference](/docs/api) — `POST /api/jobs`, `GET /api/jobs/{job_id}`, and `POST /api/jobs/{job_id}/cancel`.
+
+## LLM providers do the AI work
+
+The actual intelligence — judging a transcription, critiquing a conversation, drafting a report — comes from large language models. The platform supports several providers: **Gemini** (Google AI Studio and Vertex AI), **OpenAI**, **Azure OpenAI**, and **Anthropic**.
+
+Two things are worth knowing as a new user:
+
+- **Credentials are per-tenant and encrypted.** Your organization's model keys are configured in **Admin → AI Settings** and stored encrypted at rest — they are never shared across tenants and never live in a config file you have to manage.
+- **The backend chooses the model.** Each kind of AI work resolves to the right model for your tenant automatically, so you pick *what* to evaluate, not *which* model to call.
+
+## How the deployment is shaped
+
+You don't need infrastructure knowledge to use the platform, but it helps to know there are two shapes.
+
+**Locally** (for development), each piece runs as its own container:
+
+| Service | Port | Purpose |
+| --- | --- | --- |
+| `postgres` | 5432 | Database |
+| `backend` | 8721 | FastAPI API |
+| `worker` | — | Dedicated job worker |
+| `frontend` | 5173 | Web app (dev server) |
+
+**In production** (Azure Container Apps), the backend and the worker run together in a single container — the backend runs the worker loop in-process — with the database and file storage hosted externally as managed Azure services.
+
+## Where to go next
+
+Now that the shape is clear, dive into the area you need:
+
+- The **API Reference** lists every endpoint, request, and response: [/docs/api](/docs/api).
+- Pick your workspace — `voice-rx`, `kaira-bot`, or `inside-sales` — and follow its workflow guide to run your first evaluation.
