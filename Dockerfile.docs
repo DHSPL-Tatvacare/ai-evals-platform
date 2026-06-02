@@ -1,0 +1,17 @@
+# Local docs dev server (Zudoku) — gives localhost:5173/docs parity with prod.
+# Prod serves the BUILT docs via nginx (root Dockerfile `docs` stage); locally
+# the vite dev server proxies /docs here so docs render at the same origin with
+# hot-reload. Not used by any deploy.
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY apidocs/package.json apidocs/package-lock.json ./
+RUN npm ci
+
+COPY apidocs/ ./
+
+EXPOSE 5174
+
+# --host binds 0.0.0.0 so the frontend container can reach it across the compose network.
+CMD ["npm", "run", "dev", "--", "--host", "--port", "5174"]

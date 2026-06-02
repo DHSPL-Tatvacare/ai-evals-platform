@@ -1,5 +1,11 @@
-# Production Docker Compose
+# Production Docker Compose — REFERENCE ONLY.
 # ─────────────────────────────────────────────────────────────────────────────
+# Azure Container Apps is the real prod: it builds + deploys each image directly
+# (frontend = the root `Dockerfile` = nginx + React SPA + Zudoku docs at /docs;
+# backend = `Dockerfile`'s backend target) via the *-prod-AutoDeployTrigger
+# workflows. It does NOT run docker compose. This file is a local prod-parity
+# reference; the frontend builds from the same root Dockerfile so /docs works.
+#
 # Usage: docker compose -f docker-compose.prod.yml up -d
 #
 # Prerequisites:
@@ -97,7 +103,10 @@ services:
     command: ["python", "-m", "app.worker"]
 
   frontend:
-    image: ${ACR_LOGIN_SERVER}/evals-frontend:${IMAGE_TAG:-latest}
+    # Builds the real prod image (nginx + React SPA + Zudoku docs), same as Azure.
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: evals-frontend
     restart: unless-stopped
     ports:

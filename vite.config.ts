@@ -34,6 +34,15 @@ export default defineConfig({
         target: process.env.API_PROXY_TARGET || 'http://localhost:8721',
         changeOrigin: true,
       },
+      // Local docs parity: /docs is served by the Zudoku dev server (docs
+      // container) so it renders at the same origin. Prod serves the built
+      // docs via nginx at /docs instead. No changeOrigin — keep the Host as
+      // localhost so the docs vite server's anti-DNS-rebinding host check
+      // (which blocks the "docs" hostname) lets the request through.
+      '/docs': {
+        target: process.env.DOCS_PROXY_TARGET || 'http://localhost:5174',
+        ws: true,
+      },
     },
   },
 })

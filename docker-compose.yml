@@ -83,12 +83,29 @@ services:
       - "5173:5173"
     environment:
       API_PROXY_TARGET: http://backend:8721
+      DOCS_PROXY_TARGET: http://docs:5174
     volumes:
       - ./src:/app/src # hot-reload: React source
       - ./public:/app/public # hot-reload: static assets
       - ./index.html:/app/index.html # hot-reload: entry HTML
+      - ./vite.config.ts:/app/vite.config.ts # hot-reload: dev-server proxy config
     depends_on:
       - backend
+      - docs
+
+  # Local docs (Zudoku) dev server. Vite proxies /docs here so docs render at
+  # localhost:5173/docs with hot-reload — local parity with prod's nginx /docs.
+  docs:
+    build:
+      context: .
+      dockerfile: Dockerfile.docs
+    container_name: evals-docs
+    ports:
+      - "5174:5174"
+    volumes:
+      - ./apidocs/pages:/app/pages # hot-reload: docs content
+      - ./apidocs/apis:/app/apis # hot-reload: openapi spec
+      - ./apidocs/zudoku.config.tsx:/app/zudoku.config.tsx # hot-reload: docs config
 
 volumes:
   pgdata:

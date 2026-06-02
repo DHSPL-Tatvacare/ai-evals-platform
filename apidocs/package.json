@@ -10,7 +10,7 @@
     "preview": "zudoku preview"
   },
   "dependencies": {
-    "mermaid": "^11",
-    "zudoku": "latest"
+    "mermaid": "11.15.0",
+    "zudoku": "0.79.1"
   }
 }
