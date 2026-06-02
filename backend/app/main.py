@@ -20,8 +20,7 @@ warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from scalar_fastapi import AgentScalarConfig, get_scalar_api_reference
+from fastapi.responses import HTMLResponse, JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -420,17 +419,31 @@ async def health_check():
 
 
 @app.get("/api/docs", include_in_schema=False)
-async def scalar_reference():
-    """Interactive Scalar API reference — served in dev environments only."""
+async def zudoku_reference(request: Request):
+    """Interactive Zudoku API reference — served in dev environments only.
+
+    Standalone CDN bundle reading the live OpenAPI spec; no build step. Zudoku
+    requires an ABSOLUTE spec URL, built from the inbound request so it is
+    correct on any host. All tags/descriptions carry over from the same spec.
+    """
     if not settings.is_dev:
         raise HTTPException(status_code=404)
-    return get_scalar_api_reference(
-        openapi_url=app.openapi_url,
-        title="TatvaCare AI Platform API",
-        servers=[{"url": f"http://localhost:{settings.API_PORT}", "description": "Local"}],
-        telemetry=False,
-        agent=AgentScalarConfig(disabled=True),
-    )
+    spec_url = str(request.base_url).rstrip("/") + (app.openapi_url or "/openapi.json")
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TatvaCare AI Platform API</title>
+  <link rel="icon" type="image/svg+xml" href="https://cdn.zudoku.dev/logos/favicon.svg" />
+  <script type="module" src="https://cdn.zudoku.dev/latest/main.js" crossorigin></script>
+  <link rel="stylesheet" href="https://cdn.zudoku.dev/latest/style.css" crossorigin />
+</head>
+<body>
+  <div data-api-url="{spec_url}"></div>
+</body>
+</html>"""
+    return HTMLResponse(html)
 
 
 # Register routers
