@@ -37,6 +37,7 @@ from app.models.scheduled_job import ScheduledJobDefinition
 from app.models.scheduler_heartbeat import SchedulerWorkerHeartbeat
 from app.models.eval_template import EvaluationTemplate
 from app.models.analytics_facts import AggEvaluationRun, FactEvaluation, FactEvaluationReview
+from app.models.analytics_workflow_facts import AggWorkflowRun, FactWorkflowEngagement
 from app.models.analytics_lead_facts import (
     DimLead,
     FactLeadActivity,

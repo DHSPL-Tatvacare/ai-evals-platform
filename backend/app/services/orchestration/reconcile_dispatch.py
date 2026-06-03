@@ -88,6 +88,7 @@ async def reconcile_dispatch(
         grouped.setdefault((action.tenant_id, action.app_id, conn_id), []).append(action)
 
     reconciled = 0
+    reconciled_run_ids: set[uuid.UUID] = set()
     resolvers: dict[tuple[uuid.UUID, str], ConnectionResolver] = {}
     for (tenant_id, app_id, conn_id), conn_actions in grouped.items():
         resolver = resolvers.get((tenant_id, app_id))
@@ -120,15 +121,32 @@ async def reconcile_dispatch(
                 db, action=action, node_id=action_node[action.id], execution=execution,
             ):
                 reconciled += 1
+                reconciled_run_ids.add(action.run_id)
 
         batch_by_id: dict[str, list[WorkflowRunRecipientAction]] = {}
         for action in batch:
             batch_by_id.setdefault(str(action.provider_correlation_id), []).append(action)
         for batch_id, batch_actions in batch_by_id.items():
-            reconciled += await _reconcile_batch(
+            n = await _reconcile_batch(
                 db, adapter=adapter, config=config, batch_id=batch_id,
                 actions=batch_actions, action_node=action_node,
             )
+            reconciled += n
+            if n:
+                reconciled_run_ids.update(a.run_id for a in batch_actions)
+
+    # Post-reconcile hook: a late terminal event changes a run's engagement rollup, so enqueue
+    # the analytics rebuild for each run that actually advanced. Idempotent; isolated from reconcile.
+    if reconciled_run_ids:
+        try:
+            from app.services.orchestration.analytics.workflow_engagement_populator import build_populate_job
+            runs = (await db.execute(
+                select(WorkflowRun).where(WorkflowRun.id.in_(reconciled_run_ids))
+            )).scalars().all()
+            for run in runs:
+                db.add(build_populate_job(run))
+        except Exception as enqueue_err:
+            _log.warning("reconcile_dispatch.analytics_enqueue_error: %s", enqueue_err)
 
     await db.commit()
     return reconciled

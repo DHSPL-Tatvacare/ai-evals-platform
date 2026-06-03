@@ -1687,6 +1687,32 @@ async def handle_populate_analytics(job_id, params: dict, *, tenant_id: uuid.UUI
 
 
 @register_job_handler(
+    "populate-workflow-analytics",
+    queue_class="bulk",
+    priority=510,
+    retry_safe=True,
+    required_permissions=("orchestration:manage",),
+)
+async def handle_populate_workflow_analytics(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Rebuild ``analytics.fact_workflow_engagement`` + the ``agg_workflow_run`` matview.
+
+    Params: ``run_id`` for a single completed/reconciled run (post-run + post-reconcile hooks);
+    omitted means a scoped sweep (optional ``app_id``/``tenant_id``) — the backfill path.
+    """
+    from app.services.orchestration.analytics.workflow_engagement_populator import populate_workflow_engagement
+
+    run_id = params.get("run_id")
+    scope_tenant = params.get("tenant_id")
+    async with async_session() as db:
+        return await populate_workflow_engagement(
+            db,
+            run_ids=[uuid.UUID(run_id)] if run_id else None,
+            app_id=params.get("app_id") or None,
+            tenant_id=uuid.UUID(scope_tenant) if scope_tenant else None,
+        )
+
+
+@register_job_handler(
     "backfill-evaluations",
     queue_class="bulk",
     priority=520,

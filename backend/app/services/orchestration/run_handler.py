@@ -332,6 +332,14 @@ async def _maybe_complete_run(
             )
         except Exception as emit_err:
             _log.warning("run-workflow: completed_emit_event_error: %s", emit_err)
+        # Enqueue the engagement-analytics rebuild for this run. Isolated: a populate-enqueue
+        # failure must never flip a completed run to failed.
+        try:
+            from app.services.orchestration.analytics.workflow_engagement_populator import build_populate_job
+            db.add(build_populate_job(run))
+            await db.flush()
+        except Exception as enqueue_err:
+            _log.warning("run-workflow: analytics_enqueue_error: %s", enqueue_err)
     else:
         run.status = "waiting"
         await db.flush()
