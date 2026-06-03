@@ -57,26 +57,17 @@ class ConnectionInvalid(ConnectionError_):
 _generate_webhook_token = generate_webhook_token
 
 
-def resolve_base_url(origin_header: Optional[str]) -> str:
-    """Pick the public origin for URLs returned to the caller.
+def resolve_base_url(origin_header: Optional[str] = None) -> str:  # noqa: ARG001
+    """Public base for provider webhook URLs returned to the UI — always ``APP_BASE_URL``.
 
-    Mirrors ``_invite_base_url`` in ``routes/admin.py``: prefer the
-    request's ``Origin`` header so URLs render against whichever domain
-    the user is actually on (``evals.tatvacare.in``, the raw Azure FQDN,
-    localhost dev, etc.) rather than whatever is baked into the
-    container env. Falls back to ``settings.APP_BASE_URL`` when no
-    Origin header rides the request — non-browser clients, no-request
-    contexts, browsers omitting the header on same-origin GETs.
-
-    ``Origin`` is browser-controlled and can't be set from page
-    JavaScript, so reflecting it is self-scoped per session: the
-    response only goes to the same caller. The URL embeds no tenant or
-    app identifier (the token alone resolves the connection row at
-    receive time), so a forged Origin from a non-browser client doesn't
-    leak cross-tenant state.
+    Webhook URLs get pasted into external providers (WATI/Bolna/CRM), so they must
+    be the ONE stable, branded public host — which is exactly what ``APP_BASE_URL``
+    already is. We deliberately do NOT reflect the request ``Origin`` here: doing so
+    rendered whatever container host the operator happened to browse from (the raw
+    ``*.azurecontainerapps.io`` FQDN), which leaked into a saved WATI webhook and
+    failed its URL validation. ``origin_header`` is accepted (callers pass it) but
+    ignored. One env var, one branded base.
     """
-    if origin_header:
-        return origin_header.rstrip("/")
     return (settings.APP_BASE_URL or "").rstrip("/")
 
 

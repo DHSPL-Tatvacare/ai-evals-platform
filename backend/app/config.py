@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     KAIRA_AUTH_TOKEN: str = ""
     KAIRA_TEST_USER_ID: str = ""
 
-    # Frontend URL (used for invite link URLs — must point to where users access the app)
+    # Public branded URL where users access the app — also the base for provider
+    # webhook URLs shown in the UI (invite links, WATI/Bolna/CRM callbacks). ONE
+    # base, must be the branded host (e.g. https://evals.tatvacare.in), never the
+    # raw container FQDN.
     APP_BASE_URL: str = "http://localhost:5173"
     # Internal frontend URL used by backend-driven browser rendering (e.g. PDF export).
     PDF_RENDER_BASE_URL: str = ""
