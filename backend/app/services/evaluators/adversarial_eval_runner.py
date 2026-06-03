@@ -36,7 +36,7 @@ from app.services.evaluators.adversarial_config import (
     load_config_from_db,
 )
 from app.services.evaluators.credential_lane_scheduler import (
-    normalize_kaira_credential_pool,
+    normalize_credential_pool,
     run_cases_with_credential_lanes,
 )
 from app.services.evaluators.kaira_client import KairaClient
@@ -304,7 +304,7 @@ async def run_adversarial_evaluation(
     # Reuse the submit-time placeholder id when present so the queued row
     # already visible in the Runs list gets promoted in place.
     run_id = uuid.UUID(eval_run_id) if eval_run_id else uuid.uuid4()
-    resolved_credentials = normalize_kaira_credential_pool(
+    resolved_credentials = normalize_credential_pool(
         kaira_credential_pool,
         fallback_user_id=kaira_test_user_id,
         fallback_auth_token=kaira_auth_token,
@@ -654,6 +654,20 @@ async def run_adversarial_evaluation(
                         result=result_data,
                     ))
                     await db.commit()
+                    from app.services.evaluators.draft_builders import adversarial_drafts
+                    from app.services.evaluators.output_atoms import RunContext
+                    from app.services.evaluators.persistence import safe_persist
+                    await safe_persist(
+                        db,
+                        RunContext(id=run_id, tenant_id=tenant_id, user_id=user_id, app_id="kaira-bot"),
+                        adversarial_drafts(
+                            case_label=case_label,
+                            evaluation=evaluation,
+                            difficulty=tc.difficulty,
+                            goal_flow=tc.goal_flow,
+                            active_traits=tc.active_traits,
+                        ),
+                    )
 
                 logger.info(
                     f"  -> {canonical_case['judge']['verdict']} (Goal: {canonical_case['judge']['goalAchieved']})"

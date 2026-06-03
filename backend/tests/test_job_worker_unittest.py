@@ -332,7 +332,7 @@ class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(
-            'app.services.evaluators.batch_runner.run_batch_evaluation',
+            'app.services.evaluators.thread_eval_runner.run_thread_evaluation',
             return_value={'ok': True},
         ) as mock_runner:
             result = await job_worker.handle_evaluate_batch(
@@ -359,7 +359,7 @@ class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(
-            'app.services.evaluators.batch_runner.run_batch_evaluation',
+            'app.services.evaluators.thread_eval_runner.run_thread_evaluation',
             return_value={'ok': True},
         ) as mock_runner:
             result = await job_worker.handle_evaluate_batch(
@@ -385,7 +385,7 @@ class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(
-            'app.services.evaluators.adversarial_runner.run_adversarial_evaluation',
+            'app.services.evaluators.adversarial_eval_runner.run_adversarial_evaluation',
             return_value={'ok': True},
         ) as mock_runner:
             result = await job_worker.handle_evaluate_adversarial(
@@ -426,7 +426,7 @@ class JobWorkerHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(
-            'app.services.evaluators.adversarial_runner.run_adversarial_evaluation',
+            'app.services.evaluators.adversarial_eval_runner.run_adversarial_evaluation',
             return_value={'ok': True},
         ) as mock_runner:
             result = await job_worker.handle_evaluate_adversarial(

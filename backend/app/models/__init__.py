@@ -22,6 +22,7 @@ from app.models.eval_run import (
     EvaluationRunAdversarialResult,
     EvaluationRunApiCallLog,
 )
+from app.models.evaluation import EvaluationTarget, Evaluation, EvaluationDetail
 from app.models.review import EvaluationReview, EvaluationReviewItem
 from app.models.report_config import ReportConfiguration
 from app.models.report_run import ReportGenerationRun
@@ -96,6 +97,7 @@ __all__ = [
     "BackgroundJob",
     "EvaluationRun", "EvaluationRunThreadResult", "EvaluationRunAdversarialResult",
     "EvaluationRunApiCallLog", "EvaluationReview", "EvaluationReviewItem",
+    "EvaluationTarget", "Evaluation", "EvaluationDetail",
     "ReportConfiguration", "ReportGenerationRun", "ReportGeneratedArtifact",
     "CrmCallRecord", "CrmLeadRecord", "LogCrmSourceSync",
     "ApplicationExternalAgentConnector",

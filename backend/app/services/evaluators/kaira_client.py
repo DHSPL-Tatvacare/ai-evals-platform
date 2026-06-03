@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import aiohttp
 
-from app.services.evaluators.models import KairaSessionState
+from app.services.evaluators.models import ChatSessionState
 from app.services.evaluators.kaira_widget_grammar import (
     KairaWidget,
     confirm_message_for,
@@ -95,12 +95,12 @@ class KairaStreamResponse:
 
     @property
     def thread_id(self) -> Optional[str]:
-        # adversarial_runner.py writes ConversationTurn.thread_id from this
+        # adversarial_eval_runner.py writes ConversationTurn.thread_id from this
         return self.session_id
 
     @property
     def response_id(self) -> None:
-        # adversarial_runner.py writes ConversationTurn.response_id from this
+        # adversarial_eval_runner.py writes ConversationTurn.response_id from this
         return None
 
 
@@ -195,7 +195,7 @@ class KairaClient:
         self,
         widget: KairaWidget,
         user_id: str,
-        session_state: KairaSessionState,
+        session_state: ChatSessionState,
         test_case_label: Optional[str] = None,
     ) -> KairaStreamResponse:
         """Send the canonical confirmation for ANY registered widget kind.
@@ -217,7 +217,7 @@ class KairaClient:
         self,
         food_card: Dict[str, Any],
         user_id: str,
-        session_state: KairaSessionState,
+        session_state: ChatSessionState,
         test_case_label: Optional[str] = None,
         verbs: Optional[List[str]] = None,  # accepted for back-compat; ignored
     ) -> KairaStreamResponse:
@@ -247,7 +247,7 @@ class KairaClient:
         self,
         query: str,
         user_id: str,
-        session_state: KairaSessionState,
+        session_state: ChatSessionState,
         test_case_label: Optional[str] = None,
         image_id: Optional[str] = None,
     ) -> KairaStreamResponse:
@@ -340,7 +340,7 @@ class KairaClient:
         url: str,
         payload: dict,
         headers: dict,
-        session_state: KairaSessionState,
+        session_state: ChatSessionState,
         result: KairaStreamResponse,
         timeout: Optional[aiohttp.ClientTimeout] = None,
     ) -> None:

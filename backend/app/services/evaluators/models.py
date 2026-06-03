@@ -617,7 +617,7 @@ class RunMetadata(SerializableMixin):
 
 
 @dataclass
-class KairaSessionState:
+class ChatSessionState:
     """Tracks Kaira API session identifiers across turns.
 
     Shared protocol for building request payloads and syncing session

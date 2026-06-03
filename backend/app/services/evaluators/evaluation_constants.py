@@ -1,7 +1,7 @@
 """Evaluation constants for the voice-rx pipeline.
 
 All hardcoded prompts, schemas, display names, and normalization templates
-for both upload and API flows. Separated from voice_rx_runner.py for
+for both upload and API flows. Separated from transcript_eval_runner.py for
 maintainability.
 """
 

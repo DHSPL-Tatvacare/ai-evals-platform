@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ── BackgroundJob type → eval type mapping ─────────────────────────────────────
 #
 # Only job types that produce exactly ONE EvaluationRun appear here. Batch-of-runs
-# types (evaluate-custom-batch fans out to N child run_custom_evaluator calls,
+# types (evaluate-custom-batch fans out to N child run_custom_evaluation calls,
 # each with its own EvaluationRun) are intentionally absent — a single placeholder
 # would be orphaned. Non-evaluation job types (generate-report,
 # sync-external-source, populate-analytics) also return None.

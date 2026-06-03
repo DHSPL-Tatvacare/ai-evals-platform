@@ -323,7 +323,7 @@ class EvaluatorPersonaRulesTests(unittest.TestCase):
 
 class PersonaTacticSummaryTests(unittest.TestCase):
     def test_summarize_aggregates_attempted_and_landed(self):
-        from app.services.evaluators.adversarial_runner import _summarize_persona_tactics
+        from app.services.evaluators.adversarial_eval_runner import _summarize_persona_tactics
 
         transcript = ConversationTranscript(
             turns=[
@@ -361,7 +361,7 @@ class PersonaTacticSummaryTests(unittest.TestCase):
         self.assertEqual(len(summary['turn_tactic_sequence']), 2)
 
     def test_summarize_returns_empty_landed_when_no_violations(self):
-        from app.services.evaluators.adversarial_runner import _summarize_persona_tactics
+        from app.services.evaluators.adversarial_eval_runner import _summarize_persona_tactics
 
         transcript = ConversationTranscript(
             turns=[

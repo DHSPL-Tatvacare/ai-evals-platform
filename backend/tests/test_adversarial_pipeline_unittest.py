@@ -37,7 +37,7 @@ from app.services.evaluators.models import (  # noqa: E402
     TransportFacts,
 )
 from app.services.evaluators import credential_lane_scheduler as credential_lane_scheduler_module  # noqa: E402
-from app.services.evaluators import adversarial_runner as adversarial_runner_module  # noqa: E402
+from app.services.evaluators import adversarial_eval_runner as adversarial_eval_runner_module  # noqa: E402
 from app.services.reports.aggregator import AdversarialAggregator  # noqa: E402
 
 
@@ -787,24 +787,24 @@ class AdversarialRunnerPhaseThreeTests(unittest.IsolatedAsyncioTestCase):
         update_job_progress = AsyncMock(side_effect=RuntimeError('stop-after-create'))
 
         with patch.object(
-            adversarial_runner_module,
+            adversarial_eval_runner_module,
             'load_config_from_db',
             new=AsyncMock(return_value=get_default_config()),
         ), patch.object(
-            adversarial_runner_module,
+            adversarial_eval_runner_module,
             'promote_eval_run_to_running',
             new=promote_eval_run_to_running,
         ), patch.object(
-            adversarial_runner_module,
+            adversarial_eval_runner_module,
             'finalize_eval_run',
             new=finalize_eval_run,
         ), patch.object(
-            adversarial_runner_module,
+            adversarial_eval_runner_module,
             'update_job_progress',
             new=update_job_progress,
         ):
             with self.assertRaisesRegex(RuntimeError, 'stop-after-create'):
-                await adversarial_runner_module.run_adversarial_evaluation(
+                await adversarial_eval_runner_module.run_adversarial_evaluation(
                     job_id='job-1',
                     tenant_id=uuid.uuid4(),
                     user_id=uuid.uuid4(),
@@ -1085,8 +1085,8 @@ class AnalyticsPhaseFourTests(unittest.TestCase):
 
 
 class CredentialLaneSchedulerTests(unittest.IsolatedAsyncioTestCase):
-    def test_normalize_kaira_credential_pool_dedupes_and_falls_back(self):
-        normalized = credential_lane_scheduler_module.normalize_kaira_credential_pool(
+    def test_normalize_credential_pool_dedupes_and_falls_back(self):
+        normalized = credential_lane_scheduler_module.normalize_credential_pool(
             [
                 {'userId': ' user-1 ', 'authToken': ' token-1 '},
                 {'user_id': 'USER-1', 'auth_token': 'ignored-duplicate'},

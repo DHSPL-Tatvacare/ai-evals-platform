@@ -12,7 +12,7 @@ from app.services.evaluators.kaira_client import KairaStreamResponse
 from app.services.evaluators.kaira_widget_grammar import KairaWidget
 from app.services.evaluators.models import (
     AdversarialTestCase,
-    KairaSessionState,
+    ChatSessionState,
 )
 
 
@@ -46,14 +46,14 @@ class _FakeKairaClient:
         self.scripted = list(scripted)
         self.calls: List[dict] = []
 
-    async def stream_message(self, query, user_id, session_state: KairaSessionState, test_case_label=None):
+    async def stream_message(self, query, user_id, session_state: ChatSessionState, test_case_label=None):
         self.calls.append({"kind": "stream", "query": query})
         # Mark session as established so subsequent turns send session_id
         session_state.new_session = False
         session_state.session_id = session_state.session_id or "sess_test"
         return self.scripted.pop(0)
 
-    async def confirm_widget(self, widget: KairaWidget, user_id, session_state: KairaSessionState, test_case_label=None):
+    async def confirm_widget(self, widget: KairaWidget, user_id, session_state: ChatSessionState, test_case_label=None):
         self.calls.append({"kind": "confirm", "widget_kind": widget.kind, "data": widget.data})
         session_state.new_session = False
         session_state.session_id = session_state.session_id or "sess_test"

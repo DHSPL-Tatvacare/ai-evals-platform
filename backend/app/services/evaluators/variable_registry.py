@@ -34,8 +34,7 @@ class VariableRegistry:
 
     def __init__(self) -> None:
         self._variables: dict[str, VariableDefinition] = {}
-        self._register_voice_rx_variables()
-        self._register_kaira_variables()
+        self._register_variables()
 
     # ── Public API ───────────────────────────────────────────────
 
@@ -80,7 +79,8 @@ class VariableRegistry:
     def _register(self, v: VariableDefinition) -> None:
         self._variables[v.key] = v
 
-    def _register_voice_rx_variables(self) -> None:
+    def _register_variables(self) -> None:
+        # Per-app surfacing is driven by each definition's app_ids data field, not by symbol names.
         r = self._register
         # ── input category ────────────────────────────────────────
         r(VariableDefinition(
@@ -137,9 +137,7 @@ class VariableRegistry:
             "Requires a prior standard evaluation to have been run.",
             "standard_eval", "json", ["voice-rx"], requires_eval_output=True,
         ))
-
-    def _register_kaira_variables(self) -> None:
-        self._register(VariableDefinition(
+        r(VariableDefinition(
             "chat_transcript", "Chat Transcript",
             "Full conversation formatted as User: / Bot: lines.",
             "transcript", "text", ["kaira-bot"],

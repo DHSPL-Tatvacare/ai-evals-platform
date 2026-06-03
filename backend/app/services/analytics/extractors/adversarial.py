@@ -87,7 +87,7 @@ def extract_adversarial(run: EvaluationRun, cases: list[EvaluationRunAdversarial
 
         verdict = case.verdict or result.get("verdict")
 
-        # Per-case persona tactic summary (from adversarial_runner.
+        # Per-case persona tactic summary (from adversarial_eval_runner.
         # _summarize_persona_tactics). Legacy cases without the summary
         # simply emit empty lists — downstream charts show no bars for them.
         tactic_summary = result.get("persona_tactic_summary") or {}

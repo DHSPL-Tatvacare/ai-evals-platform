@@ -3,7 +3,7 @@ import uuid
 from typing import Callable
 
 
-def normalize_kaira_credential_pool(
+def normalize_credential_pool(
     raw_pool: list[dict] | None,
     *,
     fallback_user_id: str,

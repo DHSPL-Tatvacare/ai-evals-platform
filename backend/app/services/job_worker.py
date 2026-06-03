@@ -1367,9 +1367,9 @@ async def get_queue_position(job_id: str) -> int:
 )
 async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run batch evaluation on threads from a data file."""
-    from app.services.evaluators.batch_runner import run_batch_evaluation
+    from app.services.evaluators.thread_eval_runner import run_thread_evaluation
 
-    result = await run_batch_evaluation(
+    result = await run_thread_evaluation(
         job_id=job_id,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1412,7 +1412,7 @@ async def handle_evaluate_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
 )
 async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run adversarial stress test against live Kaira API."""
-    from app.services.evaluators.adversarial_runner import run_adversarial_evaluation
+    from app.services.evaluators.adversarial_eval_runner import run_adversarial_evaluation
 
     result = await run_adversarial_evaluation(
         job_id=job_id,
@@ -1466,9 +1466,9 @@ async def handle_evaluate_adversarial(job_id, params: dict, *, tenant_id: uuid.U
 )
 async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run voice-rx two-call evaluation (transcription + critique)."""
-    from app.services.evaluators.voice_rx_runner import run_voice_rx_evaluation
+    from app.services.evaluators.transcript_eval_runner import run_transcript_evaluation
 
-    return await run_voice_rx_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
+    return await run_transcript_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
 @register_job_handler(
@@ -1480,9 +1480,9 @@ async def handle_evaluate_voice_rx(job_id, params: dict, *, tenant_id: uuid.UUID
 )
 async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run a custom evaluator on a voice-rx listing."""
-    from app.services.evaluators.custom_evaluator_runner import run_custom_evaluator
+    from app.services.evaluators.custom_eval_runner import run_custom_evaluation
 
-    return await run_custom_evaluator(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
+    return await run_custom_evaluation(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 
 
 @register_job_handler(
@@ -1494,7 +1494,7 @@ async def handle_evaluate_custom(job_id, params: dict, *, tenant_id: uuid.UUID, 
 )
 async def handle_evaluate_custom_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run multiple custom evaluators on a single entity."""
-    from app.services.evaluators.custom_evaluator_runner import run_custom_eval_batch
+    from app.services.evaluators.custom_eval_runner import run_custom_eval_batch
 
     return await run_custom_eval_batch(job_id=job_id, params=params, tenant_id=tenant_id, user_id=user_id)
 

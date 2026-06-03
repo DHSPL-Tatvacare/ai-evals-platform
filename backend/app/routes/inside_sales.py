@@ -41,7 +41,7 @@ from app.services.inside_sales_dataset_resolver import (
     InsideSalesLeadFilters,
 )
 from typing import cast
-from app.services.inside_sales_eval_linkage import (
+from app.services.evaluation_linkage import (
     fetch_latest_eval_overlays,
     list_eval_history_entries,
 )

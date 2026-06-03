@@ -37,7 +37,7 @@ from app.services.evaluators.models import (
     ConversationTranscript,
     ConversationTurn,
     GoalTransition,
-    KairaSessionState,
+    ChatSessionState,
     SimulatorState,
 )
 from app.services.evaluators.adversarial_config import (
@@ -442,7 +442,7 @@ class ConversationAgent:
             simulator=SimulatorState(goals_attempted=[g.id for g in goals]),
         )
         current_message = test_case.synthetic_input
-        session_state = KairaSessionState(user_id=user_id, new_session=True)
+        session_state = ChatSessionState(user_id=user_id, new_session=True)
 
         # Track per-goal state
         pending_goals = list(goals)

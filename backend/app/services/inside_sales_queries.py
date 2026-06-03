@@ -36,8 +36,8 @@ from app.services.inside_sales_dataset_resolver import (
     InsideSalesLeadFilters,
     ResolvedDatasetPage,
 )
-from app.services.inside_sales_eval_linkage import (
-    extract_inside_sales_eval_score,
+from app.services.evaluation_linkage import (
+    extract_eval_score,
     fetch_latest_eval_overlays,
 )
 
@@ -275,7 +275,7 @@ def map_call_listing_row(
         "callStartTime": _format_response_datetime(call.occurred_at),
         "createdOn": _format_response_datetime(call.created_at),
         "attributes": dict(call.attributes or {}),
-        "lastEvalScore": extract_inside_sales_eval_score(eval_result),
+        "lastEvalScore": extract_eval_score(eval_result),
         "evalCount": int(eval_count or 0),
     }
 

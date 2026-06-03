@@ -18,18 +18,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult
 
-INSIDE_SALES_VISIBLE_EVAL_STATUSES = ("completed", "completed_with_errors")
+VISIBLE_EVAL_STATUSES = ("completed", "completed_with_errors")
 
 
 @dataclass(frozen=True)
-class InsideSalesEvalOverlay:
+class EvalOverlay:
     eval_count: int
     latest_score: float | None
     latest_result: dict[str, Any] | None
     latest_run_id: str | None = None
 
 
-def extract_inside_sales_eval_score(result: dict[str, Any] | None) -> float | None:
+def extract_eval_score(result: dict[str, Any] | None) -> float | None:
     raw = result or {}
     evaluations = raw.get("evaluations") or []
     if evaluations:
@@ -47,8 +47,8 @@ async def fetch_latest_eval_overlays(
     user_id: uuid.UUID,
     app_id: str,
     thread_ids: Sequence[str],
-    statuses: Sequence[str] = INSIDE_SALES_VISIBLE_EVAL_STATUSES,
-) -> dict[str, InsideSalesEvalOverlay]:
+    statuses: Sequence[str] = VISIBLE_EVAL_STATUSES,
+) -> dict[str, EvalOverlay]:
     clean_thread_ids = tuple(thread_id for thread_id in thread_ids if thread_id)
     if not clean_thread_ids:
         return {}
@@ -79,9 +79,9 @@ async def fetch_latest_eval_overlays(
         ).join(latest_eval_subquery, EvaluationRunThreadResult.id == latest_eval_subquery.c.latest_id)
     )
     return {
-        str(thread_id): InsideSalesEvalOverlay(
+        str(thread_id): EvalOverlay(
             eval_count=int(eval_count or 0),
-            latest_score=extract_inside_sales_eval_score(eval_result),
+            latest_score=extract_eval_score(eval_result),
             latest_result=eval_result,
             latest_run_id=str(run_id),
         )

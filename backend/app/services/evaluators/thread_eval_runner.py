@@ -94,7 +94,7 @@ def _file_hash(path: str) -> str:
         return ""
 
 
-async def run_batch_evaluation(
+async def run_thread_evaluation(
     job_id,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -180,7 +180,7 @@ async def run_batch_evaluation(
 
     from app.services.llm_credentials import resolve_llm_call
 
-    # batch_runner is the generic chat-quality runner. Caller-supplied
+    # thread_eval_runner is the generic chat-quality runner. Caller-supplied
     # llm_provider / llm_model become resolver overrides; the call site is
     # always chat_text for this runner.
     async with async_session() as db:
@@ -613,6 +613,19 @@ async def run_batch_evaluation(
                         )
                     )
                     await db.commit()
+                    from app.services.evaluators.draft_builders import thread_drafts
+                    from app.services.evaluators.output_atoms import RunContext
+                    from app.services.evaluators.persistence import safe_persist
+                    await safe_persist(
+                        db,
+                        RunContext(id=run_id, tenant_id=tenant_id, user_id=user_id, app_id=app_id),
+                        thread_drafts(
+                            thread_id=thread_id,
+                            intent_results=intent_results,
+                            correctness_results=correctness_results,
+                            efficiency_result=efficiency_result,
+                        ),
+                    )
 
                 return {
                     "is_error": bool(eval_errors),

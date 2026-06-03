@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from app.services import inside_sales_eval_linkage as linkage  # noqa: E402
+from app.services import evaluation_linkage as linkage  # noqa: E402
 
 
 class _FakeResult:
@@ -39,11 +39,11 @@ class _FakeSession:
 
 
 class InsideSalesEvalLinkageTests(unittest.IsolatedAsyncioTestCase):
-    def test_extract_inside_sales_eval_score_uses_nested_and_fallback_shapes(self):
-        nested_score = linkage.extract_inside_sales_eval_score(
+    def test_extract_eval_score_uses_nested_and_fallback_shapes(self):
+        nested_score = linkage.extract_eval_score(
             {"evaluations": [{"output": {"overall_score": 87}}]}
         )
-        fallback_score = linkage.extract_inside_sales_eval_score(
+        fallback_score = linkage.extract_eval_score(
             {"output": {"overall_score": 73}}
         )
 

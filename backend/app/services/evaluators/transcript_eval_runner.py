@@ -140,7 +140,7 @@ def _validate_pipeline_inputs(flow, listing, params: dict) -> list[str]:
     return errors
 
 
-async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+async def run_transcript_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Run voice-rx FlowConfig-driven evaluation pipeline.
 
     Three-step sequence: transcription -> normalization -> critique.
@@ -535,6 +535,15 @@ async def run_voice_rx_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID,
                 logger.info(
                     "Eval run %s was cancelled before completion write — skipping",
                     eval_run_id,
+                )
+            else:
+                from app.services.evaluators.draft_builders import transcript_drafts
+                from app.services.evaluators.output_atoms import RunContext
+                from app.services.evaluators.persistence import safe_persist
+                await safe_persist(
+                    db,
+                    RunContext(id=eval_run_id, tenant_id=tenant_id, user_id=user_id, app_id=app_id),
+                    transcript_drafts(target_key=str(listing_id), evaluation=evaluation, summary=summary_data),
                 )
 
         # Submit analytics population job (fire-and-forget)

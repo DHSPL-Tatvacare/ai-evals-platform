@@ -4,7 +4,7 @@ Creates evaluation_runs rows (eval_type='custom') as the single source of truth.
 Called by the job worker when processing 'evaluate-custom' jobs.
 
 Also contains run_custom_eval_batch() for the 'evaluate-custom-batch' job type
-(merged from voice_rx_batch_custom_runner.py).
+(merged from custom_eval_runner.py (historical)).
 """
 import asyncio
 import json
@@ -108,7 +108,7 @@ def _extract_scores(output: dict, output_schema: list[dict]) -> Optional[dict]:
 # ── Single Custom Evaluator ─────────────────────────────────────────
 
 
-async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+async def run_custom_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Execute a custom evaluator on a voice-rx listing or kaira-bot session.
 
     Params:
@@ -375,6 +375,28 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
             summary=scores,
         )
 
+        try:
+            from app.services.evaluators.draft_builders import custom_drafts
+            from app.services.evaluators.output_atoms import RunContext
+            from app.services.evaluators.persistence import safe_persist
+            async with async_session() as db:
+                await safe_persist(
+                    db,
+                    RunContext(id=eval_run_id, tenant_id=tenant_id, user_id=user_id, app_id=app_id),
+                    custom_drafts(
+                        target_key=str(entity_ref),
+                        target_type="chat_thread" if is_session_flow else "transcript",
+                        output=output,
+                        output_schema=output_schema_data,
+                        scores=scores,
+                        evaluator_id=uuid.UUID(str(evaluator_id)),
+                        evaluator_name=evaluator.name,
+                        raw_payload={"rawRequest": prompt_text, "rawResponse": response_text},
+                    ),
+                )
+        except Exception:
+            logger.warning("custom spine dual-write setup failed for run %s", eval_run_id, exc_info=True)
+
         # Submit analytics population job (fire-and-forget)
         try:
             from app.services.analytics import submit_analytics_job
@@ -430,7 +452,7 @@ async def run_custom_evaluator(job_id, params: dict, *, tenant_id: uuid.UUID, us
 
 
 # ── Batch Custom Evaluator ───────────────────────────────────────────
-# Merged from voice_rx_batch_custom_runner.py
+# Merged from custom_eval_runner.py (historical)
 
 
 async def run_custom_eval_batch(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
@@ -483,7 +505,7 @@ async def run_custom_eval_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
     await update_job_progress(job_id, 0, total, f"Starting {total} evaluators...")
 
     async def _run_one(eid: str, index: int) -> dict:
-        """Run one evaluator, creating its own EvaluationRun via run_custom_evaluator."""
+        """Run one evaluator, creating its own EvaluationRun via run_custom_evaluation."""
         nonlocal completed, errors, first_run_id_written
 
         if await is_job_cancelled(job_id, tenant_id=tenant_id):
@@ -503,7 +525,7 @@ async def run_custom_eval_batch(job_id, params: dict, *, tenant_id: uuid.UUID, u
             sub_params["session_id"] = session_id
 
         try:
-            result = await run_custom_evaluator(job_id=job_id, params=sub_params, tenant_id=tenant_id, user_id=user_id)
+            result = await run_custom_evaluation(job_id=job_id, params=sub_params, tenant_id=tenant_id, user_id=user_id)
             run_id = result.get("eval_run_id")
             if run_id:
                 eval_run_ids.append(run_id)
