@@ -47,6 +47,9 @@ class FactWorkflowEngagement(Base):
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     outcome_bucket: Mapped[str] = mapped_column(String(16), nullable=False)  # most-advanced for this capability
+    # True iff a real bucket (rank≥1) was observed; pure-dispatch recipients default outcome_bucket
+    # to the in_flight sentinel with bucket_resolved=False so rollups leave them uncounted (read_service parity).
+    bucket_resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     dispatched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dispatch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # COUNT(parent_action_id IS NULL)

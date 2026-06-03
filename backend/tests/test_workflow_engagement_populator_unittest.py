@@ -58,15 +58,27 @@ class CollapseLogic(unittest.TestCase):
         ]
         row = self._row(members)
         self.assertEqual(row.outcome_bucket, "positive")
+        self.assertTrue(row.bucket_resolved)  # a real bucket was observed
         self.assertEqual(row.attempts, 3)
         self.assertEqual(row.dispatch_attempts, 1)  # one parent_action_id IS NULL
         self.assertTrue(row.dispatched)
 
-    def test_pending_only_resolves_to_in_flight(self):
+    def test_pending_only_resolves_to_in_flight_but_unresolved(self):
+        # Pure-dispatch recipient: in_flight sentinel for leaf integrity, but bucket_resolved=False
+        # so the matview/breakdown leave it uncounted — parity with read_service's rank-0 → None.
         members = [(_Action("voice_queued", "voice", outcome_bucket=None, parent_action_id=None), "n1")]
         row = self._row(members)
         self.assertEqual(row.outcome_bucket, "in_flight")
+        self.assertFalse(row.bucket_resolved)
         self.assertTrue(row.dispatched)
+
+    def test_explicit_in_flight_is_resolved(self):
+        # A genuine TXN outcome_bucket='in_flight' (e.g. WATI unmapped-child fallback) is rank-1
+        # resolved and MUST count — distinct from a pure-dispatch default.
+        members = [(_Action("wa_sent", "whatsapp", outcome_bucket="in_flight", parent_action_id=None), "n1")]
+        row = self._row(members, capability="messaging")
+        self.assertEqual(row.outcome_bucket, "in_flight")
+        self.assertTrue(row.bucket_resolved)
 
     def test_cost_sum_and_cost_rows(self):
         members = [

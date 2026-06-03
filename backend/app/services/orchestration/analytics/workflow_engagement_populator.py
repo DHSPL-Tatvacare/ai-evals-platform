@@ -167,6 +167,9 @@ class WorkflowEngagementPopulator:
             rank = _BUCKET_RANK.get(bucket, 0)
             if rank > best_rank:
                 best_rank, best_bucket = rank, bucket
+        # best_rank==0 → no real bucket observed (pure-dispatch); keep the in_flight sentinel for leaf
+        # integrity but mark unresolved so the matview/breakdown leave it uncounted (read_service parity).
+        bucket_resolved = best_rank > 0
         outcome_bucket = best_bucket if best_bucket else EngagementBucket.in_flight.value
 
         dispatch_rows = [a for a in actions if a.parent_action_id is None]
@@ -218,6 +221,7 @@ class WorkflowEngagementPopulator:
             connection_label=conn_name or ("unmapped" if conn_id is None else conn_id),
             provider=provider,
             outcome_bucket=outcome_bucket,
+            bucket_resolved=bucket_resolved,
             dispatched=bool(dispatch_rows),
             dispatch_attempts=len(dispatch_rows),
             attempts=len(actions),

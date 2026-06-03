@@ -12,6 +12,10 @@ custom_instructions: |
   verdicts, joinable to fact_evaluation on (run_id, target_key, key).
   Use dim_lead for lead identity, fact_lead_activity for calls/activities,
   fact_lead_stage_transition for stage history.
+  Dispatch/campaign analytics: agg_workflow_run for per-run KPIs (recipients, positive/reached/
+  no_response/failed/in_flight, dispatched, cost), fact_workflow_engagement for per-channel /
+  per-connection / funnel detail. To connect a campaign to lead outcomes, inner-join
+  fact_workflow_engagement.lead_id = dim_lead.lead_id (lead_id is NULL for non-lead targets).
 
 module_custom_instructions:
   sql_generation: |
@@ -19,6 +23,11 @@ module_custom_instructions:
     per-dimension or per-call rubric analysis; filter is_main=true for the overall call score.
     Lead-pipeline questions: always join through dim_lead.lead_id.
     Never join fact_evaluation to fact_lead_activity directly — they live on different grains.
+    Dispatch KPIs (delivery/answer rates, spend per run): agg_workflow_run. Per-channel /
+    per-connection / funnel breakdowns: fact_workflow_engagement, filtering bucket_resolved=true
+    before counting outcome_bucket. "Of the leads we called, how many advanced": inner-join
+    fact_workflow_engagement.lead_id = dim_lead.lead_id. Never count outcome_bucket without the
+    bucket_resolved=true filter (unresolved rows are dispatched-but-not-yet-answered).
 
 tables:
   agg_evaluation_run:
@@ -251,6 +260,95 @@ tables:
         physical_type: numeric
         source_table: fact_lead_activity
 
+  agg_workflow_run:
+    table_kind: aggregate
+    base_table:
+      database: ai_evals_platform
+      schema: analytics
+      table: agg_workflow_run
+    physical_primary_key: { columns: [run_id] }
+    analytical_grain: { columns: [run_id] }
+    description: "One row per campaign/workflow run, recipients collapsed to one most-advanced outcome each (no double-count). Use for run-level dispatch KPIs."
+    dimensions:
+      - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
+      - { name: workflow_id, expr: workflow_id, data_type: nominal, physical_type: uuid, synonyms: [campaign] }
+      - { name: workflow_name, expr: workflow_name, data_type: nominal, physical_type: text, synonyms: [campaign name] }
+      - name: run_status
+        expr: run_status
+        data_type: nominal
+        physical_type: text
+        is_enum: true
+        sample_values: [completed, running, failed, cancelled]
+      - { name: triggered_by, expr: triggered_by, data_type: nominal, physical_type: text }
+    time_dimensions:
+      - { name: run_started_at, expr: run_started_at, data_type: temporal, physical_type: timestamptz }
+      - { name: run_completed_at, expr: run_completed_at, data_type: temporal, physical_type: timestamptz }
+    facts:
+      - { name: cohort_size_at_entry, expr: cohort_size_at_entry, data_type: quantitative, physical_type: integer }
+      - { name: recipients, expr: recipients, data_type: quantitative, physical_type: integer }
+      - { name: positive, expr: positive, data_type: quantitative, physical_type: integer }
+      - { name: reached, expr: reached, data_type: quantitative, physical_type: integer }
+      - { name: no_response, expr: no_response, data_type: quantitative, physical_type: integer }
+      - { name: failed, expr: failed, data_type: quantitative, physical_type: integer }
+      - { name: in_flight, expr: in_flight, data_type: quantitative, physical_type: integer }
+      - { name: dispatched, expr: dispatched, data_type: quantitative, physical_type: integer }
+      - { name: cost, expr: cost, data_type: quantitative, physical_type: numeric, synonyms: [spend] }
+
+  fact_workflow_engagement:
+    table_kind: fact
+    base_table:
+      database: ai_evals_platform
+      schema: analytics
+      table: fact_workflow_engagement
+    physical_primary_key: { columns: [id] }
+    tenant_scoped_unique_key: { columns: [run_id, recipient_id, capability] }
+    analytical_grain: { columns: [id] }
+    description: "One row per (run × recipient × capability) dispatch engagement. Flat, zero-JSON. Count outcome buckets only WHERE bucket_resolved = true. lead_id is set only for CRM-lead recipients (NULL otherwise) — inner-join to dim_lead for campaign→lead questions."
+    dimensions:
+      - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
+      - { name: workflow_id, expr: workflow_id, data_type: nominal, physical_type: uuid, synonyms: [campaign] }
+      - { name: workflow_name, expr: workflow_name, data_type: nominal, physical_type: text, synonyms: [campaign name] }
+      - { name: recipient_id, expr: recipient_id, data_type: nominal, physical_type: text, synonyms: [recipient, target] }
+      - { name: lead_id, expr: lead_id, data_type: nominal, physical_type: text, synonyms: [prospect, lead] }
+      - name: capability
+        expr: capability
+        data_type: nominal
+        physical_type: text
+        is_enum: true
+        sample_values: [voice, messaging, webhook]
+      - name: channel
+        expr: channel
+        data_type: nominal
+        physical_type: text
+        is_enum: true
+        sample_values: [voice, whatsapp, webhook]
+      - { name: provider, expr: provider, data_type: nominal, physical_type: text, synonyms: [vendor] }
+      - { name: connection_label, expr: connection_label, data_type: nominal, physical_type: text, synonyms: [connection, sender] }
+      - name: outcome_bucket
+        expr: outcome_bucket
+        data_type: nominal
+        physical_type: text
+        is_enum: true
+        sample_values: [positive, reached, no_response, failed, in_flight]
+        synonyms: [outcome, result]
+      - { name: bucket_resolved, expr: bucket_resolved, data_type: nominal, physical_type: boolean }
+      - { name: dispatched, expr: dispatched, data_type: nominal, physical_type: boolean }
+      - name: run_status
+        expr: run_status
+        data_type: nominal
+        physical_type: text
+        is_enum: true
+        sample_values: [completed, running, failed, cancelled]
+      - { name: triggered_by, expr: triggered_by, data_type: nominal, physical_type: text }
+    time_dimensions:
+      - { name: run_started_at, expr: run_started_at, data_type: temporal, physical_type: timestamptz }
+    facts:
+      - { name: dispatch_attempts, expr: dispatch_attempts, data_type: quantitative, physical_type: integer, synonyms: [attempts, sends] }
+      - { name: cost, expr: cost, data_type: quantitative, physical_type: numeric, synonyms: [spend] }
+      - { name: cost_rows, expr: cost_rows, data_type: quantitative, physical_type: integer }
+      - { name: duration_sec, expr: duration_sec, data_type: quantitative, physical_type: numeric, synonyms: [talk time] }
+      - { name: talk_count, expr: talk_count, data_type: quantitative, physical_type: integer }
+
 relationships:
   - name: fact_eval_to_agg_run
     left_table: fact_evaluation
@@ -266,6 +364,12 @@ relationships:
     relationship_type: many_to_one
   - name: lead_activity_to_lead
     left_table: fact_lead_activity
+    right_table: dim_lead
+    relationship_columns: [{ left_column: lead_id, right_column: lead_id }]
+    join_type: inner
+    relationship_type: many_to_one
+  - name: engagement_to_lead
+    left_table: fact_workflow_engagement
     right_table: dim_lead
     relationship_columns: [{ left_column: lead_id, right_column: lead_id }]
     join_type: inner

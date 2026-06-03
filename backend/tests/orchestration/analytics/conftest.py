@@ -16,6 +16,9 @@ from app.models.orchestration import (
     WorkflowRunRecipientState,
     WorkflowRunRecipientAction,
 )
+from app.services.orchestration.analytics.workflow_engagement_populator import (
+    populate_workflow_engagement,
+)
 
 
 @pytest_asyncio.fixture
@@ -166,6 +169,11 @@ async def seed_orchestration_run(db_session):
             db_session.add(action)
             action_ids.append(action.id)
         await db_session.flush()
+
+        # Mirror prod (run completes → populate): build the engagement fact + refresh the matview
+        # so the fact-based read_service sees this run. This is the parity bridge — assertions
+        # authored against the old TXN read now re-validate the flat-fact read.
+        await populate_workflow_engagement(db_session, run_ids=[run.id])
 
         return {
             "tenant_id": tenant_id,

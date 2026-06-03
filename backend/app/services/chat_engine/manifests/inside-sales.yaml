@@ -939,6 +939,290 @@ catalog_tables:
     # attribute_schemas surface for future signal_type-specific keys.
     attribute_schemas:
       _default: {}
+  # Dispatch/campaign analytics (orchestration leg). Flat, zero-JSON. The leaf fact is
+  # (run × recipient × capability); agg_workflow_run is its recipient-collapsed per-run rollup.
+  # lead_id bridges to dim_lead ONLY for lead-sourced recipients (NULL for dataset/event/webhook
+  # targets), so campaign→lead questions INNER-join on lead_id — it is NOT a full FK, hence not in
+  # the orphan-guarded relationships block below.
+  fact_workflow_engagement:
+    pg_schema: analytics
+    expected_empty_when: "no workflow/campaign runs have dispatched for this app yet (fresh DB / freshly-onboarded app)"
+    layer: analytics_fact
+    grain: engagement
+    orm: FactWorkflowEngagement
+    alias: fwe
+    columns:
+      id:
+        role: identifier
+        type: int
+        data_type: nominal
+        semantic_type: pk
+      tenant_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+      app_id:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        allowed_values: ["inside-sales"]
+      workflow_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+        synonyms: ["campaign", "campaign id", "workflow"]
+      workflow_name:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        synonyms: ["campaign name", "workflow name"]
+      run_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+        synonyms: ["run", "campaign run", "dispatch run"]
+      recipient_id:
+        role: identifier
+        type: text
+        data_type: nominal
+        semantic_type: id_hash
+        synonyms: ["recipient", "target", "contact"]
+      lead_id:
+        role: identifier
+        type: text
+        data_type: nominal
+        semantic_type: id_hash
+        nullable: true
+        synonyms: ["prospect", "lead"]
+        description: "dim_lead bridge — set only when the recipient is a CRM lead; NULL for dataset/event/webhook targets. INNER-join to dim_lead.lead_id for campaign→lead questions."
+      capability:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        allowed_values: ["voice", "messaging", "webhook"]
+        synonyms: ["channel type"]
+      channel:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        allowed_values: ["voice", "whatsapp", "webhook"]
+      provider:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        semantic_type: category
+        synonyms: ["vendor"]
+      connection_label:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        synonyms: ["connection", "sender", "line"]
+      outcome_bucket:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        allowed_values: ["positive", "reached", "no_response", "failed", "in_flight"]
+        synonyms: ["outcome", "engagement outcome", "result"]
+        description: "Most-advanced engagement outcome for this recipient on this capability. Count buckets only where bucket_resolved is true."
+      bucket_resolved:
+        role: dimension
+        type: boolean
+        data_type: nominal
+        semantic_type: category
+        description: "True when a real outcome was observed; false for dispatched-but-unresolved (pure-dispatch) recipients. Filter to true before counting outcome_bucket."
+      dispatched:
+        role: dimension
+        type: boolean
+        data_type: nominal
+        semantic_type: category
+      dispatch_attempts:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        synonyms: ["attempts", "sends", "calls placed"]
+      cost:
+        role: measure
+        type: float
+        data_type: quantitative
+        semantic_type: currency
+        synonyms: ["spend", "amount"]
+      cost_rows:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        description: "Count of cost-bearing rows — the denominator for average cost per request."
+      duration_sec:
+        role: measure
+        type: float
+        data_type: quantitative
+        semantic_type: duration
+        unit: seconds
+        measure_kind: duration_s
+        synonyms: ["talk time", "call duration"]
+      talk_count:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        description: "Count of answered (positive) rows carrying a duration — the talk-time denominator."
+      run_status:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        semantic_type: category
+      triggered_by:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        semantic_type: category
+      run_started_at:
+        role: temporal
+        type: timestamptz
+        data_type: temporal
+        nullable: true
+        synonyms: ["run date", "dispatched on"]
+  agg_workflow_run:
+    pg_schema: analytics
+    expected_empty_when: "no workflow/campaign runs have dispatched for this app yet (fresh DB / freshly-onboarded app)"
+    layer: analytics_aggregate
+    grain: run
+    orm: AggWorkflowRun
+    alias: awr
+    columns:
+      run_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+        synonyms: ["run", "campaign run"]
+      tenant_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+      app_id:
+        role: dimension
+        type: text
+        data_type: nominal
+        semantic_type: category
+        allowed_values: ["inside-sales"]
+      workflow_id:
+        role: identifier
+        type: uuid
+        data_type: nominal
+        semantic_type: id_hash
+        synonyms: ["campaign", "workflow"]
+      workflow_name:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        synonyms: ["campaign name"]
+      run_status:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        semantic_type: category
+      triggered_by:
+        role: dimension
+        type: text
+        data_type: nominal
+        nullable: true
+        semantic_type: category
+      cohort_size_at_entry:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+        synonyms: ["cohort size", "audience size"]
+      recipients:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+        synonyms: ["targets", "contacts"]
+      positive:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+      reached:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+      no_response:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+      failed:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+      in_flight:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+      dispatched:
+        role: measure
+        type: int
+        data_type: quantitative
+        semantic_type: count
+        measure_kind: count
+        nullable: true
+      cost:
+        role: measure
+        type: float
+        data_type: quantitative
+        semantic_type: currency
+        nullable: true
+        synonyms: ["spend"]
+      run_started_at:
+        role: temporal
+        type: timestamptz
+        data_type: temporal
+        nullable: true
+        synonyms: ["run date"]
+      run_completed_at:
+        role: temporal
+        type: timestamptz
+        data_type: temporal
+        nullable: true
 
 # Every lead-grain fact joins back to dim_lead via lead_id. The boot
 # validator's cardinality audit confirms each relation is truly many-to-one
