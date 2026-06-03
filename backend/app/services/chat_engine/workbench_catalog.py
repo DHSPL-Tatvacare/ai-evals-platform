@@ -604,15 +604,29 @@ def workbench_to_prompt_inputs(
                     f"{table_name}.{col.name} allowed values: "
                     + ", ".join(str(v) for v in metadata["allowed_values"][:8])
                 )
+            # Source table = where the column physically lives (derived
+            # cols declare it; passthroughs source from their own table).
+            source_table = col.source_table or table_name
+            source = catalog.tables.get(source_table)
+            grain = list(source.analytical_grain.columns) if source else []
             entry: dict[str, Any] = {
                 "name": col.name,
                 "description": _prompt_safe_description(col.description),
+                "source_table": source_table,
+                "grain": grain,
+                "derived": col.is_derived,
                 "comment_metadata": metadata,
             }
             cols.append(entry)
         # Universal access-control columns the LLM always needs.
         for ac in ("tenant_id", "app_id"):
-            cols.append({"name": ac, "comment_metadata": {"role": "dimension"}})
+            cols.append({
+                "name": ac,
+                "source_table": table_name,
+                "grain": list(table.analytical_grain.columns),
+                "derived": False,
+                "comment_metadata": {"role": "dimension"},
+            })
 
         tables_payload[table_name] = {
             "physical_table": table.qualified_table,

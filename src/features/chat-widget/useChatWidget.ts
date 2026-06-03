@@ -215,27 +215,19 @@ export const useChatWidgetStore = create<ChatWidgetStore>((set, get) => ({
   },
 
   send: async (text, appId) => {
+    // Blank/whitespace-only sends never reach the backend — guard here so the
+    // ephemeral bubble (sourced from lastUserPrompt) can't get stuck either.
+    if (!text.trim()) return;
     const turnId = crypto.randomUUID();
     activeStream?.abort();
     activeStream = null;
     activeStreamTurnId = turnId;
 
-    // Optimistically render the user bubble before the thinking shimmer; the SSE
-    // user_message echo carries this same id, so applyEvent upserts in place (no dup).
-    const optimisticUserPartId = `user-${turnId}`;
-    useStreamStore.getState().applyEvent(get().sessionId ?? '', {
-      kind: 'part_added',
-      seq: 0,
-      part: {
-        id: optimisticUserPartId,
-        type: 'user_message',
-        chat_session_id: get().sessionId ?? '',
-        seq: 0,
-        created_at: Date.now(),
-        text,
-      },
-    });
-
+    // The optimistic user bubble is client-only ephemeral UI. TurnList renders it
+    // from lastUserPrompt+activeTurnId while sending, and drops it the instant the
+    // server's user_message echo — whose id is `user-${client_turn_id}` (== turnId,
+    // see sherlock_v3/runtime.py) — lands in `parts`. Reconcile by that real id, not
+    // by text/count. The buffer stays server-authoritative.
     set({
       open: true,
       view: 'chat',

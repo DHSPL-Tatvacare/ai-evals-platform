@@ -27,6 +27,8 @@ export function ChatMessages({
   onPromptSelect,
 }: ChatMessagesProps) {
   const sessionId = useChatWidgetStore((s) => s.sessionId);
+  const lastUserPrompt = useChatWidgetStore((s) => s.lastUserPrompt);
+  const activeTurnId = useChatWidgetStore((s) => s.activeTurnId);
   const parts = useStreamStore(selectSessionParts(sessionId ?? ''));
 
   // Hydrate the store from the snapshot endpoint whenever the active session
@@ -105,6 +107,8 @@ export function ChatMessages({
               appId={appId}
               sessionId={sessionId}
               streaming={status === 'sending'}
+              pendingUserText={status === 'sending' ? lastUserPrompt : null}
+              pendingTurnId={activeTurnId}
               onRetry={onRetry}
             />
           )}

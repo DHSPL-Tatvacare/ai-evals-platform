@@ -9,8 +9,11 @@ import type {
   SherlockPart,
   StepFinishPart,
   StepStartPart,
+  SubtaskPart,
   UserMessagePart,
 } from '@/features/sherlock/generated/sherlockContract';
+
+const SHIMMER_SELECTOR = '[class*="chat-widget-shimmer"]';
 
 const landCanvasPatch = vi.fn<
   (partId: string, patch: unknown) => Promise<ApplyCanvasPatchResult | undefined>
@@ -95,5 +98,120 @@ describe('TurnList error region collapse', () => {
     const retryButtons = screen.getAllByRole('button', { name: /retry/i });
     expect(retryButtons.length).toBe(1);
     expect(container.querySelectorAll('[data-part-type="error"]').length).toBe(1);
+  });
+});
+
+const runningSubtask: SubtaskPart = {
+  ...BASE,
+  id: 'sub-1',
+  seq: 2,
+  type: 'subtask',
+  specialist: 'data_specialist',
+  call_id: 'call-1',
+  brief: {
+    question: 'summarize the latest run',
+    scope: { tenant_id: 't', app_id: 'inside-sales', user_id: 'u' },
+  },
+  state: { status: 'running', started_at: 1 },
+};
+
+describe('TurnList live-turn ordering + single shimmer', () => {
+  it('renders the pending user bubble BEFORE the thinking glass on a fresh send', () => {
+    const { container } = render(
+      <TurnList
+        parts={[]}
+        appId="inside-sales"
+        sessionId={null}
+        streaming
+        pendingUserText="how many leads?"
+        onRetry={() => {}}
+      />,
+    );
+    const bubble = screen.getByText('how many leads?');
+    const glass = container.querySelector('[data-testid="sherlock-thinking"]');
+    expect(bubble).toBeTruthy();
+    expect(glass).toBeTruthy();
+    // bubble must precede the glass in document order
+    expect(
+      bubble.compareDocumentPosition(glass as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('does not double the bubble once the server echo lands (reconcile by user-${turnId})', () => {
+    // the echo carries id `user-${client_turn_id}` (== pendingTurnId)
+    const echo: UserMessagePart = { ...BASE, id: 'user-turn-9', seq: 1, type: 'user_message', text: 'how many leads?' };
+    render(
+      <TurnList
+        parts={[stepStart, echo]}
+        appId="inside-sales"
+        sessionId={null}
+        streaming
+        pendingTurnId="turn-9"
+        pendingUserText="how many leads?"
+        onRetry={() => {}}
+      />,
+    );
+    expect(screen.getAllByText('how many leads?').length).toBe(1);
+  });
+
+  it('shows the pending bubble on identical-text retry (id reconcile, not text)', () => {
+    // prior turn has a user_message with the SAME text but a DIFFERENT turn id;
+    // the new send's echo id (user-turn-2) is not present yet => bubble shows
+    const priorStart: StepStartPart = { ...BASE, id: 'ss0', seq: 0, type: 'step_start', turn_id: 'turn-1' };
+    const priorUser: UserMessagePart = { ...BASE, id: 'user-turn-1', seq: 1, type: 'user_message', text: 'retry me' };
+    render(
+      <TurnList
+        parts={[priorStart, priorUser]}
+        appId="inside-sales"
+        sessionId={null}
+        streaming
+        pendingTurnId="turn-2"
+        pendingUserText="retry me"
+        onRetry={() => {}}
+      />,
+    );
+    // prior bubble (user-turn-1) + the new optimistic one (user-turn-2 not echoed yet)
+    expect(screen.getAllByTestId('user-bubble').length).toBe(2);
+  });
+
+  it('does not render a pending bubble for whitespace-only text', () => {
+    render(
+      <TurnList
+        parts={[]}
+        appId="inside-sales"
+        sessionId={null}
+        streaming
+        pendingUserText="   "
+        onRetry={() => {}}
+      />,
+    );
+    expect(screen.queryAllByTestId('user-bubble').length).toBe(0);
+  });
+
+  it('suppresses the standalone thinking glass while a specialist is consulting', () => {
+    const { container } = render(
+      <TurnList
+        parts={[stepStart, userMsg, runningSubtask]}
+        appId="inside-sales"
+        sessionId={null}
+        streaming
+        onRetry={() => {}}
+      />,
+    );
+    // the specialist group narrates; no separate glass line
+    expect(container.querySelector('[data-testid="sherlock-thinking"]')).toBeNull();
+  });
+
+  it('shimmers exactly one line (the active consulting row) while a specialist runs', () => {
+    const { container } = render(
+      <TurnList
+        parts={[stepStart, userMsg, runningSubtask]}
+        appId="inside-sales"
+        sessionId={null}
+        streaming
+        onRetry={() => {}}
+      />,
+    );
+    expect(container.querySelectorAll(SHIMMER_SELECTOR).length).toBe(1);
   });
 });

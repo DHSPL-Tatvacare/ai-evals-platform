@@ -99,6 +99,12 @@ Grounding (when a DATA VOCABULARY block is present below):
     a field: classify "ambiguous" and ask ONE clarifying followup.
 
 Rules:
+  * Emit ONE sub-question by default. A single analytical question — even
+    "compute X then rank/filter/limit by it" (e.g. "top 5 agents by average
+    score") — is ONE SQL query, so it is ONE SubQuestion. Decompose into more
+    only when the parts are genuinely independent (different metrics or
+    entities) or a later part literally needs an earlier sub-question's RESULT
+    value. Never split a single metric's "compute then sort/limit" into two.
   * Never invent data values. If a question references a person ("Show
     me Himani's calls"), keep the literal name in the rewrite.
   * Never name a target outside AVAILABLE_TARGETS. Only decompose into

@@ -314,6 +314,21 @@ _SQL_QUOTED_UUID = re.compile(
 )
 
 
+# The binder owns the bound-param + quoting contract; the data_specialist
+# prompt renders this string verbatim instead of restating it as prose.
+# prepare_query binds exactly :tenant_id/:app_id/:user_id; parameterize_sql
+# rewrites quoted UUID literals into :uuid_N — every other filter value is a
+# literal. Keep this in sync with prepare_query/parameterize_sql, never the
+# other way around.
+BINDER_CONTRACT = (
+    "Only :tenant_id, :app_id, and :user_id are bound. Filter tenant + app on "
+    "every catalog-bound table alias with :tenant_id and :app_id. Write EVERY "
+    "other filter value as a literal — quote UUIDs ('…') and the server "
+    "parameterizes them automatically. Never invent :name placeholders for "
+    "entity ids."
+)
+
+
 def prepare_query(
     sql: str,
     auth: Any,

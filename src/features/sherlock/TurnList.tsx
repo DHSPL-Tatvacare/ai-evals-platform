@@ -30,6 +30,13 @@ interface TurnListProps {
   sessionId: string | null;
   streaming: boolean;
   onRetry: () => void;
+  /** Just-sent message, rendered as an optimistic bubble until the server echoes
+   *  it. Client-only; never enters streamStore. */
+  pendingUserText?: string | null;
+  /** The client turn id of the in-flight send. The server echoes the user_message
+   *  with id `user-${client_turn_id}` (see sherlock_v3/runtime.py), so the bubble
+   *  yields by matching that exact id — the real contract, not a heuristic. */
+  pendingTurnId?: string | null;
 }
 
 const FAILED_STATUSES = new Set(['error', 'degraded', 'interrupted', 'failed']);
@@ -43,54 +50,48 @@ function AssistantAnswer({ part }: { part: AssistantTextPart }) {
 }
 
 function renderAssistantBody(turn: Turn, appId: string, sessionId: string | null, settled: boolean) {
+  // Specialists narrate live as ONE consultation block. The answer — prose, then
+  // charts — is held until the turn settles and rendered once, after the
+  // consultation. Charts never interleave mid-consultation or precede the answer.
   const blocks: React.ReactNode[] = [];
-  let run: SpecialistPart[] = [];
-
-  const flushRun = () => {
-    if (run.length === 0) return;
-    blocks.push(<SpecialistGroup key={`sg-${run[0].id}`} parts={run} settled={settled} />);
-    run = [];
-  };
+  const specialistParts = turn.parts.filter(isSpecialistPart);
+  if (specialistParts.length > 0) {
+    blocks.push(<SpecialistGroup key="sg" parts={specialistParts} settled={settled} />);
+  }
+  if (!settled) return blocks;
 
   for (const part of turn.parts) {
-    // submit_sql ToolParts are admin-trace only; their sql/rows surface on the
-    // data specialist's subtask row, so they're not drawn in the chat.
-    if (part.type === 'tool') continue;
-    if (isSpecialistPart(part)) {
-      run.push(part);
-      continue;
-    }
-    flushRun();
-    switch (part.type) {
-      case 'assistant_text':
-        blocks.push(<AssistantAnswer key={part.id} part={part} />);
-        break;
-      case 'reasoning':
-        blocks.push(<ReasoningBlock key={part.id} part={part} />);
-        break;
-      case 'chart':
-        blocks.push(<ChartCard key={part.id} part={part} appId={appId} sessionId={sessionId} />);
-        break;
-      case 'canvas_patch':
-        blocks.push(<CanvasChangeCard key={part.id} part={part} />);
-        break;
+    if (part.type === 'reasoning') {
+      blocks.push(<ReasoningBlock key={part.id} part={part} />);
+    } else if (part.type === 'assistant_text') {
+      blocks.push(<AssistantAnswer key={part.id} part={part} />);
     }
   }
-  flushRun();
+  for (const part of turn.parts) {
+    if (part.type === 'chart') {
+      blocks.push(<ChartCard key={part.id} part={part} appId={appId} sessionId={sessionId} />);
+    } else if (part.type === 'canvas_patch') {
+      blocks.push(<CanvasChangeCard key={part.id} part={part} />);
+    }
+  }
   return blocks;
+}
+
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end" data-testid="user-bubble">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-3 py-1.5 text-[12px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
+        {text}
+      </div>
+    </div>
+  );
 }
 
 function UserTurn({ turn }: { turn: Turn }) {
   const text = turn.parts
     .map((p) => (p.type === 'user_message' ? p.text : ''))
     .join('');
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-[color-mix(in_srgb,var(--interactive-primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--interactive-primary)_14%,var(--bg-primary))] px-3 py-1.5 text-[12px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words">
-        {text}
-      </div>
-    </div>
-  );
+  return <UserBubble text={text} />;
 }
 
 function AssistantTurn({
@@ -118,9 +119,14 @@ function AssistantTurn({
   const settled = !isLiveTurn;
   // The shimmer narrates specialist work; once the final answer starts
   // streaming it owns the space, so the shimmer steps aside (no glass below
-  // the growing answer).
+  // the growing answer). While a specialist group is present it is the live
+  // narrator (one shimmering "consulting…" row), so the standalone glass yields
+  // to it — exactly one shimmer line at a time.
   const answerStreaming = turn.parts.some((p) => p.type === 'assistant_text');
-  const showThinking = isLiveTurn && !answerStreaming;
+  const hasSpecialist = turn.parts.some(isSpecialistPart);
+  // Glass before any specialist (initial thinking) AND while the held answer is
+  // being composed (specialists done, not yet settled) — so it never looks frozen.
+  const showThinking = isLiveTurn && ((!answerStreaming && !hasSpecialist) || answerStreaming);
 
   // Action bar below a finished message: copy + cost. Driven by the persisted
   // parts (answer text + step_finish.turn_id), so it's identical across live
@@ -176,10 +182,17 @@ function AssistantTurn({
   );
 }
 
-export function TurnList({ parts, appId, sessionId, streaming, onRetry }: TurnListProps) {
+export function TurnList({ parts, appId, sessionId, streaming, onRetry, pendingUserText, pendingTurnId }: TurnListProps) {
   const turns = groupPartsIntoTurns(parts);
   const last = turns[turns.length - 1];
-  const trailingThinking = streaming && (!last || last.role === 'user');
+  // The optimistic bubble shows from send until the server's user_message echo —
+  // whose id is `user-${client_turn_id}` (== pendingTurnId) — lands in `parts`.
+  // Reconcile by that exact id (the real contract); the grouped UserTurn then owns
+  // the bubble. No text/count heuristic, retry-safe, no duplicate.
+  const echoId = pendingTurnId != null ? `user-${pendingTurnId}` : null;
+  const echoArrived = echoId != null && parts.some((p) => p.id === echoId);
+  const showPending = streaming && !!pendingUserText && pendingUserText.trim() !== '' && !echoArrived;
+  const trailingThinking = streaming && !showPending && (!last || last.role === 'user');
 
   return (
     <div className="flex flex-col gap-5">
@@ -209,7 +222,14 @@ export function TurnList({ parts, appId, sessionId, streaming, onRetry }: TurnLi
         );
       })}
 
-      {trailingThinking ? (
+      {showPending ? (
+        <>
+          <UserBubble text={pendingUserText as string} />
+          <div className="w-full">
+            <ThinkingIndicator />
+          </div>
+        </>
+      ) : trailingThinking ? (
         <div className="w-full">
           <ThinkingIndicator />
         </div>

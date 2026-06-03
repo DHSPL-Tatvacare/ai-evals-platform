@@ -67,7 +67,11 @@ from app.services.chat_engine.granularity_graph import (
     aggregate_at_lowest_grain,
 )
 from app.services.chat_engine.manifest import AppManifest
-from app.services.chat_engine.scope import visible_projection_names
+from app.services.chat_engine.scope import (
+    compute_scope_bindings,
+    cte_aliases_for,
+    visible_projection_names,
+)
 from app.services.chat_engine.workbench_catalog import (
     WorkbenchCatalog,
     WorkbenchTable,
@@ -190,8 +194,9 @@ class _AliasBinding:
 class _ParsedSelect:
     """Flattened view of a parsed SQL statement.
 
-    ``cte_names`` are bare names of WITH-clause aliases; references to
-    these are allowed even though they're not catalog tables.
+    ``cte_names`` holds both WITH-clause aliases and derived-table aliases
+    (``FROM (subquery) alias``); references qualified by either are opaque to
+    catalog rules.
     """
 
     root: exp.Expression
@@ -335,16 +340,6 @@ def _column_alias(col: exp.Column) -> str | None:
     if isinstance(table_part, exp.Identifier):
         return table_part.name.lower()
     return None
-
-
-def _alias_table_map(parsed: _ParsedSelect) -> dict[str, str]:
-    """Map query aliases and bare table names to catalog table names."""
-    alias_map: dict[str, str] = {}
-    for b in parsed.base_tables:
-        if b.alias:
-            alias_map[b.alias] = b.table
-        alias_map.setdefault(b.table, b.table)
-    return alias_map
 
 
 # Logical→physical lowering lives in semantic_lowering.lower_sql.
@@ -508,48 +503,54 @@ def _all_available_joins(graph: GranularityGraph) -> list[AvailableJoin]:
 def _r3_declared_joins(
     parsed: _ParsedSelect, graph: GranularityGraph
 ) -> Verdict | None:
-    """R3 — joined catalog tables must use declared relationship keys."""
-    tables = [b.table for b in parsed.base_tables if graph.has_table(b.table)]
-    if len(tables) <= 1:
-        return None
-    accepted = {tables[0]}
-    pending = list(tables[1:])
-    while pending:
-        progressed = False
-        for t in list(pending):
-            if any(graph.declared_join_exists(t, a) for a in accepted):
-                accepted.add(t)
-                pending.remove(t)
-                progressed = True
-        if not progressed:
+    """R3 — joined catalog tables must use declared relationship keys.
+
+    Resolution is PER SCOPE: a join only exists between two catalog tables when
+    they sit in the same SELECT's FROM/JOINs. Tables in separate CTE bodies are
+    never joined directly, so they are never cross-checked."""
+    for scope in parsed.root.find_all(exp.Select):
+        bindings = compute_scope_bindings(scope)
+        alias_to_table = {
+            alias: table
+            for alias, table in bindings.catalog_aliases.items()
+            if graph.has_table(table)
+        }
+        tables = sorted(set(alias_to_table.values()))
+        if len(tables) <= 1:
+            continue
+        accepted = {tables[0]}
+        pending = list(tables[1:])
+        while pending:
+            progressed = False
+            for t in list(pending):
+                if any(graph.declared_join_exists(t, a) for a in accepted):
+                    accepted.add(t)
+                    pending.remove(t)
+                    progressed = True
+            if not progressed:
+                return _fail(
+                    "R3.undeclared_join",
+                    f"undeclared join: {sorted(pending)} are not connected "
+                    f"to {sorted(accepted)} via any declared relationship",
+                    offending_tables=tuple(sorted(pending)),
+                    hint="add a many_to_one relationship in the catalog or use a different table",
+                    available_joins=_all_available_joins(graph),
+                )
+        bad_pairs = _join_pairs_missing_declared_keys(scope, alias_to_table, graph)
+        if bad_pairs:
             return _fail(
-                "R3.undeclared_join",
-                f"undeclared join: {sorted(pending)} are not connected "
-                f"to {sorted(accepted)} via any declared relationship",
-                offending_tables=tuple(sorted(pending)),
-                hint="add a many_to_one relationship in the catalog or use a different table",
+                "R3.declared_join_columns",
+                "joined catalog tables must be joined on their declared relationship columns",
+                offending_tables=tuple(sorted(bad_pairs)),
+                hint="use the relationship columns declared in the workbench catalog",
                 available_joins=_all_available_joins(graph),
             )
-    bad_pairs = _join_pairs_missing_declared_keys(parsed, graph)
-    if bad_pairs:
-        return _fail(
-            "R3.declared_join_columns",
-            "joined catalog tables must be joined on their declared relationship columns",
-            offending_tables=tuple(sorted(bad_pairs)),
-            hint="use the relationship columns declared in the workbench catalog",
-            available_joins=_all_available_joins(graph),
-        )
     return None
 
 
 def _join_pairs_missing_declared_keys(
-    parsed: _ParsedSelect, graph: GranularityGraph
+    scope: exp.Select, alias_to_table: dict[str, str], graph: GranularityGraph
 ) -> set[str]:
-    alias_to_table = {
-        alias: table
-        for alias, table in _alias_table_map(parsed).items()
-        if graph.has_table(table)
-    }
     tables = sorted(set(alias_to_table.values()))
     if len(tables) <= 1:
         return set()
@@ -565,7 +566,10 @@ def _join_pairs_missing_declared_keys(
                 }
 
     satisfied: dict[tuple[str, str], set[tuple[str, str]]] = {}
-    for eq in parsed.select_expr.find_all(exp.EQ):
+    for eq in scope.find_all(exp.EQ):
+        # Only equalities owned by THIS scope — not ones nested in a subquery/CTE.
+        if eq.find_ancestor(exp.Select) is not scope:
+            continue
         left, right = eq.this, eq.expression
         if not isinstance(left, exp.Column) or not isinstance(right, exp.Column):
             continue
@@ -663,7 +667,10 @@ def _r4_allowed_columns(
         if col_name in cte_projection_names:
             continue
         alias = _column_alias(col)
-        if alias is not None and alias in parsed.cte_names:
+        # A column qualified by a CTE / derived-subquery FROM-alias visible in
+        # this column's scope chain is opaque to catalog rules (the CTE body is
+        # validated in its own scope). Resolved the same way the lowerer does.
+        if alias is not None and alias in cte_aliases_for(col):
             continue
         if alias is not None:
             t = alias_map.get(alias)
@@ -1464,6 +1471,26 @@ def _r7_apply_server_limit(
     return safe, cap + 1
 
 
+def _top_level_limit(root: exp.Expression) -> int | None:
+    """The integer LIMIT on the outermost SELECT, or None. Used so a user's
+    "top N" (a semantic limit) is honored when tighter than the server cap."""
+    target = root if isinstance(root, exp.Select) else None
+    if target is None:
+        flat = _flatten_select(root)
+        target = flat.select_expr if flat is not None else None
+    if target is None:
+        return None
+    limit = target.args.get("limit")
+    if isinstance(limit, exp.Limit):
+        expr = limit.expression
+        if isinstance(expr, exp.Literal) and expr.is_int:
+            try:
+                return int(expr.name)
+            except ValueError:
+                return None
+    return None
+
+
 def _strip_top_level_limit_offset(root: exp.Expression) -> str:
     stripped = root.copy()
     target = stripped if isinstance(stripped, exp.Select) else None
@@ -1474,6 +1501,28 @@ def _strip_top_level_limit_offset(root: exp.Expression) -> str:
         target.set("limit", None)
         target.set("offset", None)
     return stripped.sql(dialect=_DIALECT)
+
+
+# ── Rule teaching surface ─────────────────────────────────────────────
+#
+# Each rule the bouncer applies pre-execution owns ONE model-facing line
+# stating the rule positively. The data_specialist prompt renders these
+# in place of hand-written contract prose — teach == enforce. A new rule
+# without an entry here is caught by test_data_specialist_rule_teach.
+# Keep each line in sync with the rule function above it, never the prose.
+
+RULE_TEACH: dict[str, str] = {
+    "R1": "Submit ONE read-only statement — a single SELECT or WITH … SELECT. No DDL/DML, no stacked statements, no SQL comments.",
+    "R2": "Reference only catalog tables. information_schema and pg_* are rejected.",
+    "R3": "Join catalog tables only on their declared relationship columns; undeclared joins are rejected.",
+    "R4": "Reference only declared logical columns (and declared attributes->>'key' reads); the backend expands logical names to physical SQL after approval.",
+    "R5": "Every non-aggregated SELECT column must appear in GROUP BY.",
+    "R6": "Put aggregates on the lowest-grain table in the query, not a coarser joined table.",
+    "R7": "The server caps rows via expected_row_bound — don't hand-write LIMIT for the cap. But for a user-requested 'top N', DO write ORDER BY … LIMIT N; the server honors a LIMIT tighter than the cap.",
+    "R7s": "Filter tenant_id = :tenant_id and app_id = :app_id on every catalog-bound alias, in WHERE and in JOIN ON.",
+    "R8a": "Don't aggregate a coarse-grain measure across a join to a finer-grain table — it multiplies the measure (fan trap).",
+    "R8b": "Don't join two fine-grain facts through a shared dimension — ask each fact separately (chasm trap).",
+}
 
 
 # ── Public API: check_before ──────────────────────────────────────────
@@ -1544,10 +1593,15 @@ def check_before(
         if result is not None:
             return _attach_meta(result, declared_grain, expected_row_bound)
 
-    # R7: server-owned LIMIT.
+    # R7: server-owned LIMIT. The cap is a CEILING; a user-requested "top N"
+    # (a model LIMIT tighter than the cap) is honored so "top 5" returns 5.
     cap = row_cap_override if row_cap_override is not None else ROW_CAPS.get(
         expected_row_bound, DEFAULT_ROW_CAP
     )
+    if row_cap_override is None:
+        model_limit = _top_level_limit(parsed.root)
+        if model_limit is not None and model_limit > 0:
+            cap = min(cap, model_limit)
     safe_sql, limit_applied = _r7_apply_server_limit(parsed, cap=cap)
     return Verdict(
         status="ok",
@@ -1640,25 +1694,25 @@ def check_after(
                 )
             seen.add(key)
 
-    # R12 — at least one non-null value per column.
+    # R12 — the result must carry SOME data. Reject only when EVERY column is
+    # null (a garbage/empty row — a LEFT JOIN miss, or an aggregate over no
+    # rows). A partially-null row is valid sparse data (e.g. an unscored run);
+    # the chart layer omits the null columns rather than failing the query.
     if displayed:
         cols = list(displayed[0].keys())
         all_null = [
             c for c in cols
             if all(r.get(c) is None for r in displayed)
         ]
-        if all_null and len(cols) > 0:
-            # All-null result columns indicate the query selected fields
-            # that are NULL for every row in scope — refuse rather than
-            # render a misleading chart of nulls.
+        if cols and len(all_null) == len(cols):
             return _attach_post_meta(
                 _fail(
                     "R12.all_null_columns",
-                    f"result columns are entirely NULL: {all_null}",
+                    "the entire result is NULL — no usable data was returned",
                     offending_columns=tuple(all_null),
                     hint=(
-                        "filter the query to exclude rows where these "
-                        "columns are NULL, or pick a different column"
+                        "the matched row(s) have no data in any column — check "
+                        "the filter/join; the rows you expected may not exist"
                     ),
                 ),
                 grain,
@@ -1793,6 +1847,7 @@ __all__ = [
     "Diagnostic",
     "ExpectedRowBound",
     "ROW_CAPS",
+    "RULE_TEACH",
     "Verdict",
     "apply_server_limit",
     "check_after",

@@ -487,14 +487,7 @@ async def _run_workbench_pipeline(
     evidence_models = [EvidenceRef.model_validate(e) for e in evidence_raw]
     _stash_last_attempt(sherlock_ctx, attempt)
     if emitter is not None:
-        for artifact_model in artifact_models:
-            await emitter.emit(ChartPart(
-                id=new_part_id(),
-                chat_session_id='',
-                seq=0,
-                created_at=0,
-                artifact=artifact_model,
-            ))
+        await _emit_chart_parts(emitter=emitter, artifacts=artifact_models)
         if evidence_models:
             await emitter.emit(EvidencePart(
                 id=new_part_id(),
@@ -530,11 +523,53 @@ async def _run_workbench_pipeline(
     return result.model_dump_json()
 
 
-def _bouncer_summary(verdict: Any) -> str:
-    diag = verdict.diagnostic
+async def _emit_chart_parts(*, emitter: Any | None, artifacts: list[Artifact]) -> None:
+    """Emit one ChartPart per artifact, skipping empties — empty is a status (Attempt.status), not a card."""
+    if emitter is None:
+        return
+    for artifact_model in artifacts:
+        if artifact_model.kind == 'empty':
+            continue
+        await emitter.emit(ChartPart(
+            id=new_part_id(),
+            chat_session_id='',
+            seq=0,
+            created_at=0,
+            artifact=artifact_model,
+        ))
+
+
+def _render_retry_corrections(verdict: Any) -> str:
+    """Render a failed Verdict's diagnostic as explicit corrections for the next attempt.
+
+    The submit_sql tool output IS the model's retry context, so the diagnostic's
+    own recovery surface (hint / required_scope_predicates / did_you_mean) is
+    rendered here rather than re-guessed. Pure function over the existing carrier.
+    """
+    diag = getattr(verdict, 'diagnostic', None)
     if diag is None:
         return 'bouncer rejected the SQL'
-    return f'{diag.rule_id}: {diag.message}'
+    parts = [f'Your last attempt failed rule {diag.rule_id}: {diag.message}.']
+    if diag.hint:
+        parts.append(f'Hint: {diag.hint}.')
+    if diag.required_scope_predicates:
+        parts.append(
+            'Add these predicates: '
+            + ', '.join(diag.required_scope_predicates)
+            + '.'
+        )
+    if diag.did_you_mean:
+        pairs = ', '.join(f'{k} -> {v}' for k, v in diag.did_you_mean.items())
+        parts.append(f'Did you mean: {pairs}.')
+    if diag.missing_group_by_keys:
+        parts.append(
+            'Add to GROUP BY: ' + ', '.join(diag.missing_group_by_keys) + '.'
+        )
+    return ' '.join(parts)
+
+
+def _bouncer_summary(verdict: Any) -> str:
+    return _render_retry_corrections(verdict)
 
 
 def _workbench_summary(question: str, verdict: Any, artifacts: list[dict[str, Any]]) -> str:

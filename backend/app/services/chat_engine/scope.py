@@ -68,6 +68,20 @@ def visible_projection_names(root: exp.Expression) -> frozenset[str]:
     return frozenset(names)
 
 
+def cte_aliases_for(node: exp.Expression) -> frozenset[str]:
+    """CTE / derived-subquery FROM-aliases visible to ``node`` — its owning SELECT
+    plus every enclosing SELECT. A column qualified by one of these is bound to a
+    CTE/derived scope, not a catalog table, so it is opaque to catalog rules."""
+    names: set[str] = set()
+    scope: exp.Select | None = (
+        node if isinstance(node, exp.Select) else node.find_ancestor(exp.Select)
+    )
+    while scope is not None:
+        names |= compute_scope_bindings(scope).cte_aliases
+        scope = scope.find_ancestor(exp.Select)
+    return frozenset(names)
+
+
 def _ctes_in_scope(select_node: exp.Select) -> list[str]:
     names: list[str] = []
     node: exp.Expression | None = select_node
@@ -84,5 +98,6 @@ def _ctes_in_scope(select_node: exp.Select) -> list[str]:
 __all__ = [
     'ScopeBindings',
     'compute_scope_bindings',
+    'cte_aliases_for',
     'visible_projection_names',
 ]

@@ -269,6 +269,28 @@ class CatalogParseTests(unittest.TestCase):
         self.assertNotIn("->>", prompt_text)
         self.assertNotIn("result_detail", prompt_text)
 
+    def test_prompt_inputs_render_per_column_source_table_grain_and_derived(self) -> None:
+        # P7 — each logical column surfaces source_table + its source table's
+        # analytical_grain + a derived flag, without leaking the JSONB expr.
+        catalog = parse_workbench_catalog(_minimal_catalog_yaml())
+        schema_context, _, _, _ = workbench_to_prompt_inputs(catalog)
+        cols = {
+            c["name"]: c
+            for c in schema_context["tables"]["fact_evaluation"]["columns"]
+        }
+        passthrough = cols["agent"]
+        self.assertEqual(passthrough["source_table"], "fact_evaluation")
+        self.assertEqual(
+            passthrough["grain"], ["run_id", "item_id", "evaluator_id"]
+        )
+        self.assertFalse(passthrough["derived"])
+        derived = cols["call_opening_score"]
+        self.assertEqual(derived["source_table"], "fact_evaluation")
+        self.assertTrue(derived["derived"])
+        # Still no JSONB expression leakage.
+        self.assertNotIn("->>", repr(schema_context))
+        self.assertNotIn("result_detail", repr(schema_context))
+
 
 class StrictFallbackTests(unittest.TestCase):
     """Plan invariant: a broken catalog YAML must raise, not silently fall

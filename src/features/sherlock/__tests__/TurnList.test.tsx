@@ -106,7 +106,7 @@ describe('TurnList', () => {
       <TurnList parts={settledParts} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />,
     );
     expect(container.querySelector('[data-part-type="specialist-group"]')).not.toBeNull();
-    expect(screen.getByText(/Consulted the data specialist/i)).toBeTruthy();
+    expect(screen.getByText(/Consulted Titan Mnemosyne, the archivist/i)).toBeTruthy();
     expect(screen.queryByText(/Consulting/i)).toBeNull();
   });
 
@@ -115,7 +115,25 @@ describe('TurnList', () => {
     expect(screen.getByText('7,201')).toBeTruthy();
   });
 
-  it('shows the thinking shimmer while an assistant turn is still streaming, with the group expanded', () => {
+  it('holds the chart until the turn settles — never mid-consultation', () => {
+    // live turn: a chart part has arrived while a specialist is still consulting
+    const live: SherlockPart[] = [
+      stepStart,
+      userMsg,
+      dataSubtask(2, 'st-data', { status: 'running', started_at: 0 }),
+      chart,
+    ];
+    const { rerender } = render(
+      <TurnList parts={live} appId="inside-sales" sessionId={null} streaming onRetry={() => {}} />,
+    );
+    // chart must NOT show while live (KPI value hidden)
+    expect(screen.queryByText('7,201')).toBeNull();
+    // once settled, the chart renders
+    rerender(<TurnList parts={settledParts} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />);
+    expect(screen.getByText('7,201')).toBeTruthy();
+  });
+
+  it('lets the consulting row be the single live line — no standalone glass while a specialist runs', () => {
     const inflight: SherlockPart[] = [
       stepStart,
       userMsg,
@@ -124,9 +142,11 @@ describe('TurnList', () => {
     const { container } = render(
       <TurnList parts={inflight} appId="inside-sales" sessionId={null} streaming onRetry={() => {}} />,
     );
-    expect(container.querySelector('[data-testid="sherlock-thinking"]')).not.toBeNull();
-    // group is expanded and the row reads "consulting…", honestly from state.
+    // the specialist group narrates; the standalone thinking glass yields to it
+    expect(container.querySelector('[data-testid="sherlock-thinking"]')).toBeNull();
+    // the expanded row reads "consulting…", honestly from state, and is the one shimmer
     expect(screen.getByText(/consulting…/i)).toBeTruthy();
+    expect(container.querySelectorAll('[class*="chat-widget-shimmer"]').length).toBe(1);
   });
 
   it('resolves every specialist from its own state — no perpetual spinner on a settled turn', () => {
@@ -151,7 +171,7 @@ describe('TurnList', () => {
     ];
     render(<TurnList parts={settled} appId="inside-sales" sessionId={null} streaming={false} onRetry={() => {}} />);
     expect(screen.queryByText(/Consulting/i)).toBeNull();
-    expect(screen.getByText(/Consulted 2 specialists/i)).toBeTruthy();
+    expect(screen.getByText(/Consulted 2 Titans/i)).toBeTruthy();
   });
 });
 

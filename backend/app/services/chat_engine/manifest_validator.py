@@ -50,6 +50,94 @@ class WorkbenchCatalogDriftError(RuntimeError):
     """
 
 
+class ExemplarContractError(RuntimeError):
+    """Raised when a verified-query exemplar fails the real enforcers.
+
+    Seam B: every exemplar shipped to the data_specialist prompt must pass
+    ``check_before`` + ``prepare_query``. A divergence here means the prompt
+    teaches SQL the bouncer would reject — boot blocks.
+    """
+
+
+# Boot-time placeholder scope: the binder only reads tenant_id/user_id as
+# strings to bind :tenant_id/:user_id — no DB access, no real identity.
+class _BootScope:
+    tenant_id = "00000000-0000-0000-0000-000000000000"
+    user_id = "00000000-0000-0000-0000-000000000000"
+    is_owner = True
+    app_access: frozenset[str] = frozenset()
+    permissions: frozenset[str] = frozenset()
+
+
+def validate_exemplars_through_enforcers(
+    catalog: WorkbenchCatalog,
+    app_id: str,
+    *,
+    extra_exemplars: list[tuple[str, str]] | None = None,
+    raise_on_reject: bool = False,
+) -> list[tuple[str, str]]:
+    """Run every catalog verified-query through the REAL enforcers.
+
+    Mirrors the runtime ``submit_sql`` pipeline exactly:
+    ``check_before`` → ``lower_sql`` → ``prepare_query`` against the app's
+    catalog + granularity graph. Reuses the single enforcer; adds no second
+    validator. Returns the list of ``(name, reason)`` rejections (empty =
+    all pass). With ``raise_on_reject`` it raises ``ExemplarContractError``
+    so the boot path aborts.
+    """
+    from app.services.chat_engine.granularity_graph import build_granularity_graph
+    from app.services.chat_engine.manifest import get_manifest
+    from app.services.chat_engine.semantic_lowering import lower_sql
+    from app.services.chat_engine.sql_agent import (
+        SQLValidationError,
+        UUIDParamRegistry,
+        prepare_query,
+    )
+    from app.services.chat_engine.sql_bouncer import check_before
+
+    graph = build_granularity_graph(catalog)
+    try:
+        manifest = get_manifest(app_id)
+    except KeyError:
+        manifest = None
+
+    pairs: list[tuple[str, str]] = [
+        (v.name, v.sql) for v in catalog.verified_queries
+    ]
+    if extra_exemplars:
+        pairs.extend(extra_exemplars)
+
+    scope = _BootScope()
+    rejected: list[tuple[str, str]] = []
+    for name, sql in pairs:
+        before = check_before(
+            sql=sql,
+            declared_grain=[],
+            expected_row_bound="medium",
+            catalog=catalog,
+            graph=graph,
+            manifest=manifest,
+            permissions=None,
+        )
+        if not before.ok:
+            diag = before.diagnostic
+            reason = getattr(diag, "message", None) or "rejected by check_before"
+            rejected.append((name, f"check_before: {reason}"))
+            continue
+        try:
+            lowered = lower_sql(sql, catalog)
+            prepare_query(lowered, scope, app_id, None, uuid_registry=UUIDParamRegistry())
+        except (SQLValidationError, ValueError) as exc:
+            rejected.append((name, f"prepare_query: {exc}"))
+
+    if rejected and raise_on_reject:
+        raise ExemplarContractError(
+            f"Exemplar contract drift for {app_id} ({len(rejected)} rejected):\n  - "
+            + "\n  - ".join(f"{n}: {r}" for n, r in rejected)
+        )
+    return rejected
+
+
 def validate_manifest_taxonomy(manifest: AppManifest, strict: bool = False) -> list[str]:
     """Return warnings for chart-contract taxonomy drift.
 
@@ -646,6 +734,15 @@ async def run_manifest_validator(db: AsyncSession) -> None:
                 "Workbench catalog %s: cross-check OK (%d tables, %d verified queries)",
                 manifest.app_id,
                 len(catalog.tables),
+                len(catalog.verified_queries),
+            )
+            # Seam B: every shipped exemplar must pass the real enforcers.
+            validate_exemplars_through_enforcers(
+                catalog, manifest.app_id, raise_on_reject=True
+            )
+            logger.info(
+                "Workbench catalog %s: all %d exemplars pass check_before+prepare_query",
+                manifest.app_id,
                 len(catalog.verified_queries),
             )
             # Best-effort rubric coverage warning; a DB hiccup here must never block boot.

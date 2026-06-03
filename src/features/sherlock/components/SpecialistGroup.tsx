@@ -20,9 +20,9 @@ export type SpecialistPart = SubtaskPart | RetryPart;
 type Status = 'running' | 'completed' | 'error';
 
 const SPECIALIST_LABELS: Record<string, string> = {
-  data_specialist: 'data specialist',
-  query_synthesis_specialist: 'query synthesis',
-  authoring_specialist: 'authoring specialist',
+  data_specialist: 'Titan Mnemosyne, the archivist',
+  query_synthesis_specialist: 'Titan Metis, the planner',
+  authoring_specialist: 'Titan Prometheus, the maker',
 };
 
 function specialistLabel(name: string): string {
@@ -106,7 +106,7 @@ function StatusGlyph({ status }: { status: Status }) {
   return <span className="h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full bg-[var(--color-verdict-pass)]" />;
 }
 
-function ConsultationRow({ consultation, status }: { consultation: Consultation; status: Status }) {
+function ConsultationRow({ consultation, status, shimmer }: { consultation: Consultation; status: Status; shimmer: boolean }) {
   const { specialist, brief, retries } = consultation;
   const running = status === 'running';
   const errored = status === 'error';
@@ -153,7 +153,9 @@ function ConsultationRow({ consultation, status }: { consultation: Consultation;
           </span>
           <span className="text-[var(--text-muted)]">·</span>
           <span className="min-w-0 flex-1 text-[var(--text-primary)]">
-            {running ? <Shimmer>consulting…</Shimmer> : errored ? 'consultation failed' : 'consulted'}
+            {running
+              ? (shimmer ? <Shimmer>consulting…</Shimmer> : 'consulting…')
+              : errored ? 'consultation failed' : 'consulted'}
           </span>
           {duration && !running ? (
             <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)]">{duration}</span>
@@ -252,11 +254,14 @@ export function SpecialistGroup({ parts, settled }: { parts: SpecialistPart[]; s
   const totalRows = consultations.reduce((sum, c) => sum + (completedResult(c)?.row_count ?? 0), 0);
   const totalMs = consultations.reduce((sum, c) => sum + (durationMs(c) ?? 0), 0);
 
+  // Exactly one live line shimmers: the first running row when expanded, the
+  // header (the only visible line) when collapsed.
+  const firstRunningIdx = statuses.findIndex((s) => s === 'running');
   const verb = anyRunning ? 'Consulting' : 'Consulted';
   const headLabel =
     distinct.length === 1
-      ? `${verb} the ${specialistLabel(distinct[0])}${anyRunning ? '…' : ''}`
-      : `${verb} ${distinct.length} specialists${anyRunning ? '…' : ''}`;
+      ? `${verb} ${specialistLabel(distinct[0])}${anyRunning ? '…' : ''}`
+      : `${verb} ${distinct.length} Titans${anyRunning ? '…' : ''}`;
 
   const summaryMeta: string[] = [];
   if (!anyRunning && totalRows > 0) summaryMeta.push(`${totalRows} ${totalRows === 1 ? 'row' : 'rows'}`);
@@ -272,7 +277,7 @@ export function SpecialistGroup({ parts, settled }: { parts: SpecialistPart[]; s
         className="inline-flex w-fit items-center gap-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
       >
         <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', !collapsed && 'rotate-90')} />
-        {anyRunning ? (
+        {collapsed && anyRunning ? (
           <Shimmer className="font-mono uppercase tracking-[0.08em]">{headLabel}</Shimmer>
         ) : (
           <span
@@ -294,7 +299,7 @@ export function SpecialistGroup({ parts, settled }: { parts: SpecialistPart[]; s
       {!collapsed ? (
         <div className="flex flex-col gap-1.5">
           {consultations.map((c, i) => (
-            <ConsultationRow key={c.key} consultation={c} status={statuses[i]} />
+            <ConsultationRow key={c.key} consultation={c} status={statuses[i]} shimmer={i === firstRunningIdx} />
           ))}
         </div>
       ) : null}

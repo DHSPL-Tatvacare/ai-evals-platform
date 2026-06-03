@@ -537,11 +537,15 @@ class R7HonestLimitTests(unittest.TestCase):
         assert v.safe_sql is not None
         self.assertIn("LIMIT 2", v.safe_sql)
 
-    def test_llm_top_level_limit_is_stripped_before_server_cap(self) -> None:
+    def test_tighter_llm_limit_is_honored_as_the_cap(self) -> None:
+        # A user "top N" (LIMIT below the bound's cap) is honored: the effective
+        # cap becomes N, the inner LIMIT is stripped, and we wrap with N+1 for
+        # honest more-rows detection.
         v = _run_before(_ok_sql() + " LIMIT 3", bound="small")
         self.assertEqual(v.status, "ok", msg=v.diagnostic)
+        self.assertEqual(v.row_cap, 3)
         assert v.safe_sql is not None
-        self.assertIn(f"LIMIT {ROW_CAPS['small'] + 1}", v.safe_sql)
+        self.assertIn("LIMIT 4", v.safe_sql)
         inner_sql = v.safe_sql.split("AS bouncer_limited_result", 1)[0]
         self.assertNotIn("LIMIT 3", inner_sql)
 
@@ -664,7 +668,23 @@ class PostExecutionRulesTests(unittest.TestCase):
         self.assertFalse(v.more_rows_exist)
         self.assertEqual(v.displayed_row_count, 1)
 
-    def test_all_null_columns_rejected(self) -> None:
+    def test_user_top_n_limit_is_honored_below_cap(self) -> None:
+        # "top 5" => the model writes LIMIT 5; cap (small=50) is a ceiling, so 5 wins.
+        v = _run_before(_ok_sql() + " ORDER BY avg_score DESC LIMIT 5", bound="small")
+        self.assertTrue(v.ok)
+        self.assertEqual(v.row_cap, 5)
+        assert v.safe_sql is not None
+        self.assertIn("LIMIT 6", v.safe_sql)  # cap+1 for honest more-rows detection
+
+    def test_runaway_limit_is_clamped_to_cap(self) -> None:
+        # a LIMIT above the cap is still clamped to the server cap.
+        v = _run_before(_ok_sql() + " ORDER BY avg_score DESC LIMIT 9999", bound="small")
+        self.assertTrue(v.ok)
+        self.assertEqual(v.row_cap, 50)
+
+    def test_partial_null_columns_allowed(self) -> None:
+        # Sparse-but-valid data (e.g. an unscored run): agent has data, the
+        # score column is null. R12 must NOT reject — the row is useful.
         rows = [
             {"agent": "A", "result_score": None},
             {"agent": "B", "result_score": None},
@@ -673,10 +693,19 @@ class PostExecutionRulesTests(unittest.TestCase):
             rows=rows, declared_grain=["agent"],
             expected_row_bound="small", row_cap=50,
         )
+        self.assertEqual(v.status, "ok")
+
+    def test_all_columns_null_rejected(self) -> None:
+        # Every column null = a garbage/empty row (LEFT JOIN miss, aggregate
+        # over no rows) — no usable data, refuse.
+        rows = [{"agent": None, "result_score": None}]
+        v = check_after(
+            rows=rows, declared_grain=["agent"],
+            expected_row_bound="small", row_cap=50,
+        )
         self.assertEqual(v.status, "invalid")
         assert v.diagnostic is not None
         self.assertEqual(v.diagnostic.rule_id, "R12.all_null_columns")
-        self.assertIn("result_score", v.diagnostic.offending_columns)
 
 
 # ── AST coverage: aliases, CTEs, subqueries, casts, quoted IDs ────────

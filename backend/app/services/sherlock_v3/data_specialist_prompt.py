@@ -25,6 +25,14 @@ from typing import Any
 
 import yaml
 
+from app.services.chat_engine.sql_agent import BINDER_CONTRACT
+from app.services.chat_engine.sql_bouncer import RULE_TEACH
+
+
+def _indent(text: str, n: int) -> str:
+    pad = ' ' * n
+    return '\n'.join(pad + line for line in text.splitlines())
+
 
 _PERSONALITY = """\
 You are Sherlock's data_specialist. The supervisor hands you a
@@ -102,19 +110,69 @@ OUTPUT_COLUMNS RULES:
 - Aggregate columns (no passthrough source): omit ``source_column``.
 """
 
-_CATALOG_USAGE = """\
-HOW TO USE THE CATALOG:
-- The SCHEMA block below is the curated workbench catalog. Every table
-  declares its ``analytical_grain``, its physical primary key, and the
-  logical columns the bouncer accepts. Joins listed under ``relations``
-  are the ONLY allowed joins.
-- Logical column names are the names you write in SQL even when the
-  underlying column is a JSONB extract. The backend expands those logical
-  names to physical expressions after the bouncer approves the query.
-- Filter tenant + app on every catalog-bound table alias using the
-  bind parameters ``:tenant_id`` and ``:app_id``. Entity IDs are bind
-  parameters too (``:uuid_1`` etc.); never hardcode UUID strings.
-"""
+# A single-row run-id filter plus an IN-list of quoted UUIDs. parameterize_sql
+# rewrites each quoted UUID literal into :uuid_N, so this is the binder's truth.
+ENTITY_ID_FILTER_EXEMPLAR_SQL = (
+    "SELECT agent, overall_score, created_at\n"
+    "FROM analytics.fact_evaluation\n"
+    "WHERE tenant_id = :tenant_id AND app_id = :app_id\n"
+    "  AND run_id = '11111111-1111-1111-1111-111111111111'\n"
+    "  AND evaluator_id IN ('22222222-2222-2222-2222-222222222222',\n"
+    "                       '33333333-3333-3333-3333-333333333333')\n"
+    "ORDER BY created_at DESC"
+)
+
+
+# Grain-correct GROUP BY (R5): every non-aggregated SELECT column is in
+# GROUP BY; the aggregate stays on the table's analytical grain.
+GRAIN_GROUP_BY_EXEMPLAR_SQL = (
+    "SELECT agent,\n"
+    "       COUNT(*) AS calls,\n"
+    "       ROUND(AVG(overall_score)::numeric, 2) AS avg_score\n"
+    "FROM analytics.fact_evaluation\n"
+    "WHERE tenant_id = :tenant_id AND app_id = :app_id\n"
+    "GROUP BY agent\n"
+    "ORDER BY avg_score DESC"
+)
+
+# Multi-grain join (R6/R7s/R8): aggregate the fine-grain fact, join the
+# coarse dimension on its declared key, scope BOTH aliases.
+MULTI_GRAIN_JOIN_EXEMPLAR_SQL = (
+    "SELECT dl.source,\n"
+    "       COUNT(*) AS activity_count\n"
+    "FROM analytics.fact_lead_activity la\n"
+    "JOIN analytics.dim_lead dl ON la.lead_id = dl.lead_id\n"
+    "WHERE la.tenant_id = :tenant_id AND la.app_id = :app_id\n"
+    "  AND dl.tenant_id = :tenant_id AND dl.app_id = :app_id\n"
+    "GROUP BY dl.source"
+)
+
+
+def _render_query_contract() -> str:
+    """Render the query contract from the enforcers — one source of truth.
+
+    The rule teaching comes from the bouncer (``RULE_TEACH``); the
+    bound-param + quoting rule comes from the binder (``BINDER_CONTRACT``).
+    This function only formats them; it authors no rule text.
+    """
+    rule_lines = '\n'.join(
+        f'- {teach}' for _rule_id, teach in RULE_TEACH.items()
+    )
+    return (
+        'QUERY CONTRACT (enforced by the bouncer — a rejection is feedback, '
+        'not a failure):\n'
+        + rule_lines + '\n\n'
+        + 'PARAMETERS:\n- ' + BINDER_CONTRACT + '\n\n'
+        + '  Example — filter by a resolved run_id (and an IN-list of '
+        'run/evaluator ids):\n'
+        + _indent(ENTITY_ID_FILTER_EXEMPLAR_SQL, 4) + '\n\n'
+        + '  Example — grain-correct GROUP BY (every non-aggregated column '
+        'grouped):\n'
+        + _indent(GRAIN_GROUP_BY_EXEMPLAR_SQL, 4) + '\n\n'
+        + '  Example — multi-grain join (aggregate the fine-grain fact, '
+        'scope every alias):\n'
+        + _indent(MULTI_GRAIN_JOIN_EXEMPLAR_SQL, 4) + '\n'
+    )
 
 
 def build_data_specialist_prompt(
@@ -167,7 +225,7 @@ def build_data_specialist_prompt(
     return (
         _PERSONALITY
         + '\n\n' + _OUTPUT_CONTRACT
-        + '\n\n' + _CATALOG_USAGE
+        + '\n\n' + _render_query_contract()
         + '\nAPP SCOPE: ' + app_id + '\n\n'
         + grounding_block
         + '\nAllowed tables: ' + allowed_tables_block + '\n'
@@ -177,8 +235,3 @@ def build_data_specialist_prompt(
         + instructions_section
         + exemplars_block + '\n'
     )
-
-
-def _indent(text: str, n: int) -> str:
-    pad = ' ' * n
-    return '\n'.join(pad + line for line in text.splitlines())
