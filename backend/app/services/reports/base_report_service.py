@@ -9,12 +9,18 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult, EvaluationRunAdversarialResult
+from app.models.eval_run import EvaluationRun
 from app.schemas.base import CamelModel
 from app.services.access_control import readable_scope_clause
 from app.services.evaluators.llm_base import LoggingLLMWrapper, create_llm_provider
 from app.services.evaluators.runner_utils import save_api_log, make_usage_callback
 from app.services.llm_credentials import resolve_llm_call
+from app.services.reports.spine_source import (
+    AdversarialEvidence,
+    ThreadEvidence,
+    load_adversarial_evidence,
+    load_thread_evidence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,19 +78,11 @@ class BaseReportService(ABC):
             raise ValueError(f"Eval run not found: {run_id}")
         return run
 
-    async def _load_threads(self, run_id: str) -> list[EvaluationRunThreadResult]:
-        result = await self.db.execute(
-            select(EvaluationRunThreadResult).where(EvaluationRunThreadResult.run_id == UUID(run_id))
-        )
-        return list(result.scalars().all())
+    async def _load_threads(self, run_id: str) -> list[ThreadEvidence]:
+        return await load_thread_evidence(self.db, UUID(run_id))
 
-    async def _load_adversarial(self, run_id: str) -> list[EvaluationRunAdversarialResult]:
-        result = await self.db.execute(
-            select(EvaluationRunAdversarialResult).where(
-                EvaluationRunAdversarialResult.run_id == UUID(run_id)
-            )
-        )
-        return list(result.scalars().all())
+    async def _load_adversarial(self, run_id: str) -> list[AdversarialEvidence]:
+        return await load_adversarial_evidence(self.db, UUID(run_id))
 
     async def _load_source_data(self, run_id: str) -> dict[str, Any]:
         return {

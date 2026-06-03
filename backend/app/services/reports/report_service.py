@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import load_only
 
 from app.models.application import Application
-from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult, EvaluationRunAdversarialResult
+from app.models.eval_run import EvaluationRun
 from app.models.evaluator import Evaluator
 from app.schemas.app_config import AppConfig as AppConfigSchema
 from app.schemas.app_analytics_config import AppAnalyticsConfig
@@ -27,6 +27,12 @@ from .custom_evaluations.narrator import CustomEvalNarrator
 from .custom_evaluations.schemas import CustomEvaluationsReport
 from .health_score import compute_adversarial_health_score, compute_health_score
 from .narrator import ReportNarrator
+from .spine_source import (
+    AdversarialEvidence,
+    ThreadEvidence,
+    reconstruct_adversarial_summary,
+    reconstruct_thread_summary,
+)
 from .schemas import (
     Exemplars,
     NarrativeOutput,
@@ -60,8 +66,12 @@ class ReportService(BaseReportService):
         threads = source_data["threads"]
         adversarial = source_data["adversarial"]
 
-        summary = run.summary or {}
         is_adversarial = run.eval_type == "batch_adversarial"
+        summary = (
+            reconstruct_adversarial_summary(adversarial)
+            if is_adversarial
+            else reconstruct_thread_summary(threads)
+        )
 
         # Phase 2 — missing-input markers for the health-score path. Each entry
         # corresponds to a downstream blank-card class; the finalizer in
@@ -107,7 +117,7 @@ class ReportService(BaseReportService):
         adversarial_breakdown = agg.compute_adversarial_breakdown()
 
         # Metadata
-        metadata = self._build_metadata(run, threads, adversarial)
+        metadata = self._build_metadata(run, threads, adversarial, summary)
         analytics_config = await self._load_analytics_config(run.app_id)
         report_assets = await resolve_report_assets(
             self.db,
@@ -275,10 +285,10 @@ class ReportService(BaseReportService):
     def _build_metadata(
         self,
         run: EvaluationRun,
-        threads: list[EvaluationRunThreadResult],
-        adversarial: list[EvaluationRunAdversarialResult],
+        threads: list[ThreadEvidence],
+        adversarial: list[AdversarialEvidence],
+        summary: dict,
     ) -> ReportMetadata:
-        summary = run.summary or {}
         batch_meta = run.batch_metadata or {}
         is_adversarial = run.eval_type == "batch_adversarial"
 

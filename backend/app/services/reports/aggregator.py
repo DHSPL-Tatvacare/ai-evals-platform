@@ -1,7 +1,7 @@
 """Pure data aggregation — no DB access, no LLM calls.
 
-Receives loaded ORM instances, returns structured analytics as Pydantic models.
-All methods are sync (no async needed for computation).
+Receives spine-backed ThreadEvidence/AdversarialEvidence, returns structured analytics as
+Pydantic models. All methods are sync (no async needed for computation).
 """
 
 from __future__ import annotations
@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 from itertools import combinations
 
-from app.models.eval_run import EvaluationRunAdversarialResult, EvaluationRunThreadResult
 from app.services.evaluators.adversarial_canonical import build_canonical_adversarial_case
 from app.services.evaluators.thread_canonical import build_canonical_thread_evaluation
+from app.services.reports.spine_source import AdversarialEvidence, ThreadEvidence
 
 from .schemas import (
     AdversarialBreakdown,
@@ -59,7 +59,7 @@ DIFFICULTY_ORDER = ["EASY", "MEDIUM", "HARD"]
 MAX_TRANSCRIPT_CHARS = 500
 
 
-def _canonical_adversarial_case(ae: EvaluationRunAdversarialResult) -> dict:
+def _canonical_adversarial_case(ae: AdversarialEvidence) -> dict:
     return build_canonical_adversarial_case(
         getattr(ae, "result", {}) or {},
         row_verdict=getattr(ae, "verdict", None),
@@ -83,7 +83,7 @@ def _canonical_rule_compliance(case: dict) -> list[dict]:
     ]
 
 
-def _canonical_thread_evaluation(thread: EvaluationRunThreadResult) -> dict:
+def _canonical_thread_evaluation(thread: ThreadEvidence) -> dict:
     return build_canonical_thread_evaluation(
         getattr(thread, "result", {}) or {},
         row_intent_accuracy=getattr(thread, "intent_accuracy", None),
@@ -93,7 +93,7 @@ def _canonical_thread_evaluation(thread: EvaluationRunThreadResult) -> dict:
     )
 
 
-def _canonical_thread_rule_outcomes(thread: EvaluationRunThreadResult) -> list[dict]:
+def _canonical_thread_rule_outcomes(thread: ThreadEvidence) -> list[dict]:
     canonical = _canonical_thread_evaluation(thread)
     return list(canonical.get("derived", {}).get("canonicalRuleOutcomes", []))
 
@@ -112,8 +112,8 @@ class ReportAggregator:
 
     def __init__(
         self,
-        threads: list[EvaluationRunThreadResult],
-        adversarial: list[EvaluationRunAdversarialResult],
+        threads: list[ThreadEvidence],
+        adversarial: list[AdversarialEvidence],
         run_summary: dict,
     ):
         self.threads = threads
@@ -331,7 +331,7 @@ class ReportAggregator:
 
     @staticmethod
     def _compute_composite_score(
-        thread: EvaluationRunThreadResult,
+        thread: ThreadEvidence,
         custom_scores: dict[str, float] | None = None,
     ) -> float:
         intent = thread.intent_accuracy if thread.intent_accuracy is not None else 0.5
@@ -349,7 +349,7 @@ class ReportAggregator:
 
         return (intent * 0.25) + (correctness * 0.25) + (efficiency * 0.25) + (task * 0.25)
 
-    def _build_exemplar(self, score: float, thread: EvaluationRunThreadResult) -> ExemplarThread:
+    def _build_exemplar(self, score: float, thread: ThreadEvidence) -> ExemplarThread:
         result = thread.result or {}
         canonical = _canonical_thread_evaluation(thread)
 
@@ -491,7 +491,7 @@ class AdversarialAggregator:
 
     def __init__(
         self,
-        adversarial: list[EvaluationRunAdversarialResult],
+        adversarial: list[AdversarialEvidence],
         run_summary: dict,
     ):
         self.case_records = [
@@ -620,7 +620,7 @@ class AdversarialAggregator:
         return Exemplars(best=best, worst=worst)
 
     @staticmethod
-    def _compute_adversarial_score(ae: EvaluationRunAdversarialResult) -> float:
+    def _compute_adversarial_score(ae: AdversarialEvidence) -> float:
         case = _canonical_adversarial_case(ae)
         verdict_score = ADVERSARIAL_VERDICT_ORDINAL.get(case.get("judge", {}).get("verdict") or ae.verdict or "", 0.5)
         goal_score = 1.0 if case.get("judge", {}).get("goalAchieved") else 0.0
@@ -636,7 +636,7 @@ class AdversarialAggregator:
         return (verdict_score * 0.4) + (goal_score * 0.3) + (rc_score * 0.3)
 
     def _build_adversarial_exemplar(
-        self, score: float, ae: EvaluationRunAdversarialResult,
+        self, score: float, ae: AdversarialEvidence,
     ) -> ExemplarThread:
         case = _canonical_adversarial_case(ae)
 

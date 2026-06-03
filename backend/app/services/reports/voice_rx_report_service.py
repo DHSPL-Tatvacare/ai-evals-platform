@@ -13,6 +13,7 @@ from app.services.reports.contracts.data_quality import DataQualityReport
 from app.services.reports.contracts.run_report import PlatformReportMetadata, PlatformRunReportPayload
 from app.services.reports.document_composer import compose_document
 from app.services.reports.report_composer import compose_run_report
+from app.services.reports.spine_source import load_transcript_payload
 
 
 def _as_percent(value: float | int | None) -> float:
@@ -36,8 +37,7 @@ class VoiceRxReportService(BaseReportService):
         del source_data, llm_provider, llm_model, include_narrative
 
         analytics_config = await self._load_analytics_config(run.app_id)
-        summary = run.summary or {}
-        result = run.result or {}
+        result, summary = await load_transcript_payload(self.db, run)
         critique = result.get('critique', {}) or {}
         severity_distribution = summary.get('severity_distribution', {}) or {}
         flow_type = summary.get('flow_type', 'unknown')
