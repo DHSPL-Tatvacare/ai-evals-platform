@@ -1,28 +1,24 @@
 name: inside_sales_model
 description: |
-  Sherlock workbench semantic model for inside-sales call rubric +
-  lead-pipeline analytics. Curated to facts + aggregates only; legacy
-  transactional/identity tables are intentionally absent.
+  Sherlock workbench semantic model for inside-sales call rubric + lead-pipeline analytics.
+  Flat leaf facts: fact_evaluation (one row per evaluation detail), agg_evaluation_run (per-run
+  rollup), fact_evaluation_review (human review), plus the lead-pipeline facts. No JSON eval tables.
 
 custom_instructions: |
-  Quality scoring for inside-sales calls uses the 'GoodFlip Sales Call QA'
-  rubric on a 0–45.7 scale (eval_type='call_rubric'). A second eval_type,
-  'full_evaluation', has its own rubric (communication_skills, product_knowledge,
-  need_analysis, objection_handling, urgency_creation, actions_offer, call_closure)
-  on a 0–10 scale per criterion.
-  result_status is always NULL for this app — use result_score and
-  rubric-derived columns for quality analysis. fact_evaluation_criterion has
-  no rows for this app (call_rubric does not emit criterion-level data),
-  which is why it is not exposed.
+  Inside-sales scores sales calls against a rubric. In fact_evaluation each scored rubric dimension
+  is a row with style='dimension', key=the dimension name (e.g. 'Call Opening & Permission'),
+  score and max; the overall call score is the row flagged is_main (key='overall_score'). Run-level
+  rollups (avg_score, pass_rate) live on agg_evaluation_run. fact_evaluation_review holds human-review
+  verdicts, joinable to fact_evaluation on (run_id, target_key, key).
   Use dim_lead for lead identity, fact_lead_activity for calls/activities,
   fact_lead_stage_transition for stage history.
 
 module_custom_instructions:
   sql_generation: |
-    Aggregate rubric scores at the agent grain or the (run_id, agent) grain.
+    Use agg_evaluation_run for run-level questions; fact_evaluation (style='dimension') for
+    per-dimension or per-call rubric analysis; filter is_main=true for the overall call score.
     Lead-pipeline questions: always join through dim_lead.lead_id.
-    Never join fact_evaluation to fact_lead_activity directly — they live on
-    different grains (recording vs LSQ activity).
+    Never join fact_evaluation to fact_lead_activity directly — they live on different grains.
 
 tables:
   agg_evaluation_run:
@@ -31,9 +27,9 @@ tables:
       database: ai_evals_platform
       schema: analytics
       table: agg_evaluation_run
-    physical_primary_key: { columns: [id] }
+    physical_primary_key: { columns: [run_id] }
     analytical_grain: { columns: [run_id] }
-    description: One row per eval run (call_rubric or full_evaluation), aggregated.
+    description: One row per inside-sales evaluation run, aggregated.
     dimensions:
       - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
       - { name: run_name, expr: run_name, data_type: nominal, physical_type: text }
@@ -42,13 +38,14 @@ tables:
         data_type: nominal
         physical_type: text
         is_enum: true
-        sample_values: [call_quality, batch_thread, full_evaluation, inside_sales, custom]
+        sample_values: [call_quality]
       - name: status
         expr: status
         data_type: nominal
         physical_type: text
         is_enum: true
-        sample_values: [pending, running, completed, completed_with_errors, failed]
+        sample_values: [pending, running, completed, completed_with_errors, failed, cancelled]
+        synonyms: ["state", "run status", "result", "disposition", "outcome"]
     time_dimensions:
       - { name: created_at, expr: created_at, data_type: temporal, physical_type: timestamptz }
       - { name: completed_at, expr: completed_at, data_type: temporal, physical_type: timestamptz }
@@ -56,14 +53,24 @@ tables:
       - { name: thread_count, expr: thread_count, data_type: quantitative, physical_type: integer }
       - { name: pass_count, expr: pass_count, data_type: quantitative, physical_type: integer }
       - { name: fail_count, expr: fail_count, data_type: quantitative, physical_type: integer }
-      - { name: error_count, expr: error_count, data_type: quantitative, physical_type: integer }
-      - { name: avg_score, expr: avg_score, data_type: quantitative, physical_type: double precision, pre_aggregated: true }
-      - { name: duration_ms, expr: duration_ms, data_type: quantitative, physical_type: double precision }
+      - { name: critical_count, expr: critical_count, data_type: quantitative, physical_type: integer }
+      - name: pass_rate
+        expr: pass_rate
+        data_type: quantitative
+        physical_type: numeric
+        pre_aggregated: true
+        synonyms: ["pass percentage", "success rate", "pass %"]
+      - name: avg_score
+        expr: avg_score
+        data_type: quantitative
+        physical_type: numeric
+        pre_aggregated: true
+        synonyms: ["average score", "call quality", "quality", "rating"]
+      - { name: duration_ms, expr: duration_ms, data_type: quantitative, physical_type: numeric }
     metrics:
       - name: avg_call_score
         expr: "ROUND(AVG(avg_score)::numeric, 2)"
-        description: Average rubric score per run (0–45.7).
-        synonyms: [average call quality, average score, mean score, call quality]
+        synonyms: ["average score", "call quality", "quality", "rating"]
 
   fact_evaluation:
     table_kind: fact
@@ -72,236 +79,66 @@ tables:
       schema: analytics
       table: fact_evaluation
     physical_primary_key: { columns: [id] }
-    analytical_grain: { columns: [run_id, item_id, evaluator_id] }
-    description: |
-      One row per (run, call_recording, evaluator). Evaluator-graded result.
-      result_detail JSONB holds the rubric scores; exposed below as
-      derived logical columns so the LLM never has to write `->>` syntax.
-
+    analytical_grain: { columns: [id] }
+    description: One row per inside-sales evaluation detail (scored rubric dimension or headline).
     dimensions:
-      # ── scalar columns ──
+      - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
+      - { name: target_key, expr: target_key, data_type: nominal, physical_type: text }
       - name: agent
         expr: agent
         data_type: nominal
         physical_type: text
-        description: TatvaCare inside-sales rep name (human).
-        synonyms: [rep, caller, salesperson, sales rep, executive]
-      - name: direction
-        expr: direction
+        synonyms: ["rep", "sales rep", "caller"]
+      - name: evaluator_name
+        expr: evaluator_name
+        data_type: nominal
+        physical_type: text
+        synonyms: ["evaluator", "rubric", "reviewer", "grader"]
+      - name: style
+        expr: style
         data_type: nominal
         physical_type: text
         is_enum: true
-        sample_values: [inbound, outbound]
-      - { name: evaluator_id, expr: evaluator_id, data_type: nominal, physical_type: uuid }
-      - { name: evaluator_name, expr: evaluator_name, data_type: nominal, physical_type: text }
-      - { name: evaluator_type, expr: evaluator_type, data_type: nominal, physical_type: text }
-      - { name: item_id, expr: item_id, data_type: nominal, physical_type: text }
-      - { name: item_type, expr: item_type, data_type: nominal, physical_type: text }
-      # result_verdict/intent/route are never populated for inside-sales (the
-      # call_quality extractor leaves them NULL; result_verdict has no producer),
-      # so surfacing them only trips bouncer R12 all-null on every answer.
-      - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
-      # ── JSONB-derived: call_rubric numeric scores ──
-      - name: call_opening_score
-        expr: "(result_detail->>'call_opening')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        description: Call-opening rubric score (0–10).
-        source_table: fact_evaluation
-      - name: brand_positioning_score
-        expr: "(result_detail->>'brand_positioning')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: credibility_safety_score
-        expr: "(result_detail->>'credibility_safety')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: intent_decision_mapping_score
-        expr: "(result_detail->>'intent_decision_mapping')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: metabolic_score_explanation_score
-        expr: "(result_detail->>'metabolic_score_explanation')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: metabolism_explanation_score
-        expr: "(result_detail->>'metabolism_explanation')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: probing_quality_score
-        expr: "(result_detail->>'probing_quality')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: program_mapping_score
-        expr: "(result_detail->>'program_mapping')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: transition_probing_score
-        expr: "(result_detail->>'transition_probing')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: closing_impression_score
-        expr: "(result_detail->>'closing_impression')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: overall_score
-        expr: "(result_detail->>'overall_score')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        description: Overall rubric score for the call.
-        synonyms: [call quality, quality score, score, call score]
-        source_table: fact_evaluation
-
-      # ── JSONB-derived: yes/no outcome flags ──
-      - name: callback_occurred
-        expr: "result_detail->>'callback_occurred'"
+        sample_values: [dimension, rule, comparison]
+      - name: key
+        expr: key
         data_type: nominal
         physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-      - name: crosssell_accepted
-        expr: "result_detail->>'crosssell_accepted'"
-        data_type: nominal
-        physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-      - name: crosssell_attempted
-        expr: "result_detail->>'crosssell_attempted'"
-        data_type: nominal
-        physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-      - name: disagreement_present
-        expr: "result_detail->>'disagreement_present'"
-        data_type: nominal
-        physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-      - name: escalation_present
-        expr: "result_detail->>'escalation_present'"
-        data_type: nominal
-        physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-      - name: meeting_occurred
-        expr: "result_detail->>'meeting_occurred'"
-        data_type: nominal
-        physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-      - name: purchase_occurred
-        expr: "result_detail->>'purchase_occurred'"
-        data_type: nominal
-        physical_type: text
-        is_enum: true
-        sample_values: [Yes, No]
-        source_table: fact_evaluation
-
-      # ── JSONB-derived: compliance booleans ──
-      - name: compliance_no_guarantees
-        expr: "(result_detail->>'compliance_no_guarantees')::boolean"
-        data_type: boolean
-        physical_type: boolean
-        source_table: fact_evaluation
-      - name: compliance_no_misinformation
-        expr: "(result_detail->>'compliance_no_misinformation')::boolean"
-        data_type: boolean
-        physical_type: boolean
-        source_table: fact_evaluation
-      - name: compliance_no_stop_medicines
-        expr: "(result_detail->>'compliance_no_stop_medicines')::boolean"
-        data_type: boolean
-        physical_type: boolean
-        source_table: fact_evaluation
-
-      # ── JSONB-derived: full_evaluation rubric (different eval_type) ──
-      - name: communication_skills_score
-        expr: "(result_detail->>'communication_skills')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: product_knowledge_score
-        expr: "(result_detail->>'product_knowledge')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: need_analysis_score
-        expr: "(result_detail->>'need_analysis')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: objection_handling_score
-        expr: "(result_detail->>'objection_handling')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: urgency_creation_score
-        expr: "(result_detail->>'urgency_creation')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: actions_offer_score
-        expr: "(result_detail->>'actions_offer')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-      - name: call_closure_score
-        expr: "(result_detail->>'call_closure')::numeric"
-        data_type: quantitative
-        physical_type: numeric
-        source_table: fact_evaluation
-
-      # ── JSONB-derived: ZTP flag (full_evaluation) ──
-      - name: ztp_violation
-        expr: "(result_detail->>'ztp_violation')::boolean"
-        data_type: boolean
-        physical_type: boolean
-        source_table: fact_evaluation
-      - name: ztp_evidence
-        expr: "result_detail->>'ztp_evidence'"
-        data_type: nominal
-        physical_type: text
-        description: Evidence text captured for zero-tolerance policy violations.
-        source_table: fact_evaluation
-
+        synonyms: ["dimension", "rubric dimension", "criterion"]
+      - { name: is_main, expr: is_main, data_type: nominal, physical_type: boolean }
     time_dimensions:
-      - { name: created_at, expr: created_at, data_type: temporal, physical_type: timestamptz }
-
+      - { name: run_completed_at, expr: run_completed_at, data_type: temporal, physical_type: timestamptz }
     facts:
-      - name: result_score
-        expr: result_score
-        data_type: quantitative
-        physical_type: double precision
-        synonyms: [call quality, quality score, score, call score]
-      - { name: duration_seconds, expr: duration_seconds, data_type: quantitative, physical_type: double precision }
-      - { name: total_turns, expr: total_turns, data_type: quantitative, physical_type: integer }
-
+      - { name: score, expr: score, data_type: quantitative, physical_type: numeric, synonyms: [score, rating, quality] }
+      - { name: max, expr: max, data_type: quantitative, physical_type: numeric }
     metrics:
-      - name: avg_call_score
-        expr: "ROUND(AVG(result_score)::numeric, 2)"
-        description: Average rubric score (0–45.7 scale).
-        synonyms: [average call quality, average score, mean score, call quality]
-      - name: max_call_score
-        expr: "MAX(result_score)"
-      - name: avg_call_opening
-        expr: "ROUND(AVG((result_detail->>'call_opening')::numeric), 2)"
-      - name: ztp_violation_rate
-        expr: "AVG(CASE WHEN (result_detail->>'ztp_violation')::boolean THEN 1.0 ELSE 0.0 END)"
+      - name: avg_dimension_score
+        expr: "ROUND(AVG(score)::numeric, 2)"
+        synonyms: ["average score", "call quality", "rating"]
+      - name: evaluated_calls
+        expr: "COUNT(DISTINCT target_key)"
+
+  fact_evaluation_review:
+    table_kind: fact
+    base_table:
+      database: ai_evals_platform
+      schema: analytics
+      table: fact_evaluation_review
+    physical_primary_key: { columns: [id] }
+    analytical_grain: { columns: [id] }
+    description: One row per human review item for an inside-sales evaluation.
+    dimensions:
+      - { name: run_id, expr: run_id, data_type: nominal, physical_type: uuid }
+      - { name: target_key, expr: target_key, data_type: nominal, physical_type: text }
+      - { name: key, expr: key, data_type: nominal, physical_type: text }
+      - name: decision
+        expr: decision
+        data_type: nominal
+        physical_type: text
+        is_enum: true
+        sample_values: [accept, correct, reject]
+    time_dimensions:
+      - { name: reviewed_at, expr: reviewed_at, data_type: temporal, physical_type: timestamptz }
 
   dim_lead:
     table_kind: dimension
@@ -378,7 +215,6 @@ tables:
         data_type: nominal
         physical_type: text
         source_table: fact_lead_activity
-      # JSONB-derived: attributes
       - name: rep_email
         expr: "attributes->>'rep_email'"
         data_type: nominal
@@ -436,29 +272,30 @@ relationships:
     relationship_type: many_to_one
 
 verified_queries:
-  - name: avg_call_score_by_agent_this_week
-    question: What is the average call quality for each agent this week?
+  - name: avg_call_score_by_run_this_week
+    question: What is the average call quality per run this week?
     sql: |
-      SELECT agent,
-             ROUND(AVG(result_score)::numeric, 2) AS avg_score,
-             COUNT(*) AS calls
-      FROM analytics.fact_evaluation
+      SELECT run_name,
+             avg_score,
+             pass_rate,
+             thread_count
+      FROM analytics.agg_evaluation_run
       WHERE tenant_id = :tenant_id AND app_id = :app_id
         AND created_at >= date_trunc('week', now())
-      GROUP BY agent
-      ORDER BY avg_score DESC;
-  - name: ztp_violations_last_30d
-    question: Which calls had ZTP violations in the last 30 days?
+      ORDER BY created_at DESC;
+  - name: weakest_rubric_dimensions
+    question: Which rubric dimensions score lowest in the last 30 days?
     sql: |
-      SELECT item_id,
-             agent,
-             created_at,
-             ztp_evidence AS evidence
+      SELECT key,
+             ROUND(AVG(score)::numeric, 2) AS avg_score,
+             COUNT(*) AS scored
       FROM analytics.fact_evaluation
       WHERE tenant_id = :tenant_id AND app_id = :app_id
-        AND ztp_violation = true
-        AND created_at >= now() - interval '30 days'
-      ORDER BY created_at DESC;
+        AND style = 'dimension'
+        AND is_main = false
+        AND run_completed_at >= now() - interval '30 days'
+      GROUP BY key
+      ORDER BY avg_score ASC;
   - name: leads_stuck_over_7_days
     question: Which leads have not moved stage in over 7 days?
     sql: |
@@ -469,14 +306,15 @@ verified_queries:
       WHERE tenant_id = :tenant_id AND app_id = :app_id
         AND latest_stage_observed_at < now() - interval '7 days'
       ORDER BY latest_stage_observed_at ASC;
-  - name: avg_call_opening_score_by_agent
-    question: Average call-opening rubric score by agent for the last 30 days
+  - name: overall_call_score_by_agent
+    question: Average overall call score by agent in the last 30 days
     sql: |
       SELECT agent,
-             ROUND(AVG(call_opening_score)::numeric, 2) AS avg_opening,
+             ROUND(AVG(score)::numeric, 2) AS avg_overall,
              COUNT(*) AS calls
       FROM analytics.fact_evaluation
       WHERE tenant_id = :tenant_id AND app_id = :app_id
-        AND created_at >= now() - interval '30 days'
+        AND is_main = true
+        AND run_completed_at >= now() - interval '30 days'
       GROUP BY agent
-      ORDER BY avg_opening DESC;
+      ORDER BY avg_overall DESC;

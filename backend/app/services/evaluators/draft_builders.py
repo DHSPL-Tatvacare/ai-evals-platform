@@ -65,6 +65,7 @@ def thread_drafts(
     intent_results: list | None = None,
     correctness_results: list | None = None,
     efficiency_result: Any = None,
+    raw_payload: dict | None = None,
 ) -> list[EvaluationDraft]:
     """Chat-thread target → one evaluation per evaluator (correctness/efficiency → rule, intent → dimension)."""
     target = TargetRef(key=str(thread_id), type="chat_thread")
@@ -77,14 +78,14 @@ def thread_drafts(
         worst = _worst_correctness([getattr(ce, "verdict", None) for ce in correctness_results])
         drafts.append(EvaluationDraft(
             target=target, evaluator=EvaluatorRef(name="correctness"), status="ok",
-            headline=Headline(key="worst_correctness", verdict=worst), details=atoms,
+            headline=Headline(key="worst_correctness", verdict=worst), details=atoms, raw_payload=raw_payload,
         ))
 
     if efficiency_result is not None:
         drafts.append(EvaluationDraft(
             target=target, evaluator=EvaluatorRef(name="efficiency"), status="ok",
             headline=Headline(key="efficiency_verdict", verdict=getattr(efficiency_result, "verdict", None)),
-            details=_rule_atoms(getattr(efficiency_result, "rule_compliance", None)),
+            details=_rule_atoms(getattr(efficiency_result, "rule_compliance", None)), raw_payload=raw_payload,
         ))
 
     if intent_results:
@@ -96,6 +97,7 @@ def thread_drafts(
             headline=Headline(key="intent_accuracy", score=acc, max=1.0),
             details=[DetailAtom(style="dimension", key="intent_accuracy", label="Intent Accuracy",
                                 score=acc, max=1.0, is_main=True)],
+            raw_payload=raw_payload,
         ))
 
     return drafts

@@ -666,6 +666,7 @@ async def run_adversarial_evaluation(
                             difficulty=tc.difficulty,
                             goal_flow=tc.goal_flow,
                             active_traits=tc.active_traits,
+                            raw_payload=result_data,
                         ),
                     )
 

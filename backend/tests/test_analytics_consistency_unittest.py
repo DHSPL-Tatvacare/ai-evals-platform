@@ -12,8 +12,6 @@ from app.services.analytics.consistency import (
     build_analytics_consistency_summary,
     enqueue_missing_analytics_jobs,
 )
-from app.services.analytics.extractors.custom_eval import extract_custom
-from app.services.analytics.extractors.full_eval import extract_full_eval
 
 
 class _RowsResult:
@@ -55,59 +53,6 @@ async def test_submit_analytics_job_includes_identity_params():
         'tenant_id': str(tenant_id),
         'user_id': str(user_id),
     }
-
-
-def test_extract_custom_treats_cancelled_as_non_failure():
-    run = SimpleNamespace(
-        id=uuid.uuid4(),
-        app_id='kaira-bot',
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        eval_type='custom',
-        status='cancelled',
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        completed_at=datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc),
-        duration_ms=1234.0,
-        result={},
-        listing_id=uuid.uuid4(),
-        session_id=None,
-        evaluator_id=uuid.uuid4(),
-        batch_metadata=None,
-    )
-
-    fact_set = extract_custom(run, [])
-
-    assert fact_set.run_fact.status == 'cancelled'
-    assert fact_set.run_fact.pass_count == 0
-    assert fact_set.run_fact.fail_count == 0
-    assert fact_set.run_fact.pass_rate is None
-    assert fact_set.eval_facts[0].success is None
-
-
-def test_extract_full_eval_treats_cancelled_as_non_failure():
-    run = SimpleNamespace(
-        id=uuid.uuid4(),
-        app_id='voice-rx',
-        tenant_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        eval_type='full_evaluation',
-        status='cancelled',
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        completed_at=datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc),
-        duration_ms=1234.0,
-        result={'status': 'cancelled'},
-        listing_id=uuid.uuid4(),
-        batch_metadata=None,
-    )
-
-    fact_set = extract_full_eval(run, [])
-
-    assert fact_set.run_fact.status == 'cancelled'
-    assert fact_set.run_fact.pass_count == 0
-    assert fact_set.run_fact.fail_count == 0
-    assert fact_set.run_fact.pass_rate is None
-    assert fact_set.eval_facts[0].success is None
-    assert fact_set.eval_facts[0].result_status == 'cancelled'
 
 
 @pytest.mark.asyncio

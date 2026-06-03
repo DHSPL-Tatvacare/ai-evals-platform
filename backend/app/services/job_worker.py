@@ -1687,6 +1687,30 @@ async def handle_populate_analytics(job_id, params: dict, *, tenant_id: uuid.UUI
 
 
 @register_job_handler(
+    "backfill-evaluations",
+    queue_class="bulk",
+    priority=520,
+    retry_safe=True,
+    required_permissions=("platform:manage",),
+)
+async def handle_backfill_evaluations(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """One-time backfill of the unified evaluation spine from legacy JSON.
+
+    Platform-wide data migration: written rows inherit each source run's tenant. Optional
+    params ``app_id`` / ``tenant_id`` restrict the scan; omitted means all runs.
+    """
+    from app.services.evaluators.backfill.backfill_evaluations import backfill_evaluations
+
+    scope_tenant = params.get("tenant_id")
+    async with async_session() as db:
+        return await backfill_evaluations(
+            db,
+            app_id=params.get("app_id") or None,
+            tenant_id=uuid.UUID(scope_tenant) if scope_tenant else None,
+        )
+
+
+@register_job_handler(
     "populate-cost-rollup",
     queue_class="bulk",
     priority=510,

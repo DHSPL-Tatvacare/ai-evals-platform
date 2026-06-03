@@ -17,7 +17,8 @@ from app.routes.auth import _check_allowed_domains
 from app.models.invite_link import IdentityInviteLink, InviteSignupMethod, InviteStatus
 from app.services import invite_links as invite_link_service
 from app.models.evaluation_dataset import EvaluationDataset
-from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult, EvaluationRunAdversarialResult, EvaluationRunApiCallLog
+from app.models.eval_run import EvaluationRun, EvaluationRunApiCallLog
+from app.models.evaluation import EvaluationTarget, Evaluation, EvaluationDetail
 from app.models.chat import ChatSession, ChatMessage
 from app.models.eval_template import EvaluationTemplate
 from app.models.application_uploaded_file import ApplicationUploadedFile
@@ -135,8 +136,9 @@ async def get_stats(
 
     # ── Cascade children (no app_id, count via parent join) ──
     for name, model in [
-        ("thread_evaluations", EvaluationRunThreadResult),
-        ("adversarial_evaluations", EvaluationRunAdversarialResult),
+        ("evaluation_targets", EvaluationTarget),
+        ("evaluations", Evaluation),
+        ("evaluation_details", EvaluationDetail),
         ("api_logs", EvaluationRunApiCallLog),
         ("chat_messages", ChatMessage),
     ]:

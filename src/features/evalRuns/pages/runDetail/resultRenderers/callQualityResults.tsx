@@ -385,8 +385,15 @@ export function CallQualityResults({
   );
 }
 
-/** Reads the `call_metadata` blob off a call-quality thread row. */
+/** Subject metadata for a call-quality row: prefer the spine target's normalized
+ *  attributes (agent / lead_id / duration_seconds), falling back to the raw
+ *  `call_metadata` blob for rows without a spine target (e.g. all-errored runs). */
 function readCallMeta(t: ThreadEvalRow): Record<string, unknown> | undefined {
+  const attrs = (t as unknown as { target?: { attributes?: Record<string, unknown> } }).target
+    ?.attributes;
+  if (attrs && (attrs.agent != null || attrs.lead_id != null || attrs.duration_seconds != null)) {
+    return attrs;
+  }
   return (t.result as unknown as Record<string, unknown>)?.call_metadata as
     | Record<string, unknown>
     | undefined;

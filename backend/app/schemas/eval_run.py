@@ -4,6 +4,7 @@ from typing import Optional, Literal
 from datetime import datetime
 from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
+from app.schemas.evaluation import EvaluationTargetRead
 from app.schemas.visibility import VisibilityInputMixin, VisibilityOutputMixin
 
 
@@ -59,6 +60,8 @@ class EvalRunResponse(VisibilityOutputMixin, CamelORMModel):
     result: Optional[dict] = None
     summary: Optional[dict] = None
     batch_metadata: Optional[dict] = None
+    # Structured TXN-spine contract (target → evaluations → details) on the run detail.
+    targets: list[EvaluationTargetRead] = []
     visibility: Visibility
     shared_by: Optional[uuid.UUID] = None
     shared_at: Optional[datetime] = None

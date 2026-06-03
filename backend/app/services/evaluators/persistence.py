@@ -29,6 +29,10 @@ async def _resolve_target(db: AsyncSession, run: EvaluationRun, draft: Evaluatio
         )
     )).scalars().first()
     if existing is not None:
+        # Refresh subject metadata so re-runs/backfills pick up newly-carried attributes.
+        existing.target_type = draft.target.type
+        existing.source_ref = draft.target.source_ref
+        existing.attributes = draft.target.attributes
         return existing
     target = EvaluationTarget(
         run_id=run.id,

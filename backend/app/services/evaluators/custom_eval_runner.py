@@ -391,7 +391,7 @@ async def run_custom_evaluation(job_id, params: dict, *, tenant_id: uuid.UUID, u
                         scores=scores,
                         evaluator_id=uuid.UUID(str(evaluator_id)),
                         evaluator_name=evaluator.name,
-                        raw_payload={"rawRequest": prompt_text, "rawResponse": response_text},
+                        raw_payload={"output": output, "rawRequest": prompt_text, "rawResponse": response_text},
                     ),
                 )
         except Exception:

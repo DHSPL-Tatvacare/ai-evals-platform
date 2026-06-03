@@ -342,9 +342,9 @@ class InsideSalesYAMLTests(unittest.TestCase):
         c = load_workbench_catalog_strict("inside-sales")
         self.assertEqual(c.name, "inside_sales_model")
         self.assertIn("fact_evaluation", c.tables)
-        # ~30 derived columns from result_detail + ~6 from attributes.
-        self.assertGreater(
-            len(c.tables["fact_evaluation"].all_logical_columns()), 25
+        # Flat leaf fact: the detail atom columns (style/key/score/...) plus identity dims.
+        self.assertGreaterEqual(
+            len(c.tables["fact_evaluation"].all_logical_columns()), 8
         )
         self.assertGreaterEqual(len(c.verified_queries), 3)
 

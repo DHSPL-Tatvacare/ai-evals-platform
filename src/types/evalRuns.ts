@@ -37,6 +37,59 @@ export interface EvaluatorDescriptor {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Structured evaluation spine contract (Run → Target → Evaluation → Detail)
+// Mirrors backend/app/schemas/evaluation.py (camelCase via CamelORMModel).
+// This is the new INPUT the canonical adapters decode into the frozen
+// view-models below. Numerics arrive as strings (Pydantic Decimal → JSON).
+// ═══════════════════════════════════════════════════════════════
+
+export type EvaluationDetailStyle = 'dimension' | 'rule' | 'comparison';
+
+export interface EvaluationDetail {
+  id: number;
+  style: EvaluationDetailStyle;
+  key: string;
+  label?: string | null;
+  score?: number | string | null;
+  max?: number | string | null;
+  status?: string | null;     // PASS|FAIL|NA (rules)
+  severity?: string | null;   // minor|moderate|critical (comparisons)
+  locator?: string | null;    // segment:N / api_field:<key>
+  isMain: boolean;
+  weight?: number | string | null;
+  referenceText?: string | null;
+  candidateText?: string | null;
+  explanation?: string | null;
+}
+
+export interface Evaluation {
+  id: string;
+  runId: string;
+  targetId: string;
+  evaluatorId?: string | null;
+  evaluatorRef?: { name?: string; version?: string; output_schema_hash?: string } | null;
+  status: string;             // ok|error|skipped
+  headlineKey?: string | null;
+  headlineScore?: number | string | null;
+  headlineMax?: number | string | null;
+  verdict?: string | null;
+  reasoning?: string | null;
+  createdAt?: string | null;
+  details: EvaluationDetail[];
+}
+
+export interface EvaluationTarget {
+  id: string;
+  runId: string;
+  targetKey: string;
+  targetType: string;         // call|chat_thread|transcript|test_case
+  sourceRef?: string | null;
+  attributes?: Record<string, unknown> | null;
+  createdAt?: string | null;
+  evaluations: Evaluation[];
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Unified EvalRun type — single source of truth for ALL evaluations
 // ═══════════════════════════════════════════════════════════════
 
@@ -96,6 +149,8 @@ export interface EvalRun {
   passRate?: number | null;
   batchMetadata?: Record<string, unknown>;
   evaluatorDescriptors?: EvaluatorDescriptor[];
+  /** Structured spine targets (evaluations → details) served on the detail endpoint. */
+  targets?: EvaluationTarget[];
   flowType?: string;
   createdAt: string;
   userId?: string;
@@ -175,6 +230,8 @@ export interface Run {
   description: string | null;
   job_id: string | null;
   evaluator_descriptors?: EvaluatorDescriptor[];
+  /** Structured spine targets (evaluations → details) served on the detail endpoint. */
+  targets?: EvaluationTarget[];
   visibility?: 'private' | 'shared';
   shared_by?: string | null;
   shared_at?: string | null;
@@ -206,6 +263,8 @@ export interface ThreadEvalRow {
   success_status: number;
   result: ThreadEvalResult;
   canonical_thread?: CanonicalThreadEvaluation;
+  /** Structured spine target (evaluations → details) — the new adapter input. */
+  target?: EvaluationTarget | null;
   created_at: string;
 }
 
@@ -483,6 +542,8 @@ export interface AdversarialEvalRow {
   is_infra_failure?: boolean;
   is_retryable?: boolean;
   error: string | null;               // set when verdict is null
+  /** Structured spine target (evaluations → details) — the new adapter input. */
+  target?: EvaluationTarget | null;
   created_at: string;
 }
 

@@ -624,6 +624,7 @@ async def run_thread_evaluation(
                             intent_results=intent_results,
                             correctness_results=correctness_results,
                             efficiency_result=efficiency_result,
+                            raw_payload=result_data,
                         ),
                     )
 

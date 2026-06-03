@@ -7,11 +7,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import select, desc, asc, func, delete as sql_delete, true, false, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.context import AuthContext, get_auth_context
 from app.auth.permissions import require_permission, require_app_access
 from app.database import get_db
 from app.models.eval_run import EvaluationRun, EvaluationRunThreadResult, EvaluationRunAdversarialResult, EvaluationRunApiCallLog
+from app.models.evaluation import Evaluation, EvaluationTarget
 from app.models.evaluation_dataset import EvaluationDataset
 from app.models.job import BackgroundJob
 from app.models.user import User
@@ -19,6 +21,7 @@ from app.models.report_run import ReportGenerationRun
 from app.openapi_examples import err, ok
 from app.schemas.base import CamelModel
 from app.schemas.eval_run import EvalRunVisibilityUpdate
+from app.schemas.evaluation import EvaluationTargetRead
 from app.services.evaluators.adversarial_canonical import enrich_adversarial_result_for_api
 from app.services.evaluators.thread_canonical import enrich_thread_result_for_api
 from app.services.access_control import readable_scope_clause
@@ -93,6 +96,27 @@ async def _get_owned_run(
     if not run:
         raise HTTPException(404, "Run not found")
     return run
+
+
+async def _load_spine_targets(db: AsyncSession, run_id: UUID) -> list[EvaluationTarget]:
+    """Load the run's structured TXN spine (targets → evaluations → details), eager-loaded."""
+    result = await db.execute(
+        select(EvaluationTarget)
+        .where(EvaluationTarget.run_id == run_id)
+        .options(selectinload(EvaluationTarget.evaluations).selectinload(Evaluation.details))
+        .order_by(EvaluationTarget.created_at, EvaluationTarget.id)
+    )
+    return list(result.scalars().all())
+
+
+def _serialize_spine_targets(targets: list[EvaluationTarget]) -> list[dict]:
+    """Structured evaluation contract (targets → evaluations → details) as camelCase dicts."""
+    return [EvaluationTargetRead.model_validate(t).model_dump(by_alias=True, mode="json") for t in targets]
+
+
+def _spine_targets_by_key(targets: list[EvaluationTarget]) -> dict[str, dict]:
+    """Index serialized spine targets by ``targetKey`` for per-row attachment."""
+    return {t["targetKey"]: t for t in _serialize_spine_targets(targets)}
 
 
 # Map high-level run_type (UI concept) to the eval_type values stored in DB.
@@ -249,10 +273,20 @@ async def list_eval_runs(
             filters.append(EvaluationRun.eval_type.in_(mapped_types))
     if q:
         like = f"%{q.strip()}%"
+        # Re-derived from the spine: the evaluator name now lives on
+        # platform.evaluations.evaluator_ref->>'name' (was summary/config 'evaluator_name').
+        evaluator_name_match = (
+            select(Evaluation.run_id)
+            .where(
+                Evaluation.run_id == EvaluationRun.id,
+                cast(Evaluation.evaluator_ref["name"].astext, String).ilike(like),
+            )
+            .exists()
+        )
         filters.append(
             or_(
                 cast(EvaluationRun.id, String).ilike(like),
-                cast(func.json_extract_path_text(EvaluationRun.summary, "evaluator_name"), String).ilike(like),
+                evaluator_name_match,
                 cast(func.json_extract_path_text(EvaluationRun.config, "evaluator_name"), String).ilike(like),
                 cast(func.json_extract_path_text(EvaluationRun.batch_metadata, "name"), String).ilike(like),
             )
@@ -381,7 +415,13 @@ async def get_summary_stats(
     auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Stats across readable evaluation runs."""
+    """Stats across readable evaluation runs.
+
+    Re-derived from the TXN spine (``platform.evaluations``/``evaluation_targets``):
+    headline verdicts (``worst_correctness``/``efficiency_verdict``/``goal_achieved``) live on
+    ``evaluations.verdict``, intent accuracy on ``evaluations.headline_score``. The old typed
+    columns on ``evaluation_run_thread_results``/``..._adversarial_results`` are gone.
+    """
     # Total runs
     runs_q = select(func.count(EvaluationRun.id)).where(
         readable_scope_clause(EvaluationRun, auth),
@@ -391,9 +431,9 @@ async def get_summary_stats(
         runs_q = runs_q.where(EvaluationRun.app_id == app_id)
     total_runs = (await db.execute(runs_q)).scalar() or 0
 
-    # Thread/adversarial queries need JOIN to EvaluationRun for ownership check
-    def _thread_q(base_select):
-        q = base_select.join(EvaluationRun, EvaluationRunThreadResult.run_id == EvaluationRun.id).where(
+    # Spine queries join Evaluation→EvaluationRun (via run_id) for the ownership check.
+    def _eval_q(base_select):
+        q = base_select.join(EvaluationRun, Evaluation.run_id == EvaluationRun.id).where(
             readable_scope_clause(EvaluationRun, auth),
             _app_access_clause(EvaluationRun, auth),
         )
@@ -401,8 +441,8 @@ async def get_summary_stats(
             q = q.where(EvaluationRun.app_id == app_id)
         return q
 
-    def _adv_q(base_select):
-        q = base_select.join(EvaluationRun, EvaluationRunAdversarialResult.run_id == EvaluationRun.id).where(
+    def _target_q(base_select):
+        q = base_select.join(EvaluationRun, EvaluationTarget.run_id == EvaluationRun.id).where(
             readable_scope_clause(EvaluationRun, auth),
             _app_access_clause(EvaluationRun, auth),
         )
@@ -411,62 +451,68 @@ async def get_summary_stats(
         return q
 
     total_threads = (await db.execute(
-        _thread_q(select(func.count(func.distinct(EvaluationRunThreadResult.thread_id))))
+        _target_q(
+            select(func.count(func.distinct(EvaluationTarget.target_key)))
+            .where(EvaluationTarget.target_type == "chat_thread")
+        )
     )).scalar() or 0
     total_adversarial = (await db.execute(
-        _adv_q(select(func.count(EvaluationRunAdversarialResult.id)))
+        _target_q(
+            select(func.count(EvaluationTarget.id))
+            .where(EvaluationTarget.target_type == "test_case")
+        )
     )).scalar() or 0
 
-    # Correctness distribution
+    # Correctness distribution — correctness evaluator headline verdict.
     corr_result = await db.execute(
-        _thread_q(
-            select(EvaluationRunThreadResult.worst_correctness, func.count())
-            .where(EvaluationRunThreadResult.worst_correctness.isnot(None))
-        ).group_by(EvaluationRunThreadResult.worst_correctness)
+        _eval_q(
+            select(Evaluation.verdict, func.count())
+            .where(Evaluation.headline_key == "worst_correctness", Evaluation.verdict.isnot(None))
+        ).group_by(Evaluation.verdict)
     )
     correctness_distribution = {r[0]: r[1] for r in corr_result.all()}
 
-    # Efficiency distribution
+    # Efficiency distribution — efficiency evaluator headline verdict.
     eff_result = await db.execute(
-        _thread_q(
-            select(EvaluationRunThreadResult.efficiency_verdict, func.count())
-            .where(EvaluationRunThreadResult.efficiency_verdict.isnot(None))
-        ).group_by(EvaluationRunThreadResult.efficiency_verdict)
+        _eval_q(
+            select(Evaluation.verdict, func.count())
+            .where(Evaluation.headline_key == "efficiency_verdict", Evaluation.verdict.isnot(None))
+        ).group_by(Evaluation.verdict)
     )
     efficiency_distribution = {r[0]: r[1] for r in eff_result.all()}
 
-    # Adversarial distribution
+    # Adversarial distribution — adversarial evaluator headline verdict.
     adv_result = await db.execute(
-        _adv_q(
-            select(EvaluationRunAdversarialResult.verdict, func.count())
-            .where(EvaluationRunAdversarialResult.verdict.isnot(None))
-        ).group_by(EvaluationRunAdversarialResult.verdict)
+        _eval_q(
+            select(Evaluation.verdict, func.count())
+            .where(Evaluation.headline_key == "goal_achieved", Evaluation.verdict.isnot(None))
+        ).group_by(Evaluation.verdict)
     )
     adversarial_distribution = {r[0]: r[1] for r in adv_result.all()}
 
-    # Average intent accuracy
+    # Average intent accuracy — intent evaluator headline score.
     avg_intent = (await db.execute(
-        _thread_q(
-            select(func.avg(EvaluationRunThreadResult.intent_accuracy))
-            .where(EvaluationRunThreadResult.intent_accuracy.isnot(None))
+        _eval_q(
+            select(func.avg(Evaluation.headline_score))
+            .where(Evaluation.headline_key == "intent_accuracy", Evaluation.headline_score.isnot(None))
         )
     )).scalar()
 
-    # Intent distribution (F5: only count threads with non-null intent_accuracy)
+    # Intent distribution (F5: only count evaluations with a non-null intent_accuracy headline)
     intent_distribution = {}
     intent_evaluated_count = (await db.execute(
-        _thread_q(
+        _eval_q(
             select(func.count())
-            .select_from(EvaluationRunThreadResult)
-            .where(EvaluationRunThreadResult.intent_accuracy.isnot(None))
+            .select_from(Evaluation)
+            .where(Evaluation.headline_key == "intent_accuracy", Evaluation.headline_score.isnot(None))
         )
     )).scalar() or 0
     if intent_evaluated_count > 0:
         correct_count = (await db.execute(
-            _thread_q(
+            _eval_q(
                 select(func.count())
-                .select_from(EvaluationRunThreadResult)
-                .where(EvaluationRunThreadResult.intent_accuracy >= 0.5)
+                .select_from(Evaluation)
+                .where(Evaluation.headline_key == "intent_accuracy", Evaluation.headline_score >= 0.5)
             )
         )).scalar() or 0
         intent_distribution = {
@@ -508,28 +554,33 @@ async def get_trends(
     auth: AuthContext = require_permission('insights:view'),
     db: AsyncSession = Depends(get_db),
 ):
-    """Aggregate correctness verdicts by day for readable runs."""
+    """Aggregate correctness verdicts by day for readable runs.
+
+    Re-derived from the spine: the correctness verdict is ``evaluations.verdict`` where
+    ``headline_key='worst_correctness'``; the day comes from ``evaluations.created_at``.
+    """
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     q = (
         select(
-            func.date(EvaluationRunThreadResult.created_at).label("day"),
-            EvaluationRunThreadResult.worst_correctness,
+            func.date(Evaluation.created_at).label("day"),
+            Evaluation.verdict.label("worst_correctness"),
             func.count().label("cnt"),
         )
-        .join(EvaluationRun, EvaluationRunThreadResult.run_id == EvaluationRun.id)
+        .join(EvaluationRun, Evaluation.run_id == EvaluationRun.id)
         .where(
             readable_scope_clause(EvaluationRun, auth),
             _app_access_clause(EvaluationRun, auth),
-            EvaluationRunThreadResult.created_at >= cutoff,
-            EvaluationRunThreadResult.worst_correctness.isnot(None),
+            Evaluation.headline_key == "worst_correctness",
+            Evaluation.created_at >= cutoff,
+            Evaluation.verdict.isnot(None),
         )
     )
     if app_id:
         q = q.where(EvaluationRun.app_id == app_id)
-    q = q.group_by(func.date(EvaluationRunThreadResult.created_at), EvaluationRunThreadResult.worst_correctness)
-    q = q.order_by(func.date(EvaluationRunThreadResult.created_at))
+    q = q.group_by(func.date(Evaluation.created_at), Evaluation.verdict)
+    q = q.order_by(func.date(Evaluation.created_at))
 
     result = await db.execute(q)
     rows = result.all()
@@ -673,7 +724,8 @@ async def get_eval_run(
     db: AsyncSession = Depends(get_db),
 ):
     run = await _get_readable_run(db, run_id=run_id, auth=auth)
-    return _run_to_dict(run)
+    targets = _serialize_spine_targets(await _load_spine_targets(db, run_id))
+    return _run_to_dict(run, spine_targets=targets)
 
 
 @router.patch(
@@ -790,7 +842,12 @@ async def get_run_threads(
         select(EvaluationRunThreadResult).where(EvaluationRunThreadResult.run_id == run_id)
     )
     evals = result.scalars().all()
-    return {"run_id": str(run_id), "evaluations": [_thread_to_dict(e) for e in evals], "total": len(evals)}
+    spine = _spine_targets_by_key(await _load_spine_targets(db, run_id))
+    return {
+        "run_id": str(run_id),
+        "evaluations": [_thread_to_dict(e, spine_target=spine.get(e.thread_id)) for e in evals],
+        "total": len(evals),
+    }
 
 
 @router.get(
@@ -815,10 +872,22 @@ async def get_run_adversarial(
     await _get_readable_run(db, run_id=run_id, auth=auth)
 
     result = await db.execute(
-        select(EvaluationRunAdversarialResult).where(EvaluationRunAdversarialResult.run_id == run_id)
+        select(EvaluationRunAdversarialResult)
+        .where(EvaluationRunAdversarialResult.run_id == run_id)
+        .order_by(EvaluationRunAdversarialResult.id)
     )
     evals = result.scalars().all()
-    return {"run_id": str(run_id), "evaluations": [_adv_to_dict(e) for e in evals], "total": len(evals)}
+    # Adversarial rows carry no stable target_key; the spine targets are written in the
+    # same per-case order, so align by ordinal (both ordered by ascending id/created_at).
+    spine = _serialize_spine_targets(await _load_spine_targets(db, run_id))
+    return {
+        "run_id": str(run_id),
+        "evaluations": [
+            _adv_to_dict(e, spine_target=spine[i] if i < len(spine) else None)
+            for i, e in enumerate(evals)
+        ],
+        "total": len(evals),
+    }
 
 
 @router.get(
@@ -1008,7 +1077,7 @@ def _adversarial_pass_rate(eval_type: str, summary: dict | None) -> float | None
     return pass_count / successful
 
 
-def _run_to_dict(r: EvaluationRun, owner_name: str | None = None) -> dict:
+def _run_to_dict(r: EvaluationRun, owner_name: str | None = None, spine_targets: list[dict] | None = None) -> dict:
     """Serialize an EvaluationRun to a dict with both camelCase and snake_case keys.
 
     Frontend EvaluationRun interface uses camelCase (evaluatorId, errorMessage, etc.)
@@ -1091,12 +1160,15 @@ def _run_to_dict(r: EvaluationRun, owner_name: str | None = None) -> dict:
         # Evaluator descriptors (used by frontend for dynamic column rendering)
         "evaluatorDescriptors": descriptors,
         "evaluator_descriptors": descriptors,
+        # Structured TXN-spine contract (target → evaluations → details) for the run detail;
+        # the FE adapter builds the canonical view-model from these typed atoms.
+        "targets": spine_targets if spine_targets is not None else [],
         # Unified flow type (Phase 2)
         "flowType": (r.result or {}).get("flowType") or (r.config or {}).get("source_type") or "upload",
     }
 
 
-def _thread_to_dict(e: EvaluationRunThreadResult) -> dict:
+def _thread_to_dict(e: EvaluationRunThreadResult, spine_target: dict | None = None) -> dict:
     result = enrich_thread_result_for_api(
         e.result if isinstance(e.result, dict) else {},
         row_intent_accuracy=e.intent_accuracy,
@@ -1116,11 +1188,14 @@ def _thread_to_dict(e: EvaluationRunThreadResult) -> dict:
         "success_status": e.success_status,
         "result": result,
         "canonical_thread": canonical_thread,
+        # Structured TXN-spine contract (target → evaluations → details); the FE adapter
+        # builds the canonical view-model from these typed atoms.
+        "target": spine_target,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
 
-def _adv_to_dict(e: EvaluationRunAdversarialResult) -> dict:
+def _adv_to_dict(e: EvaluationRunAdversarialResult, spine_target: dict | None = None) -> dict:
     result = enrich_adversarial_result_for_api(
         e.result if isinstance(e.result, dict) else {},
         row_verdict=e.verdict,
@@ -1141,6 +1216,8 @@ def _adv_to_dict(e: EvaluationRunAdversarialResult) -> dict:
         "total_turns": e.total_turns,
         "result": result,
         "canonical_case": canonical_case,
+        # Structured TXN-spine contract (target → evaluations → details).
+        "target": spine_target,
         "has_contradiction": canonical_case.get("derived", {}).get("hasContradiction", False),
         "contradiction_types": canonical_case.get("derived", {}).get("contradictionTypes", []),
         "is_infra_failure": canonical_case.get("derived", {}).get("isInfraFailure", False),

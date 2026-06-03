@@ -543,7 +543,8 @@ async def run_transcript_evaluation(job_id, params: dict, *, tenant_id: uuid.UUI
                 await safe_persist(
                     db,
                     RunContext(id=eval_run_id, tenant_id=tenant_id, user_id=user_id, app_id=app_id),
-                    transcript_drafts(target_key=str(listing_id), evaluation=evaluation, summary=summary_data),
+                    transcript_drafts(target_key=str(listing_id), evaluation=evaluation, summary=summary_data,
+                                      raw_payload=evaluation),
                 )
 
         # Submit analytics population job (fire-and-forget)

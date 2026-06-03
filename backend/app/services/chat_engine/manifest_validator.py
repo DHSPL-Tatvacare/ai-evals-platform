@@ -177,7 +177,23 @@ async def _db_columns_for(
         ),
         {"schema": schema_name, "t": table_name},
     )
-    return {row.column_name: row.data_type for row in result}
+    cols = {row.column_name: row.data_type for row in result}
+    if cols:
+        return cols
+    # Materialized views are absent from information_schema.columns (relkind='m');
+    # resolve their columns from pg_catalog so manifests can expose matviews (e.g. agg_evaluation_run).
+    mv = await db.execute(
+        text(
+            "SELECT a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS data_type "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = :schema AND c.relname = :t AND c.relkind = 'm' "
+            "AND a.attnum > 0 AND NOT a.attisdropped"
+        ),
+        {"schema": schema_name, "t": table_name},
+    )
+    return {row.column_name: row.data_type for row in mv}
 
 
 async def validate_manifest_against_postgres(

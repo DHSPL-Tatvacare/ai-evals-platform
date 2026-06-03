@@ -21,6 +21,6 @@
 - For agent-leaderboard questions, default to top **20** and break ties
   by alphabetical agent name to keep results deterministic across
   refreshes.
-- For "violation" questions on `fact_evaluation_criterion`, always
-  expose both `violations` (count) and `evaluated` (denominator) so the
-  rate is interpretable.
+- For "violation" questions, filter `fact_evaluation` to `style = 'rule'`
+  and `status = 'FAIL'`; expose both the violation count and the
+  denominator (all rule rows for that key) so the rate is interpretable.

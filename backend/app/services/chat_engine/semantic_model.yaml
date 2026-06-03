@@ -1,118 +1,112 @@
 ##
-## Semantic model for the evaluation analytics platform.
-## Loaded by the SQL agent to generate queries from natural language.
-## Update this file when the schema changes.
+## Base semantic model for the evaluation analytics platform.
+## Loaded by the SQL agent and deep-merged UNDER each app's semantic_models/<app>.yaml.
+## Flat leaf facts only — update when the analytics schema changes.
 ##
 version: "3.0"
 description: >
-  Evaluation analytics platform with pre-computed fact tables.
-  Use agg_evaluation_run, fact_evaluation, and fact_evaluation_criterion
-  for all analytical queries. These contain pre-extracted, indexed data.
+  Evaluation analytics on flat leaf facts. fact_evaluation holds one row per evaluation detail
+  (style = dimension | rule | comparison); agg_evaluation_run is the per-run rollup (matview);
+  fact_evaluation_review holds human-review verdicts. No JSONB unpacking — everything is flat.
 
 tables:
 
   agg_evaluation_run:
     alias: rf
     description: >
-      Pre-computed run-level metrics. One row per eval run.
-      Use this for run trends, pass rates over time, run comparisons.
-    primary_key: id
+      Per-run rollup (materialized view). One row per eval run. Use for run trends,
+      pass rates over time, and run comparisons.
+    primary_key: run_id
     columns:
-      id: { type: uuid }
       run_id: { type: uuid, description: "References evaluation_runs.id" }
       app_id: { type: text }
       eval_type: { type: text, description: "batch_thread, call_quality, batch_adversarial, full_evaluation, custom" }
-      status: { type: text, description: "completed, completed_with_errors, failed" }
+      status: { type: text, description: "completed, completed_with_errors, cancelled" }
       created_at: { type: timestamptz }
       completed_at: { type: timestamptz }
-      duration_ms: { type: float }
-      thread_count: { type: int, description: "Number of items evaluated" }
-      pass_count: { type: int }
-      fail_count: { type: int }
-      error_count: { type: int }
-      pass_rate: { type: float, description: "0-100 percentage" }
-      avg_intent_accuracy: { type: float, description: "0.0-1.0" }
-      adversarial_total: { type: int, nullable: true }
-      adversarial_blocked: { type: int, nullable: true }
-      adversarial_block_rate: { type: float, nullable: true, description: "0-100 percentage" }
+      duration_ms: { type: numeric }
       run_name: { type: text, nullable: true, role: dimension, description: "User-given run name when present" }
-      avg_score: { type: float, nullable: true, role: measure, unit: score, pre_aggregated: true, description: "Average call-quality rubric score for the run" }
-      context: { type: jsonb, description: "App-specific metadata. Flat key-value, e.g. context->>'run_name'" }
-    context_keys:
-      run_name: { description: "User-given run name" }
+      thread_count: { type: int, description: "Targets (threads/calls/cases) evaluated in the run" }
+      pass_count: { type: int, description: "Targets with no failing detail" }
+      fail_count: { type: int, description: "Targets with a rule FAIL or a critical comparison" }
+      pass_rate: { type: numeric, nullable: true, description: "0.0-1.0 fraction of targets that passed" }
+      avg_score: { type: numeric, nullable: true, role: measure, unit: score, pre_aggregated: true, description: "Average headline (is_main) score for the run" }
+      rule_fail_count: { type: int, description: "Total rule details with status='FAIL'" }
+      critical_count: { type: int, description: "Total comparison details with severity='critical'" }
     access_control:
       tenant_column: tenant_id
 
   fact_evaluation:
     alias: ef
     description: >
-      Per-evaluator per-item results. One row per evaluator per thread/case.
-      Unifies built-in verdicts, custom scores, rubric scores, adversarial results.
-      Use this for evaluator-level analysis, score distributions, evaluator comparisons.
+      Flat leaf fact — one row per evaluation detail. style discriminates the atom:
+      'dimension' (scored rubric dimension: score/max), 'rule' (status PASS/FAIL/NA),
+      'comparison' (reference_text vs candidate_text, severity). The headline detail has is_main=true.
+      Filter/group by evaluator_name when a target has multiple evaluators.
     primary_key: id
     columns:
-      id: { type: uuid }
+      id: { type: bigint }
+      detail_id: { type: bigint }
       run_id: { type: uuid }
+      tenant_id: { type: uuid }
       app_id: { type: text }
       eval_type: { type: text }
-      item_id: { type: text, description: "Thread ID, adversarial case ID, or listing ID" }
-      item_type: { type: text, description: "thread, adversarial_case, recording, listing" }
-      evaluator_type: { type: text, description: "intent, correctness, efficiency, custom, call_rubric, adversarial_judge, critique" }
-      evaluator_name: { type: text, description: "Human-readable evaluator name" }
-      evaluator_id: { type: uuid, nullable: true, description: "FK to evaluators table for custom evaluators" }
-      result_status: { type: text, nullable: true, description: "PASS, FAIL, HARD FAIL, SOFT FAIL, CRITICAL, EFFICIENT, FRICTION, etc." }
-      result_score: { type: float, nullable: true, description: "Primary numeric metric of the evaluator for this item. Auto-detected from the evaluator's output_schema isMainMetric flag (not a fixed 'overall_score' field). For multi-evaluator runs, filter or group by evaluator_id / evaluator_name — scores from different evaluators live in separate rows keyed by evaluator_id." }
-      result_verdict: { type: text, nullable: true }
-      success: { type: boolean, nullable: true, description: "Did this evaluation pass?" }
-      agent: { type: text, nullable: true, role: dimension, description: "Primary human or bot agent associated with the evaluation item" }
-      direction: { type: text, nullable: true, role: dimension, allowed_values: ["inbound", "outbound"], description: "Interaction direction" }
-      duration_seconds: { type: float, nullable: true, role: measure, unit: seconds, description: "Interaction duration in seconds" }
-      intent: { type: text, nullable: true, role: dimension, description: "Primary intent label for the item" }
-      route: { type: text, nullable: true, role: dimension, description: "Primary routed or predicted handling path" }
-      query_type: { type: text, nullable: true, role: dimension, allowed_values: ["logging", "question"], description: "Intent/query mode" }
-      difficulty: { type: text, nullable: true, role: dimension, allowed_values: ["EASY", "MEDIUM", "HARD", "CRACK", "MORIARTY"], description: "Adversarial difficulty" }
-      total_turns: { type: int, nullable: true, role: measure, unit: count, description: "Number of turns in the interaction" }
-      result_detail: { type: jsonb, nullable: true, description: "Structured evaluation payload for the row" }
-      context: { type: jsonb, description: "App-specific metadata, e.g. context->>'agent' for call quality" }
-      created_at: { type: timestamptz }
-    context_keys:
-      agent: { description: "Agent or bot associated with the evaluation item" }
-      direction: { description: "Inbound or outbound interaction direction" }
-      difficulty: { description: "Difficulty or severity label" }
+      run_completed_at: { type: timestamptz, nullable: true }
+      target_key: { type: text, description: "Thread id, call id, or adversarial case id" }
+      target_type: { type: text, description: "chat_thread, transcript, test_case" }
+      agent: { type: text, nullable: true, role: dimension, description: "Agent/rep associated with the target" }
+      direction: { type: text, nullable: true, role: dimension, allowed_values: ["inbound", "outbound"] }
+      lead_id: { type: uuid, nullable: true, role: dimension, description: "Lead bridge for CRM-backed apps" }
+      evaluator_id: { type: uuid, nullable: true }
+      evaluator_name: { type: text, nullable: true, description: "Human-readable evaluator name" }
+      style: { type: text, description: "dimension | rule | comparison" }
+      key: { type: text, nullable: true, description: "Dimension name, rule id, or comparison category" }
+      label: { type: text, nullable: true }
+      score: { type: numeric, nullable: true, role: measure, unit: score, description: "Dimension score" }
+      max: { type: numeric, nullable: true, description: "Dimension max" }
+      status: { type: text, nullable: true, description: "PASS, FAIL, NA (rule details)" }
+      severity: { type: text, nullable: true, description: "minor, moderate, critical (comparison details)" }
+      locator: { type: text, nullable: true, description: "segment:N / api_field:<name>" }
+      is_main: { type: boolean, description: "True for the evaluation's headline detail" }
+      reference_text: { type: text, nullable: true }
+      candidate_text: { type: text, nullable: true }
+      explanation: { type: text, nullable: true }
     joins: "ef.run_id = rf.run_id"
     access_control:
       tenant_column: tenant_id
 
-  fact_evaluation_criterion:
-    alias: cf
+  fact_evaluation_review:
+    alias: rev
     description: >
-      Per-rule per-item results. One row per criterion (rule/check) per thread.
-      Answers 'which rules fail most?', 'compliance rate by rule', 'co-failing rules'.
-      No JSONB unpacking needed — rules are pre-extracted into flat rows.
+      Human-review verdicts. One row per review item. Joins fact_evaluation on
+      (run_id, target_key, key). Use for 'where did reviewers correct the LLM, by dimension'.
     primary_key: id
     columns:
-      id: { type: uuid }
+      id: { type: bigint }
       run_id: { type: uuid }
+      tenant_id: { type: uuid }
       app_id: { type: text }
-      item_id: { type: text, description: "Thread ID or adversarial case ID" }
-      criterion_source: { type: text, description: "rule_catalog, adversarial_rule, custom_criterion" }
-      criterion_id: { type: text, description: "Rule identifier, e.g. exact_calorie_values" }
-      criterion_label: { type: text, nullable: true, description: "Human-readable label (section name)" }
-      evaluator_type: { type: text, description: "correctness, efficiency, adversarial_judge" }
-      status: { type: text, description: "FOLLOWED, VIOLATED, NOT_APPLICABLE, NOT_EVALUATED" }
-      passed: { type: boolean, nullable: true, description: "true=FOLLOWED, false=VIOLATED, null=N/A" }
-      evidence: { type: text, nullable: true, description: "Why this status was assigned (truncated to 500 chars)" }
-      created_at: { type: timestamptz }
-    joins: "cf.run_id = rf.run_id"
+      reviewer_user_id: { type: uuid, nullable: true }
+      review_status: { type: text, nullable: true }
+      overall_decision: { type: text, nullable: true }
+      reviewed_at: { type: timestamptz, nullable: true }
+      target_key: { type: text }
+      target_type: { type: text, nullable: true }
+      key: { type: text, description: "== fact_evaluation.key (dimension/rule reviewed)" }
+      decision: { type: text, description: "accept, correct, reject" }
+      original_value: { type: text, nullable: true }
+      reviewed_value: { type: text, nullable: true }
+      reason_code: { type: text, nullable: true }
+      note: { type: text, nullable: true }
+    joins: "rev.run_id = rf.run_id"
     access_control:
       tenant_column: tenant_id
 
   evaluation_runs:
     alias: e
     description: >
-      Original eval run records. Use for fields not in fact tables:
-      batch_metadata, config, llm_provider, llm_model.
-      For analytics queries, prefer agg_evaluation_run.
+      Original eval run records. Use for fields not in the facts: batch_metadata, config,
+      llm_provider, llm_model. For analytics, prefer agg_evaluation_run.
     primary_key: id
     columns:
       id: { type: uuid }
@@ -148,74 +142,58 @@ dimensions:
     table: agg_evaluation_run
     expression: "status"
     description: "Lifecycle status of the evaluation run"
-  - name: evaluator_type
-    table: fact_evaluation
-    expression: "evaluator_type"
-    description: "Evaluator family or mode"
   - name: evaluator_name
     table: fact_evaluation
     expression: "evaluator_name"
     description: "Human-readable evaluator name"
-  - name: result_status
+  - name: style
     table: fact_evaluation
-    expression: "result_status"
-    description: "Primary status or verdict"
-  - name: item_id
+    expression: "style"
+    description: "Detail kind: dimension, rule, or comparison"
+  - name: key
     table: fact_evaluation
-    expression: "item_id"
-    description: "Canonical evaluated item identifier"
-  - name: item_type
+    expression: "key"
+    description: "Dimension name, rule id, or comparison category"
+  - name: target_key
     table: fact_evaluation
-    expression: "item_type"
-    description: "Kind of evaluated item"
-  - name: rule
-    table: fact_evaluation_criterion
-    expression: "criterion_label"
-    description: "Rule or criterion label"
-  - name: criterion_source
-    table: fact_evaluation_criterion
-    expression: "criterion_source"
-    description: "Where the rule or criterion came from"
+    expression: "target_key"
+    description: "Canonical evaluated target identifier"
+  - name: target_type
+    table: fact_evaluation
+    expression: "target_type"
+    description: "Kind of evaluated target"
+  - name: severity
+    table: fact_evaluation
+    expression: "severity"
+    description: "Comparison severity (minor/moderate/critical)"
 
 metrics:
   pass_rate:
-    description: "Percentage of items that passed (from run facts)"
+    description: "Fraction of targets that passed (from run facts)"
     sql: "rf.pass_rate"
     applies_to: agg_evaluation_run
 
-  avg_intent_accuracy:
-    description: "Average intent accuracy across runs"
-    sql: "ROUND(AVG(rf.avg_intent_accuracy)::numeric, 3)"
+  avg_score:
+    description: "Average headline score across runs"
+    sql: "ROUND(AVG(rf.avg_score)::numeric, 2)"
     applies_to: agg_evaluation_run
 
-  adversarial_block_rate:
-    description: "Percentage of adversarial attacks blocked"
-    sql: "rf.adversarial_block_rate"
-    applies_to: agg_evaluation_run
-
-  rule_compliance_rate:
-    description: "Per-rule: FOLLOWED / (FOLLOWED + VIOLATED)"
-    sql: |
-      ROUND(
-        COUNT(*) FILTER (WHERE cf.status = 'FOLLOWED') * 100.0 /
-        NULLIF(COUNT(*) FILTER (WHERE cf.status IN ('FOLLOWED', 'VIOLATED')), 0),
-      1)
-    applies_to: fact_evaluation_criterion
+  rule_violation_count:
+    description: "Count of rule details that FAILed"
+    sql: "COUNT(*) FILTER (WHERE ef.style = 'rule' AND ef.status = 'FAIL')"
+    applies_to: fact_evaluation
 
 common_queries:
   - intent: "Which rules are most violated?"
     sql: |
-      SELECT cf.criterion_id AS rule_id,
-             cf.criterion_label AS section,
-             COUNT(*) FILTER (WHERE cf.status = 'VIOLATED') AS violated,
-             COUNT(*) FILTER (WHERE cf.status = 'FOLLOWED') AS followed,
-             ROUND(
-               COUNT(*) FILTER (WHERE cf.status = 'FOLLOWED') * 100.0 /
-               NULLIF(COUNT(*) FILTER (WHERE cf.status IN ('FOLLOWED', 'VIOLATED')), 0),
-             1) AS compliance_pct
-      FROM fact_evaluation_criterion cf
-      WHERE cf.app_id = :app_id AND cf.tenant_id = :tenant_id
-      GROUP BY cf.criterion_id, cf.criterion_label
+      SELECT ef.key AS rule_id,
+             ef.label AS section,
+             COUNT(*) FILTER (WHERE ef.status = 'FAIL') AS violated,
+             COUNT(*) FILTER (WHERE ef.status = 'PASS') AS followed
+      FROM fact_evaluation ef
+      WHERE ef.app_id = :app_id AND ef.tenant_id = :tenant_id
+        AND ef.style = 'rule'
+      GROUP BY ef.key, ef.label
       ORDER BY violated DESC
 
   - intent: "Pass rate trend over time"
@@ -230,35 +208,23 @@ common_queries:
         AND rf.status IN ('completed', 'completed_with_errors')
       ORDER BY rf.created_at DESC
 
-  - intent: "Worst performing threads"
+  - intent: "Weakest rubric dimensions"
     sql: |
-      SELECT ef.item_id AS thread_id,
-             MAX(CASE WHEN ef.evaluator_type = 'correctness' THEN ef.result_status END) AS correctness,
-             MAX(CASE WHEN ef.evaluator_type = 'efficiency' THEN ef.result_status END) AS efficiency,
-             MAX(CASE WHEN ef.evaluator_type = 'intent' THEN ef.result_score END) AS intent_accuracy,
-             ef.created_at::date AS date
+      SELECT ef.key AS dimension,
+             ROUND(AVG(ef.score)::numeric, 2) AS avg_score,
+             COUNT(*) AS scored
       FROM fact_evaluation ef
       WHERE ef.app_id = :app_id AND ef.tenant_id = :tenant_id
-      GROUP BY ef.item_id, ef.created_at::date
-      HAVING MAX(CASE WHEN ef.evaluator_type = 'correctness' THEN ef.result_status END) != 'PASS'
-      ORDER BY
-        CASE MAX(CASE WHEN ef.evaluator_type = 'correctness' THEN ef.result_status END)
-          WHEN 'CRITICAL' THEN 1
-          WHEN 'HARD FAIL' THEN 2
-          WHEN 'SOFT FAIL' THEN 3
-          ELSE 4
-        END
-      LIMIT 20
+        AND ef.style = 'dimension' AND ef.is_main = false
+      GROUP BY ef.key
+      ORDER BY avg_score ASC
 
-  - intent: "Adversarial test results summary"
+  - intent: "Where did reviewers correct the LLM, by dimension?"
     sql: |
-      SELECT ef.context->>'difficulty' AS difficulty,
-             COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE ef.success) AS blocked,
-             COUNT(*) FILTER (WHERE NOT ef.success) AS breached,
-             ROUND(COUNT(*) FILTER (WHERE ef.success) * 100.0 / NULLIF(COUNT(*), 0), 1) AS block_rate
-      FROM fact_evaluation ef
-      WHERE ef.app_id = :app_id AND ef.tenant_id = :tenant_id
-        AND ef.evaluator_type = 'adversarial_judge'
-      GROUP BY ef.context->>'difficulty'
-      ORDER BY block_rate ASC
+      SELECT rev.key AS dimension,
+             COUNT(*) FILTER (WHERE rev.decision = 'correct') AS corrections,
+             COUNT(*) AS reviewed
+      FROM fact_evaluation_review rev
+      WHERE rev.app_id = :app_id AND rev.tenant_id = :tenant_id
+      GROUP BY rev.key
+      ORDER BY corrections DESC

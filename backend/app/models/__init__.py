@@ -36,7 +36,7 @@ from app.models.application_external_agent_connector import ApplicationExternalA
 from app.models.scheduled_job import ScheduledJobDefinition
 from app.models.scheduler_heartbeat import SchedulerWorkerHeartbeat
 from app.models.eval_template import EvaluationTemplate
-from app.models.analytics_facts import AggEvaluationRun, FactEvaluation, FactEvaluationCriterion
+from app.models.analytics_facts import AggEvaluationRun, FactEvaluation, FactEvaluationReview
 from app.models.analytics_lead_facts import (
     DimLead,
     FactLeadActivity,
@@ -103,7 +103,7 @@ __all__ = [
     "ApplicationExternalAgentConnector",
     "ScheduledJobDefinition", "SchedulerWorkerHeartbeat",
     "EvaluationTemplate",
-    "AggEvaluationRun", "FactEvaluation", "FactEvaluationCriterion",
+    "AggEvaluationRun", "FactEvaluation", "FactEvaluationReview",
     "DimLead", "FactLeadStageTransition", "FactLeadActivity", "FactLeadSignal",
     "LogFactPopulationRun", "CacheSqlQuery",
     "MappingState",
