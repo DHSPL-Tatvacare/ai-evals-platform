@@ -189,7 +189,7 @@ export function PrintReportRun() {
   }
 
   return (
-    <div className="report-print-container min-h-screen bg-[var(--bg-primary)] px-6 py-6">
+    <div className="report-print-container min-h-screen bg-[var(--bg-primary)] px-4 py-4">
       <PlatformReportView report={report} printMode />
     </div>
   );

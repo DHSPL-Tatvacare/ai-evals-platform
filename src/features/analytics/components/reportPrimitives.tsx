@@ -76,7 +76,7 @@ export function SectionShell({ tone, className, bodyClassName, children, bare }:
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]',
+        'relative overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)]',
         className,
       )}
     >
@@ -87,7 +87,7 @@ export function SectionShell({ tone, className, bodyClassName, children, bare }:
           style={{ backgroundColor: rule }}
         />
       ) : null}
-      <div className={cn('px-4 py-3', bodyClassName)}>{children}</div>
+      <div className={cn('px-3 py-2', bodyClassName)}>{children}</div>
     </div>
   );
 }
@@ -132,7 +132,7 @@ export function KpiTile({ label, value, subtitle, tone, icon: Icon, className }:
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-3',
+        'relative overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2',
         className,
       )}
     >
@@ -144,7 +144,7 @@ export function KpiTile({ label, value, subtitle, tone, icon: Icon, className }:
         <span className="truncate">{label}</span>
       </div>
       <div
-        className="mt-1.5 text-[22px] font-semibold leading-tight tabular-nums"
+        className="mt-1.5 text-lg font-semibold leading-tight tabular-nums"
         style={{ color: valueColor }}
       >
         {value}

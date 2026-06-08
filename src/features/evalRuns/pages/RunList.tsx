@@ -1,24 +1,24 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCurrentAppId, usePoll, useTableQueryParams } from '@/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Search } from 'lucide-react';
 import type { EvalRun } from '@/types';
-import { fetchEvalRunsPaged, deleteEvalRun } from '@/services/api/evalRunsApi';
+import { deleteEvalRun } from '@/services/api/evalRunsApi';
 import { jobsApi } from '@/services/api/jobsApi';
 import { notificationService } from '@/services/notifications';
 import { ConfirmDialog, FilterButton, FilterPanel, PageHeaderSearch } from '@/components/ui';
 import { DataTable } from '@/components/ui/DataTable';
 import type { SortState } from '@/components/ui/DataTable';
 import { PageSurface } from '@/components/ui/PageSurface';
-import { isActive } from '@/utils/runLifecycle';
 import { inferAppIdFromPath } from '@/config/routes';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { useAppPageActions } from '@/features/pageActions/registry';
 import { timeAgo } from '@/utils/evalFormatters';
-import { useStableEvalRunUpdate } from '../hooks';
 import { useJobTrackerStore } from '@/stores';
 import { getRunsListConfig, buildRunsListRow, type RunsListRow } from '../runsListRegistry';
 import type { RunType } from '../types';
+import { useEvaluationRuns, evalRunsQueryKeys } from '../queries/evalRunsQueries';
 
 function jobTypeToRunType(jobType: string): RunType {
   if (jobType.includes('adversarial')) return 'adversarial';
@@ -30,6 +30,7 @@ export default function RunList() {
   const navigate = useNavigate();
   const location = useLocation();
   const currentAppId = useCurrentAppId();
+  const queryClient = useQueryClient();
   const { icon, title } = usePageMetadata('runs');
   const pageActions = useAppPageActions('runs', { displayMode: 'icon' });
 
@@ -54,19 +55,10 @@ export default function RunList() {
     defaultSort: { key: 'created_at', order: 'desc' },
   });
 
-  const [items, setItems] = useState<EvalRun[]>([]);
-  const [totalItems, setTotalItems] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-
-  const isInitialLoad = useRef(true);
-  const abortRef = useRef<AbortController | null>(null);
-  const stableSetItems = useStableEvalRunUpdate(setItems);
 
   const qValue = typeof state.filters.q === 'string' ? state.filters.q : '';
   const allowedRunTypes = config.allowedRunTypes;
@@ -76,58 +68,32 @@ export default function RunList() {
     if (allowedRunTypes && !allowedRunTypes.includes(raw as (typeof allowedRunTypes)[number])) {
       return undefined;
     }
-    return raw as 'batch' | 'adversarial' | 'thread' | 'custom' | 'evaluation';
+    return raw;
   }, [state.filters.run_type, allowedRunTypes]);
   const statusValue =
     typeof state.filters.status === 'string' && state.filters.status.length > 0
       ? state.filters.status
       : undefined;
 
-  const loadRuns = useCallback(() => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    if (isInitialLoad.current) setLoading(true);
-    setError('');
-
-    fetchEvalRunsPaged({
-      app_id: appId,
-      page: state.page,
-      page_size: state.pageSize,
-      sort: state.sort,
-      order: state.order,
-      run_type: runTypeValue,
-      status: statusValue,
-      q: qValue || undefined,
-      signal: controller.signal,
-    })
-      .then((res) => {
-        stableSetItems(res.items);
-        setTotalItems(res.totalItems);
-      })
-      .catch((e: Error) => {
-        if (e.name !== 'AbortError') setError(e.message);
-      })
-      .finally(() => {
-        setLoading(false);
-        isInitialLoad.current = false;
-      });
-  }, [
+  const {
+    data,
+    isLoading,
+    isFetching,
+    error,
+  } = useEvaluationRuns({
     appId,
-    state.page,
-    state.pageSize,
-    state.sort,
-    state.order,
-    runTypeValue,
-    statusValue,
-    qValue,
-    stableSetItems,
-  ]);
+    page: state.page,
+    pageSize: state.pageSize,
+    sort: state.sort,
+    order: state.order,
+    runType: runTypeValue,
+    status: statusValue,
+    q: qValue || undefined,
+  });
 
-  useEffect(() => {
-    loadRuns();
-  }, [loadRuns, location.key]);
+  const items: EvalRun[] = data?.items ?? [];
+  const totalItems = data?.totalItems ?? 0;
+  const queryError = error instanceof Error ? error.message : '';
 
   const trackedJobs = useJobTrackerStore((s) => s.activeJobs);
   const allRunIds = useMemo(() => new Set(items.map((r) => r.id)), [items]);
@@ -139,14 +105,13 @@ export default function RunList() {
       .filter((j) => !j.runId || !allRunIds.has(j.runId));
   }, [trackedJobs, allRunIds, appId, state.page, activeFilterCount, config.includeQueuedJobs]);
 
-  const hasActive = useMemo(() => items.some((r) => isActive(r.status)), [items]);
-
   usePoll({
     fn: async () => {
-      loadRuns();
+      queryClient.invalidateQueries({ queryKey: evalRunsQueryKeys.all });
       return true;
     },
-    enabled: hasActive || pendingTrackedJobs.length > 0,
+    enabled: pendingTrackedJobs.length > 0,
+    intervalMs: 5_000,
   });
 
   const tableData = useMemo((): RunsListRow[] => {
@@ -169,31 +134,34 @@ export default function RunList() {
     return [...queuedRows, ...runRows];
   }, [items, pendingTrackedJobs, config]);
 
+  const invalidateRuns = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: evalRunsQueryKeys.all });
+  }, [queryClient]);
+
   const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
       await deleteEvalRun(deleteTarget.id);
-      setItems((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-      setTotalItems((t) => Math.max(0, t - 1));
       setDeleteTarget(null);
+      invalidateRuns();
     } catch (e: unknown) {
       notificationService.error(e instanceof Error ? e.message : 'Delete failed', 'Delete failed');
     } finally {
       setIsDeleting(false);
     }
-  }, [deleteTarget]);
+  }, [deleteTarget, invalidateRuns]);
 
   const handleCancel = useCallback(
     async (jobId: string) => {
       try {
         await jobsApi.cancel(jobId);
-        loadRuns();
+        invalidateRuns();
       } catch {
         // Cancel failed silently — polling will show real status
       }
     },
-    [loadRuns],
+    [invalidateRuns],
   );
 
   const handleRowClick = useCallback(
@@ -215,10 +183,10 @@ export default function RunList() {
     [config, menuOpenId, handleCancel],
   );
 
-  if (error) {
+  if (queryError) {
     return (
       <div className="bg-[var(--surface-error)] border border-[var(--border-error)] rounded p-3 text-sm text-[var(--color-error)]">
-        Failed to load runs: {error}
+        Failed to load runs: {queryError}
       </div>
     );
   }
@@ -259,7 +227,7 @@ export default function RunList() {
           data={tableData}
           keyExtractor={(row) => row.id}
           onRowClick={handleRowClick}
-          loading={loading}
+          loading={isLoading || isFetching}
           emptyIcon={emptyIcon}
           emptyTitle={emptyTitle}
           emptyDescription={emptyDescription}

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 
-import { usePoll } from '@/hooks';
 import { apiLogsForApp, runDetailForApp } from '@/config/routes';
 import { Button, ConfirmDialog, ModelBadge, PageHeaderSearch } from '@/components/ui';
 import { DataTable } from '@/components/ui/DataTable';
@@ -82,18 +81,6 @@ export function EvaluationRunsTab({ appId, onSubtitleChange }: EvaluationRunsTab
   useEffect(() => {
     setPage(1);
   }, [searchQuery]);
-
-  // Light polling — keep the multi-run view fresh without dependency on
-  // any active run state (per-run live polling now lives on the sub-route
-  // page where it's actually relevant).
-  usePoll({
-    fn: async () => {
-      const r = await fetchLogs({ app_id: appId, limit: LOGS_FETCH_CAP });
-      setLogs(r.logs);
-      return true;
-    },
-    enabled: false,
-  });
 
   const searchCorpus = useMemo(
     () =>

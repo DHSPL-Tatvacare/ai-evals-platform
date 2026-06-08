@@ -26,17 +26,17 @@
   --color-brand-accent: #C3C2F0;
 
   /* Neutral */
-  --color-neutral-0: #FFFFFF;
-  --color-neutral-50: #FBFAFF;
-  --color-neutral-100: #F5F4F9;
-  --color-neutral-200: #E8E7EE;
-  --color-neutral-300: #D0CED9;
-  --color-neutral-400: #A8A6B3;
-  --color-neutral-500: #6B6B7B;
-  --color-neutral-600: #49495A;
-  --color-neutral-700: #363642;
-  --color-neutral-800: #252530;
-  --color-neutral-900: #1A1A24;
+  --color-neutral-0: #FCFCFC;
+  --color-neutral-50: #F8F8F8;
+  --color-neutral-100: #F0F0F0;
+  --color-neutral-200: #E4E4E4;
+  --color-neutral-300: #D0D0D0;
+  --color-neutral-400: #A6A6A6;
+  --color-neutral-500: #5E5E5E;
+  --color-neutral-600: #2E2E2E;
+  --color-neutral-700: #1F1F1F;
+  --color-neutral-800: #181818;
+  --color-neutral-900: #121212;
 
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

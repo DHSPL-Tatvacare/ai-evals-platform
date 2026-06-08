@@ -101,7 +101,7 @@ export function CallQualitySettings() {
 
   return (
     <PageSurface icon={icon} title={title}>
-      <Tabs tabs={tabs} fillHeight />
+      <Tabs tabs={tabs} fillHeight mountStrategy="active-only" />
       <SettingsSaveBar isDirty={isDirty} isSaving={isSaving} onSave={handleSave} onDiscard={handleDiscard} />
     </PageSurface>
   );

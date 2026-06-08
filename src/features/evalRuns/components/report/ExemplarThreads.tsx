@@ -104,7 +104,7 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
       {/* Header strip */}
       <div
         className={cn(
-          'flex items-center gap-2 px-4 py-2',
+          'flex items-center gap-2 px-3 py-1.5',
           isGood ? 'bg-[var(--surface-success)]' : 'bg-[var(--surface-error)]',
         )}
       >
@@ -166,12 +166,12 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
       </div>
 
       {/* Body — AI analysis always visible */}
-      <div className="px-4 py-3 bg-[var(--bg-primary)]">
+      <div className="px-3 py-2 bg-[var(--bg-primary)]">
         {/* Adversarial-specific: reasoning and failure modes */}
         {isAdversarialExemplar && (thread.reasoning || (thread.failureModes && thread.failureModes.length > 0)) && (
-          <div className="mb-3">
+          <div className="mb-1.5">
             {thread.reasoning && (
-              <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed mb-2">
+              <p className="text-xs text-[var(--text-secondary)] leading-snug mb-1">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] block mb-0.5">
                   Reasoning
                 </span>
@@ -179,7 +179,7 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
               </p>
             )}
             {thread.failureModes && thread.failureModes.length > 0 && (
-              <div className="mb-2">
+              <div className="mb-1">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">
                   Failure Modes
                 </p>
@@ -200,36 +200,36 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
 
         {/* AI Analysis as structured prose */}
         {analysis ? (
-          <div className="mb-3">
-            <p className="text-[13px] text-[var(--text-primary)] leading-relaxed mb-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] block mb-0.5">
+          <div className="mb-1.5">
+            <p className="text-xs text-[var(--text-primary)] leading-snug mb-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] block mb-0.5">
                 {isGood ? 'What happened' : 'What went wrong'}
               </span>
               {analysis.whatHappened}
             </p>
-            <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] block mb-0.5">
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] block mb-0.5">
                 {isGood ? 'Why it worked' : 'Why it failed'}
               </span>
               {analysis.why}
             </p>
             {analysis.promptGap && (
-              <p className="text-xs text-[var(--text-muted)] italic mt-2">
+              <p className="text-[11px] text-[var(--text-muted)] italic mt-1">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-warning)] mr-1 align-middle" />
                 Prompt gap: {analysis.promptGap}
               </p>
             )}
           </div>
         ) : (
-          <p className="text-sm text-[var(--text-muted)] italic mb-3">
+          <p className="text-xs text-[var(--text-muted)] italic mb-1.5">
             {isAdversarialExemplar ? 'AI analysis not available for this test case.' : 'AI analysis not available for this thread.'}
           </p>
         )}
 
         {/* Rule violations as chips (bad examples only) */}
         {!isGood && thread.ruleViolations.length > 0 && (
-          <div className="mb-3">
-            <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">
+          <div className="mb-1.5">
+            <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1">
               Rule Violations
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -248,7 +248,7 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
 
         {/* Transcript: collapsible on screen, always-open in print mode */}
         {validMessages.length > 0 && (
-          <div className="border-t border-[var(--border-subtle)] pt-2.5">
+          <div className="border-t border-[var(--border-subtle)] pt-1.5">
             {!printMode && (
               <button
                 onClick={() => setTranscriptOpen(!transcriptOpen)}
@@ -287,7 +287,7 @@ function Transcript({ messages, isGood, printMode = false }: {
   printMode?: boolean;
 }) {
   return (
-    <div className={cn('space-y-2', printMode ? '' : 'max-h-[400px] overflow-y-auto')}>
+    <div className={cn('space-y-1', !printMode && 'max-h-[400px] overflow-y-auto')}>
       {messages.map((msg, i) => (
         <TranscriptBubble key={i} msg={msg} isGood={isGood} printMode={printMode} />
       ))}
@@ -301,8 +301,6 @@ function TranscriptBubble({ msg, isGood, printMode = false }: {
   printMode?: boolean;
 }) {
   const MAX_LENGTH = 500;
-  // Print mode: show every message in full. Truncation only makes sense on
-  // screen where the user can click to expand.
   const [showFull, setShowFull] = useState(printMode);
   const isUser = msg.role === 'user';
   const truncated = !printMode && msg.content.length > MAX_LENGTH && !showFull;
@@ -311,7 +309,7 @@ function TranscriptBubble({ msg, isGood, printMode = false }: {
   return (
     <div
       className={cn(
-        'border-l-2 rounded-r px-3 py-2 break-inside-avoid',
+        'border-l-2 rounded-r px-2 py-1 break-inside-avoid',
         isUser
           ? 'border-l-blue-400 bg-blue-50 dark:bg-blue-900/20'
           : isGood
@@ -319,10 +317,10 @@ function TranscriptBubble({ msg, isGood, printMode = false }: {
             : 'border-l-red-400 bg-red-50 dark:bg-red-900/20',
       )}
     >
-      <p className="text-[10px] uppercase tracking-wider font-semibold text-[var(--text-muted)] mb-0.5">
+      <p className="text-[9px] uppercase tracking-wider font-semibold text-[var(--text-muted)] mb-0.5">
         {msg.role}
       </p>
-      <p className="text-xs font-mono whitespace-pre-wrap text-[var(--text-primary)] leading-relaxed">
+      <p className="font-mono whitespace-pre-wrap text-[var(--text-primary)] text-[11px] leading-snug">
         {display}
       </p>
       {!printMode && msg.content.length > MAX_LENGTH && (

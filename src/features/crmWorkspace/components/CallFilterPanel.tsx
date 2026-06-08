@@ -6,7 +6,7 @@
  * so what the user sees in the dropdown is exactly what filtering returns.
  */
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button, Combobox, DateRangeField, RightSlideOverShell } from '@/components/ui';
 import { useAppConfig, useCurrentAppId } from '@/hooks';
@@ -259,18 +259,34 @@ export function CallFilterPanel({
   const callFiltersFromStore = useInsideSalesStore((state) => state.filters);
   const leadFilters = useLeadsStore((state) => state.leadFilters);
 
-  const callFiltersResolved = values ?? callFiltersFromStore;
-  const resolvedValues = datasetKey === 'leads' ? leadFilters : callFiltersResolved;
+  const isStandalone = !onPatch;
+
+  const [draft, setDraft] = useState<CallFilters | LeadFilters>(() => {
+    const src =
+      datasetKey === 'leads'
+        ? useLeadsStore.getState().leadFilters
+        : useInsideSalesStore.getState().filters;
+    return { ...src } as CallFilters | LeadFilters;
+  });
+
+  const storeValues =
+    datasetKey === 'leads' ? leadFilters : (values ?? callFiltersFromStore);
+  const resolvedValues = isStandalone ? draft : storeValues;
+
   const setPatch = (patch: Partial<CallFilters> | Partial<LeadFilters>) => {
-    if (datasetKey === 'leads') {
-      useLeadsStore.getState().setLeadFilters(patch as Partial<LeadFilters>);
+    if (!isStandalone) {
+      if (datasetKey === 'leads') {
+        useLeadsStore.getState().setLeadFilters(patch as Partial<LeadFilters>);
+        return;
+      }
+      if (onPatch) {
+        onPatch(patch as Partial<CallFilters>);
+        return;
+      }
       return;
     }
-    if (onPatch) {
-      onPatch(patch as Partial<CallFilters>);
-      return;
-    }
-    useInsideSalesStore.getState().setFilters(patch as Partial<CallFilters>);
+    // Standalone: mutate draft only
+    setDraft((prev) => ({ ...prev, ...patch } as CallFilters | LeadFilters));
   };
 
   const resetFilters = () => {
@@ -283,6 +299,22 @@ export function CallFilterPanel({
       return;
     }
     useInsideSalesStore.getState().clearFilters();
+  };
+
+  const handleApply = () => {
+    if (isStandalone) {
+      if (datasetKey === 'leads') {
+        useLeadsStore.getState().setLeadFilters(draft as Partial<LeadFilters>);
+      } else {
+        useInsideSalesStore.getState().setFilters(draft as Partial<CallFilters>);
+      }
+    }
+    onClose();
+  };
+
+  const handleReset = () => {
+    resetFilters();
+    onClose();
   };
 
   return (
@@ -326,10 +358,10 @@ export function CallFilterPanel({
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border-default)]">
-          <Button variant="ghost" size="sm" onClick={() => { resetFilters(); onClose(); }}>
+          <Button variant="ghost" size="sm" onClick={handleReset}>
             Reset
           </Button>
-          <Button size="sm" onClick={onClose}>
+          <Button size="sm" onClick={handleApply}>
             Apply
           </Button>
         </div>

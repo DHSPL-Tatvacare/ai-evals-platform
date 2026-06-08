@@ -25,7 +25,6 @@ import { useInsideSalesStore } from '@/stores';
 import { useLeadsStore } from '@/stores/insideSalesStore';
 import type { CallRecord } from '@/stores/insideSalesStore';
 import type { CollectionFreshness, CollectionSyncStatus, LeadListRecord } from '@/services/api/insideSales';
-import { fetchCollectionStatus } from '@/services/api/insideSales';
 import { cn } from '@/utils';
 import { formatDuration } from '@/utils/formatters';
 import { scoreColor } from '@/utils/scoreUtils';
@@ -37,6 +36,7 @@ import { MqlScoreBadge } from '../components/MqlScoreBadge';
 import { StageBadge } from '../components/StageBadge';
 import { buildCollectionFilterPills, countActiveCollectionFilters } from '../utils/collectionFilters';
 import { useCrmSchema, type CrmSchema } from '../queries/crmSchema';
+import { useCollectionStatus } from '../queries/collectionQueries';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
@@ -456,7 +456,6 @@ function StatusBadge({ status }: { status: string }) {
 export function CrmListing() {
   const appId = useCurrentAppId();
   const appConfig = useAppConfig(appId);
-  const { data: callSchema } = useCrmSchema(appId, 'fact_lead_activity');
   const { icon, title } = usePageMetadata('listing');
   const leadDatasetConfig = appConfig.collections.datasets.leads;
   const callDatasetConfig = appConfig.collections.datasets.calls;
@@ -482,6 +481,8 @@ export function CrmListing() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const activeTab: 'leads' | 'calls' = tabParam === 'calls' ? 'calls' : 'leads';
+
+  const { data: callSchema } = useCrmSchema(appId, 'fact_lead_activity', { enabled: activeTab === 'calls' });
   const setActiveTab = (next: 'leads' | 'calls') => {
     const params = new URLSearchParams(searchParams);
     if (next === 'leads') params.delete('tab');
@@ -612,29 +613,8 @@ export function CrmListing() {
     await useLeadsStore.getState().loadLeads(true);
   }, [activeTab]);
 
-  const [callsStatus, setCallsStatus] = useState<CollectionSyncStatus | null>(null);
-  const [leadsStatus, setLeadsStatus] = useState<CollectionSyncStatus | null>(null);
-  const activeStatus = activeTab === 'calls' ? callsStatus : leadsStatus;
-
-  // Pull durable status when the tab becomes active. The scheduler owns
-  // sync runs, so the badge no longer has a job-id signal to react to —
-  // the periodic re-fetch below keeps it eventually-consistent.
-  useEffect(() => {
-    let cancelled = false;
-    const family: 'calls' | 'leads' = activeTab === 'calls' ? 'calls' : 'leads';
-    fetchCollectionStatus(family)
-      .then((data) => {
-        if (cancelled) return;
-        if (family === 'calls') setCallsStatus(data);
-        else setLeadsStatus(data);
-      })
-      .catch(() => {
-        // Status is advisory — if it fails we fall back to ephemeral freshness.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab]);
+  const { data: activeStatus } = useCollectionStatus(activeTab === 'calls' ? 'calls' : 'leads');
+  const statusForBadge = activeStatus ?? null;
 
   const callsFilterPillsContent = activeFilterPills.length > 0 ? (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -864,7 +844,7 @@ export function CrmListing() {
       actions={
         <FreshnessBadge
           freshness={activeTab === 'calls' ? callsFreshness : leadsFreshness}
-          status={activeStatus}
+          status={statusForBadge}
           reloading={activeTab === 'calls' ? isLoading : leadsLoading}
           onReload={handleRefresh}
         />
@@ -892,6 +872,7 @@ export function CrmListing() {
       />
 
       <CallFilterPanel
+        key={`${activeTab}-${filterPanelOpen}`}
         isOpen={filterPanelOpen}
         activeTab={activeTab}
         onClose={() => setFilterPanelOpen(false)}

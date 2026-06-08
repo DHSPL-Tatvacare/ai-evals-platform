@@ -9,7 +9,7 @@ interface Props {
 
 export default function SectionHeader({ title, description, infoTooltip }: Props) {
   return (
-    <div className="mb-6 pb-3 border-b border-[var(--border-subtle)]">
+    <div className="mb-3 pb-2 border-b border-[var(--border-subtle)]">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--text-primary)]">
           {title}

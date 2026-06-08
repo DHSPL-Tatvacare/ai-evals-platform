@@ -7,6 +7,8 @@ export function useListingsLoader() {
   const { setListings, setLoading } = useListingsStore();
 
   useEffect(() => {
+    if (appId !== 'voice-rx') return;
+
     async function loadListings() {
       setLoading(true);
       try {

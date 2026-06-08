@@ -1,4 +1,4 @@
-import { type ReactNode, useState, useCallback, useEffect, useRef } from 'react';
+import { type ReactNode, useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -10,6 +10,7 @@ import { OfflineBanner, ShortcutsHelpModal } from '@/components/feedback';
 import { MiniPlayerConnector } from '@/features/transcript';
 import { cn } from '@/utils';
 import { firstAccessibleAppId, inferAppIdFromPath, isAdminPath } from '@/config/routes';
+import { LoadingState } from '@/components/ui';
 import { JobCompletionWatcher } from '@/components/JobCompletionWatcher';
 import { NewBatchEvalOverlay, NewAdversarialOverlay } from '@/features/evalRuns/components';
 import { NewCallQualityEvalOverlay } from '@/features/callQualityEval';
@@ -36,17 +37,19 @@ export function MainLayout({ children }: MainLayoutProps) {
   const activeModal = useUIStore((s) => s.activeModal);
   const closeModal = useUIStore((s) => s.closeModal);
 
-  // Sync app store from route — route is the single source of truth.
-  // Done *during render* (not in an effect) so children mounted under
-  // <Outlet/> read the correct app on their very first render. A
-  // useEffect here lands one render late, so the first paint of an app
-  // page (fresh load / cross-app navigation) would otherwise pull the
-  // previous app's config and crash on app-specific config keys.
+  // Derive the app that owns the current route.
+  // The route is the single source of truth; the Zustand store follows it.
+  // Sync runs in useLayoutEffect (synchronous before paint) so children
+  // under <Outlet/> never render with a stale app — the DOM is recomputed
+  // and committed before the browser paints a frame.
   const candidateApps = user?.isOwner ? APP_IDS : user?.appAccess ?? APP_IDS;
   const routeApp = inferAppIdFromPath(location.pathname, candidateApps) ?? firstAccessibleAppId(candidateApps);
-  if (routeApp && routeApp !== currentApp) {
-    setCurrentApp(routeApp);
-  }
+
+  useLayoutEffect(() => {
+    if (routeApp && routeApp !== currentApp) {
+      setCurrentApp(routeApp);
+    }
+  }, [routeApp, currentApp, setCurrentApp]);
 
   // Side effect of an app change (mini-player teardown) stays in an
   // effect — it must not run during render.
@@ -110,6 +113,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   ]);
 
   const miniPlayerOpen = useMiniPlayerStore((s) => s.isOpen);
+  const isAppSynced = routeApp === currentApp;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-secondary)]">
@@ -122,7 +126,7 @@ export function MainLayout({ children }: MainLayoutProps) {
             miniPlayerOpen ? 'pb-20' : 'pb-2',
           )}
         >
-          {children ?? <Outlet />}
+          {isAppSynced ? (children ?? <Outlet />) : <LoadingState fill={false} />}
         </main>
         <ReviewPersistentBar />
         <ReviewNavigationBlocker />

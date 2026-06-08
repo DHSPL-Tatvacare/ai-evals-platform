@@ -45,7 +45,8 @@ export interface CrmSchema {
   attributeSchemas: Record<string, Record<string, CrmSchemaAttributeKey>>;
 }
 
-export function useCrmSchema(appId: string, tableName: string) {
+export function useCrmSchema(appId: string, tableName: string, opts?: { enabled?: boolean }) {
+  const enabled = opts?.enabled ?? true;
   return useQuery<CrmSchema>({
     queryKey: ['analytics', 'crm-schema', appId, tableName],
     queryFn: () =>
@@ -53,6 +54,6 @@ export function useCrmSchema(appId: string, tableName: string) {
         `/api/analytics/crm-schema/${encodeURIComponent(appId)}/${encodeURIComponent(tableName)}`,
       ),
     staleTime: 5 * 60 * 1000,
-    enabled: Boolean(appId && tableName),
+    enabled: Boolean(appId && tableName) && enabled,
   });
 }

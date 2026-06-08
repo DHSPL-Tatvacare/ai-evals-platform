@@ -128,7 +128,7 @@ export function SignupPage() {
           className="relative flex flex-col justify-between px-6 py-8 md:px-12 md:py-12"
         >
           <div className="flex items-center gap-3">
-            <BrandMark size="lg" src="/tatva_logo.jpeg" alt="TatvaCare" />
+            <BrandMark size="lg" src="/tatva-new-icon.png" alt="TatvaCare" />
             <span className="text-[17px] font-semibold tracking-[-0.01em] text-[var(--text-primary)] md:text-[18px]">
               TatvaCare <span className="mx-1 text-[var(--text-muted)] font-normal">·</span> AI Platform
             </span>
