@@ -15,3 +15,16 @@ export const CONNECTION_PROVIDER_LABELS: Record<string, string> = {
   msg91: 'MSG91',
   webhook: 'Generic Webhook',
 };
+
+// Capability category per provider, mirroring the backend ProviderSpec.kind.
+// Surfaces filter on this — the CRM mapping shows only 'crm_source'. The
+// authoritative value rides on the schema response (ProviderSchema.kind); this
+// map is the static fallback for list views that don't fetch a schema.
+export const CONNECTION_PROVIDER_KINDS: Record<string, string> = {
+  bolna: 'voice',
+  wati: 'messaging',
+  aisensy: 'messaging',
+  lsq: 'crm_source',
+  msg91: 'messaging',
+  webhook: 'messaging',
+};

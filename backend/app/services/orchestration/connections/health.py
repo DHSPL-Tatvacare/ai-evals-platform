@@ -60,10 +60,35 @@ async def probe_bolna(config: dict[str, Any]) -> dict[str, Any]:
         return _fail(f"{exc}"[:200])
 
 
+async def probe_lsq(config: dict[str, Any]) -> dict[str, Any]:
+    """A minimal Leads.Get (PageSize 1) proves the LSQ creds reach the API.
+
+    Read-only: it reads at most one lead and never mutates. Auth is by
+    ``accessKey`` + ``secretKey`` query params (LSQ has no token).
+    """
+    base = str(config.get("region_host", "")).rstrip("/")
+    access_key = str(config.get("access_key", "")).strip()
+    secret_key = str(config.get("secret_key", "")).strip()
+    if not (base and access_key and secret_key):
+        return _fail("missing region_host / access_key / secret_key")
+    url = f"{base}/LeadManagement.svc/Leads.Get"
+    params = {"accessKey": access_key, "secretKey": secret_key}
+    body = {"Paging": {"PageIndex": 1, "PageSize": 1}}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            resp = await client.post(url, params=params, json=body)
+        if 200 <= resp.status_code < 400:
+            return _ok(f"HTTP {resp.status_code}")
+        return _fail(f"HTTP {resp.status_code}: {resp.text[:160]}")
+    except httpx.HTTPError as exc:
+        return _fail(f"network error: {exc!r}")
+
+
 _PROBES: dict[str, Any] = {
     "webhook": probe_webhook,
     "wati": probe_wati,
     "bolna": probe_bolna,
+    "lsq": probe_lsq,
 }
 
 

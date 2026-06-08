@@ -29,3 +29,8 @@ class Application(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def has_crm(self) -> bool:
+        """Whether this app surfaces the CRM ingestion experience (App.config flag)."""
+        return bool((self.config or {}).get("hasCrm", False))

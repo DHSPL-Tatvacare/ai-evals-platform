@@ -103,6 +103,9 @@ class ProviderSpecResponse(CamelModel):
     provider: str
     label: str
     supports_webhook: bool
+    # Capability category ('messaging' | 'voice' | 'crm_source') so the UI can
+    # filter providers by surface — the CRM mapping shows only 'crm_source'.
+    kind: str
     json_schema: dict[str, Any]
     fields: list[ConnectionFieldDescriptor]
 

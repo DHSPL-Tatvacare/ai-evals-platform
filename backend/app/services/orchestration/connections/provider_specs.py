@@ -54,6 +54,11 @@ class ProviderSpec:
     # token. Inbound providers (bolna, wati, aisensy) get a per-connection
     # token at create time.
     supports_webhook: bool
+    # Capability category the provider self-classifies as. Mirrors the adapter
+    # `capability` vocabulary ('messaging' | 'voice' | 'crm_source') so surfaces
+    # can filter (the CRM mapping shows only 'crm_source') without an adapter —
+    # lsq/msg91/webhook have none, so capability_for_vendor can't supply it.
+    kind: str
 
 
 PROVIDER_SPECS: dict[str, ProviderSpec] = {
@@ -61,6 +66,7 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         provider="bolna",
         label="Bolna (AI Voice)",
         supports_webhook=True,
+        kind="voice",
         fields=(
             FieldSpec(
                 "api_key", "string",
@@ -83,6 +89,7 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         provider="wati",
         label="WATI (WhatsApp)",
         supports_webhook=True,
+        kind="messaging",
         fields=(
             FieldSpec(
                 "base_url", "string",
@@ -111,6 +118,7 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         provider="aisensy",
         label="AiSensy (WhatsApp)",
         supports_webhook=True,
+        kind="messaging",
         fields=(
             FieldSpec(
                 "api_key", "string",
@@ -138,6 +146,7 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         provider="lsq",
         label="LeadSquared",
         supports_webhook=False,
+        kind="crm_source",
         fields=(
             FieldSpec(
                 "access_key", "string",
@@ -160,6 +169,7 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         provider="msg91",
         label="MSG91 (SMS)",
         supports_webhook=False,
+        kind="messaging",
         fields=(
             FieldSpec(
                 "auth_key", "string",
@@ -182,6 +192,7 @@ PROVIDER_SPECS: dict[str, ProviderSpec] = {
         provider="webhook",
         label="Generic Webhook",
         supports_webhook=False,
+        kind="messaging",
         fields=(
             FieldSpec(
                 "base_url", "string",
@@ -276,6 +287,7 @@ def to_json_schema(provider: str) -> dict[str, Any]:
         "title": spec.label,
         "x-provider": spec.provider,
         "x-supports-webhook": spec.supports_webhook,
+        "x-kind": spec.kind,
         "properties": properties,
         "required": required,
         "additionalProperties": False,

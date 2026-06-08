@@ -32,6 +32,14 @@ from app.models.invite_link_use import IdentityInviteLinkUse
 from app.models.tenant_config import TenantConfiguration
 from app.models.comm_cap_policy import CommCapPolicy
 from app.models.source_records import CrmCallRecord, CrmLeadRecord, LogCrmSourceSync
+from app.models.crm import (
+    CrmActivity,
+    CrmActivityExt,
+    CrmFieldMap,
+    CrmLead,
+    CrmLeadExt,
+    CrmSourceRecord,
+)
 from app.models.application_external_agent_connector import ApplicationExternalAgentConnector
 from app.models.scheduled_job import ScheduledJobDefinition
 from app.models.scheduler_heartbeat import SchedulerWorkerHeartbeat

@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-import phonenumbers
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +14,7 @@ from app.models.orchestration import (
     WorkflowRun,
     WorkflowRunRecipient,
 )
+from app.utils.phone import normalise_phone_e164
 
 
 @dataclass(frozen=True)
@@ -22,22 +22,6 @@ class RegisterReceipt:
     registered_count: int
     unresolved_phone_count: int
     predicate_hash: Optional[str]
-
-
-def normalise_phone_e164(raw: str | None, default_region: str = "IN") -> str | None:
-    """Return the E.164 form of ``raw`` or ``None`` if it cannot be validated.
-
-    Empty strings, ``None``, and unparseable inputs all return ``None``.
-    """
-    if not raw:
-        return None
-    try:
-        parsed = phonenumbers.parse(raw, default_region)
-    except phonenumbers.NumberParseException:
-        return None
-    if not phonenumbers.is_valid_number(parsed):
-        return None
-    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
 def _hash_predicate_payload(payload: dict) -> str:

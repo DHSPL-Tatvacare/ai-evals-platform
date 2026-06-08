@@ -29,8 +29,8 @@ from app.services.orchestration.connections.variable_mapping import (
     apply_variable_mappings_dict,
 )
 from app.services.orchestration.node_registry import register_node
-from app.services.orchestration.recipient_freezer import normalise_phone_e164
 from app.services.orchestration.recipient_manifest import assert_recipient_in_manifest
+from app.utils.phone import normalise_phone_e164
 
 
 class _Config(BaseModel):

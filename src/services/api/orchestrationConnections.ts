@@ -33,6 +33,9 @@ export interface ProviderSchema {
   provider: string;
   label: string;
   supportsWebhook: boolean;
+  // Capability category ('messaging' | 'voice' | 'crm_source'); the CRM mapping
+  // surface filters connections on kind === 'crm_source'.
+  kind: string;
   jsonSchema: Record<string, unknown>;
   fields: ConnectionFieldDescriptor[];
 }

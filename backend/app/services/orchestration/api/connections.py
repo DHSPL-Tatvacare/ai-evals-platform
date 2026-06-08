@@ -415,6 +415,7 @@ def get_provider_schema(provider: str) -> dict[str, Any]:
         "provider": spec.provider,
         "label": spec.label,
         "supports_webhook": spec.supports_webhook,
+        "kind": spec.kind,
         "json_schema": provider_specs.to_json_schema(provider),
         "fields": _field_descriptors(provider),
     }
