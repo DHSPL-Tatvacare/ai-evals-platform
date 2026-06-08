@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Archive, Copy, Lock, Pencil, PlugZap, RefreshCw, Share2, X } from 'lucide-react';
+import { Archive, Copy, Lock, Pencil, PlugZap, RefreshCw, Share2, Waypoints, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -19,7 +19,10 @@ import { notificationService } from '@/services/notifications';
 import { logger } from '@/services/logger';
 import { useAuthStore } from '@/stores/authStore';
 
+import { CONNECTION_PROVIDER_KINDS } from '@/constants/connectionProviders';
+
 import { ConnectionForm } from './ConnectionForm';
+import { CrmMappingEditor } from './crmMapping/CrmMappingEditor';
 import { getConnectionProviderLabel } from './providerOptions';
 import {
   useConnections,
@@ -80,6 +83,7 @@ export function ConnectionsPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Connection | null>(null);
+  const [mappingTarget, setMappingTarget] = useState<Connection | null>(null);
   // Single-open per page — opening a row's menu closes any other row's.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -277,6 +281,16 @@ export function ConnectionsPage() {
             onClick: () => setEditing(c),
           },
           {
+            // CRM-source connections carry a field mapping; managing it is part
+            // of managing the connection (same orchestration:manage gate).
+            id: 'mapping',
+            icon: Waypoints,
+            label: 'Field mapping',
+            disabled: !canEdit,
+            hidden: CONNECTION_PROVIDER_KINDS[c.provider] !== 'crm_source',
+            onClick: () => setMappingTarget(c),
+          },
+          {
             id: 'rotate',
             icon: RefreshCw,
             label: rotating ? 'Rotating…' : 'Rotate webhook URL',
@@ -443,6 +457,13 @@ export function ConnectionsPage() {
         confirmLabel="Archive"
         variant="danger"
       />
+
+      {mappingTarget ? (
+        <CrmMappingEditor
+          connection={mappingTarget}
+          onClose={() => setMappingTarget(null)}
+        />
+      ) : null}
     </>
   );
 }

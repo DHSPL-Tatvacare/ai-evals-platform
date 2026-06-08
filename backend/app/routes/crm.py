@@ -29,6 +29,9 @@ from app.schemas.crm import (
     FieldMapPublishRequest,
     FieldMapPublishResponse,
     FieldMapResponse,
+    FieldValuesResponse,
+    GrainSchemaOut,
+    GrainsResponse,
     JobSubmittedResponse,
     SyncActivityOut,
     SyncActivityResponse,
@@ -36,6 +39,8 @@ from app.schemas.crm import (
 )
 from app.services.crm.adapters import resolve_crm_adapter
 from app.services.crm.field_map_service import BindingInput, publish_field_map
+from app.services.crm.field_values import distinct_field_values
+from app.services.crm.grain_schema import all_grain_schemas
 from app.services.job_worker import get_job_submission_metadata
 from app.services.orchestration.adapters import AdapterNotRegisteredError
 from app.services.orchestration.connections.resolver import ConnectionResolver
@@ -80,6 +85,39 @@ async def _submit_job(
 
 
 @router.get(
+    "/grains",
+    response_model=GrainsResponse,
+    summary="The closed list of bind targets per grain (standard columns + slot pool)",
+)
+async def get_grains(
+    auth: AuthContext = require_permission("orchestration:manage"),  # noqa: ARG001
+):
+    return GrainsResponse(grains=[GrainSchemaOut(**g) for g in all_grain_schemas()])
+
+
+@router.get(
+    "/connections/{connection_id}/field-values",
+    response_model=FieldValuesResponse,
+    summary="Distinct observed values of a source field (for exhaustive value maps)",
+)
+async def get_field_values(
+    connection_id: uuid.UUID,
+    field: str = Query(..., description="The CRM source field name"),
+    record_type: str = Query(..., alias="recordType", description="lead | activity"),
+    auth: AuthContext = require_permission("orchestration:manage"),
+    db: AsyncSession = Depends(get_db),
+):
+    if record_type not in _RECORD_TYPES:
+        raise HTTPException(status_code=400, detail="record_type must be lead | activity")
+    row = await _load_connection(db, auth, connection_id)
+    values = await distinct_field_values(
+        db, tenant_id=auth.tenant_id, app_id=row.app_id, connection_id=connection_id,
+        record_type=record_type, field=field,
+    )
+    return FieldValuesResponse(field=field, values=values)
+
+
+@router.get(
     "/connections/{connection_id}/objects",
     response_model=DiscoverResponse,
     summary="Discover a CRM connection's mappable objects and their fields",
@@ -114,7 +152,7 @@ async def discover_objects(
 )
 async def get_field_map(
     connection_id: uuid.UUID,
-    record_type: str = Query(..., description="lead | activity"),
+    record_type: str = Query(..., alias="recordType", description="lead | activity"),
     auth: AuthContext = require_permission("orchestration:manage"),
     db: AsyncSession = Depends(get_db),
 ):

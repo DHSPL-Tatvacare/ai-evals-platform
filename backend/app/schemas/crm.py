@@ -7,6 +7,31 @@ from typing import Any, Optional
 from app.schemas.base import CamelModel
 
 
+class StandardColumnOut(CamelModel):
+    target: str
+    label: str
+    data_type: str
+
+
+class GrainSchemaOut(CamelModel):
+    record_type: str
+    natural_key_target: str
+    lead_link_target: str
+    lead_link_required: bool
+    expected_targets: list[str]
+    standard_columns: list[StandardColumnOut]
+    slots: dict[str, list[str]]
+
+
+class GrainsResponse(CamelModel):
+    grains: list[GrainSchemaOut]
+
+
+class FieldValuesResponse(CamelModel):
+    field: str
+    values: list[str]
+
+
 class DiscoveredObjectOut(CamelModel):
     source_object: str
     record_type: str
