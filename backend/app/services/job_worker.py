@@ -1555,6 +1555,34 @@ async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.U
 
 
 @register_job_handler(
+    "sync-crm-source",
+    queue_class="standard",
+    priority=120,
+    retry_safe=True,
+    required_permissions=("orchestration:manage",),
+)
+async def handle_sync_crm_source(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Land new/updated CRM records for a connection onto the replay tape (adapter-agnostic)."""
+    from app.services.crm.crm_source_sync import run_crm_source_sync
+
+    return await run_crm_source_sync(job_id, params, tenant_id=tenant_id, user_id=user_id)
+
+
+@register_job_handler(
+    "unpack-crm-source",
+    queue_class="standard",
+    priority=120,
+    retry_safe=True,
+    required_permissions=("orchestration:manage",),
+)
+async def handle_unpack_crm_source(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Populate CRM core + slots from landed raw + the field map (also fired on mapping publish)."""
+    from app.services.crm.crm_source_unpacker import run_crm_source_unpack
+
+    return await run_crm_source_unpack(job_id, params, tenant_id=tenant_id, user_id=user_id)
+
+
+@register_job_handler(
     "generate-report",
     queue_class="interactive",
     priority=10,

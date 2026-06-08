@@ -126,6 +126,9 @@ async def lifespan(app: FastAPI):
     import app.services.orchestration.adapters.wati as _register_wati_adapter  # noqa: F401
     import app.services.orchestration.adapters.aisensy as _register_aisensy_adapter  # noqa: F401
     import app.services.orchestration.adapters.bolna as _register_bolna_adapter  # noqa: F401
+    # Register CRM-source adapters (vendor implementations of CrmSourceAdapter) so the
+    # crm_source registry is populated for discover/sync/unpack before any request.
+    import app.services.crm.adapters as _register_crm_adapters  # noqa: F401
 
     # Fail boot if any event_source adapter's EVENT_MAP drifts from the catalog.
     from app.services.orchestration.event_catalog import assert_adapters_aligned_with_catalog
@@ -470,6 +473,7 @@ from app.routes.orchestration_datasets import router as orchestration_datasets_r
 from app.routes.orchestration_sse import router as orchestration_sse_router
 from app.routes.orchestration_admin import router as orchestration_admin_router
 from app.routes.orchestration_analytics import router as orchestration_analytics_router
+from app.routes.crm import router as crm_router
 from app.routes.sherlock_parts import router as sherlock_parts_router
 from app.routes.sherlock_verified_queries import router as sherlock_verified_queries_router
 from app.routes.admin_ai_settings import router as admin_ai_settings_router
@@ -515,6 +519,7 @@ app.include_router(orchestration_webhooks_router)
 app.include_router(orchestration_router)
 app.include_router(orchestration_cohorts_router)
 app.include_router(orchestration_connections_router)
+app.include_router(crm_router)
 app.include_router(orchestration_datasets_router)
 app.include_router(orchestration_sse_router)
 app.include_router(orchestration_admin_router)
