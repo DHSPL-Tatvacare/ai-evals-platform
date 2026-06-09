@@ -12,9 +12,21 @@ from app.services.crm.field_map_service import BindingInput, publish_field_map
 pytestmark = pytest.mark.asyncio
 
 
-def _b(slot, semantic, source_field, data_type="text", value_map=None):
+def _b(slot, semantic, source_field, data_type="text", value_map=None, description=None):
     return BindingInput(slot=slot, semantic_key=semantic, source_field=source_field,
-                        data_type=data_type, value_map=value_map)
+                        data_type=data_type, value_map=value_map, description=description)
+
+
+async def test_publish_persists_binding_description(db_session, seed_tenant_user_app):
+    tenant, _user, app = seed_tenant_user_app
+    conn = uuid.uuid4()
+    await publish_field_map(db_session, tenant_id=tenant, app_id=app, connection_id=conn,
+                            record_type="lead",
+                            bindings=[_b("phone_number", "phone", "Phone", description="Primary contact number")])
+    row = (await db_session.execute(
+        select(CrmFieldMap).where(CrmFieldMap.connection_id == conn, CrmFieldMap.slot == "phone_number")
+    )).scalar_one()
+    assert row.description == "Primary contact number"
 
 
 async def test_publish_persists_and_bumps_version(db_session, seed_tenant_user_app):
@@ -42,6 +54,24 @@ async def test_publish_rejects_target_outside_closed_list(db_session, seed_tenan
     with pytest.raises(ValueError):
         await publish_field_map(db_session, tenant_id=tenant, app_id=app, connection_id=conn,
                                 record_type="lead", bindings=[_b("not_a_real_column", "x", "Foo")])
+
+
+@pytest.mark.parametrize("bad_key", [
+    'x"; DROP MATERIALIZED VIEW analytics.dim_lead__x; --',
+    "x AS a, (SELECT 1) b",
+    "has space",
+    "UpperCase",
+    "trailing-dash",
+    "1leading_digit",
+    "",
+])
+async def test_publish_rejects_unsafe_semantic_key(db_session, seed_tenant_user_app, bad_key):
+    # semantic_key is emitted verbatim as a SQL alias into matview DDL — it MUST be a safe identifier.
+    tenant, _user, app = seed_tenant_user_app
+    conn = uuid.uuid4()
+    with pytest.raises(ValueError):
+        await publish_field_map(db_session, tenant_id=tenant, app_id=app, connection_id=conn,
+                                record_type="lead", bindings=[_b("phone_number", bad_key, "Phone")])
 
 
 async def test_publish_activity_requires_lead_link(db_session, seed_tenant_user_app):

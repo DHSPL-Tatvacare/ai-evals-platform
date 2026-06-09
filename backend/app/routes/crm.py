@@ -60,7 +60,7 @@ from app.services.crm.crm_resolved_populator import rebuild_resolved_surfaces, r
 from app.services.crm.crm_source_unpacker import _columns, _resolve, _GRAINS as _UNPACK_GRAINS
 from app.services.crm.field_map_service import BindingInput, publish_field_map
 from app.services.crm.field_values import distinct_field_values
-from app.services.crm.grain_schema import all_grain_schemas, grain_schema
+from app.services.crm.grain_schema import all_grain_schemas, grain_schema, registered_record_types
 from app.services.crm.scheduling import source_object_for
 from app.services.job_worker import get_job_submission_metadata
 from app.services.orchestration.adapters import AdapterNotRegisteredError
@@ -70,7 +70,7 @@ from app.services.orchestration.predicate_contract import PredicateError, parse 
 
 router = APIRouter(prefix="/api/crm", tags=["crm"])
 
-_RECORD_TYPES = ("lead", "activity")
+_RECORD_TYPES = registered_record_types("crm")
 
 
 async def _resolve_adapter(
@@ -298,7 +298,7 @@ async def publish_field_map_route(
             bindings=[
                 BindingInput(
                     slot=b.slot, semantic_key=b.semantic_key, source_field=b.source_field,
-                    data_type=b.data_type, value_map=b.value_map,
+                    data_type=b.data_type, value_map=b.value_map, description=b.description,
                 ) for b in body.bindings
             ],
         )
@@ -640,7 +640,7 @@ async def save_dataset_draft(
             bindings=[
                 BindingInput(
                     slot=b.slot, semantic_key=b.semantic_key, source_field=b.source_field,
-                    data_type=b.data_type, value_map=b.value_map,
+                    data_type=b.data_type, value_map=b.value_map, description=b.description,
                 ) for b in body.bindings
             ],
         )

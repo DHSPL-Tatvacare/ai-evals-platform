@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Database } from 'lucide-react';
 
 import { Alert } from '@/components/ui/Alert';
@@ -20,7 +20,7 @@ import {
   useCrmFieldMap,
   useCrmGrains,
 } from '../queries/crmSourceQueries';
-import type { DatasetStatus } from './DatasetFooter';
+import type { DatasetStatus } from './datasetStatus';
 import { FilterSection } from './FilterSection';
 import { GoLiveSection } from './GoLiveSection';
 import { MapSection } from './MapSection';
@@ -70,19 +70,23 @@ export function DatasetSections({
   const bindings = useCrmMappingDraftStore((s) => s.bindings);
   const filterPredicate = useCrmMappingDraftStore((s) => s.filterPredicate);
 
-  // Hydrate the draft once the grain schema and saved map are loaded for this dataset.
+  // Hydrate the draft EXACTLY ONCE per dataset from the saved map. Re-running on every
+  // mappingQuery.data identity change would let an autosave write-back re-fire startDraft and
+  // clobber in-progress edits (notably wiping the filter, which the map GET never carries back).
+  const hydratedKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (grain && discovered && mappingQuery.data) {
-      startDraft({
-        connectionId,
-        recordType: dataset.recordType,
-        sourceObject: discovered.sourceObject,
-        grain,
-        serverBindings: mappingQuery.data.bindings,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, dataset.recordType, grain?.recordType, discovered?.sourceObject, mappingQuery.data]);
+    if (!(grain && discovered && mappingQuery.data)) return;
+    const key = `${connectionId}:${dataset.recordType}`;
+    if (hydratedKeyRef.current === key) return;
+    hydratedKeyRef.current = key;
+    startDraft({
+      connectionId,
+      recordType: dataset.recordType,
+      sourceObject: discovered.sourceObject,
+      grain,
+      serverBindings: mappingQuery.data.bindings,
+    });
+  }, [connectionId, dataset.recordType, grain, discovered, mappingQuery.data, startDraft]);
 
   useEffect(() => () => reset(), [reset]);
 

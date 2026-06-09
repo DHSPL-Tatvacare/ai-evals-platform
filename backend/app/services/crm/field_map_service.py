@@ -15,7 +15,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.crm import CrmFieldMap
-from app.services.crm.field_map_validation import validate_binding
+from app.services.crm.field_map_validation import validate_binding, validate_semantic_key
 
 _LEAD_LINK_TARGET = "lead_id"  # the activity→lead join anchor
 
@@ -27,6 +27,7 @@ class BindingInput:
     source_field: str
     data_type: str = "text"
     value_map: Optional[dict[str, Any]] = None
+    description: Optional[str] = None
 
 
 async def publish_field_map(
@@ -41,6 +42,7 @@ async def publish_field_map(
     """Validate + replace + version the bindings for one grain. Returns the new version."""
     for b in bindings:
         validate_binding(record_type, b.slot)  # raises ValueError outside the closed list
+        validate_semantic_key(b.semantic_key)  # alias lands in matview DDL — must be a safe identifier
 
     if record_type == "activity" and not any(b.slot == _LEAD_LINK_TARGET for b in bindings):
         raise ValueError("activity mapping requires a lead-link binding (a source field → lead_id)")
@@ -68,7 +70,7 @@ async def publish_field_map(
             id=uuid.uuid4(), tenant_id=tenant_id, app_id=app_id, connection_id=connection_id,
             record_type=record_type, slot=b.slot, semantic_key=b.semantic_key,
             source_field=b.source_field, data_type=b.data_type, value_map=b.value_map,
-            version=version,
+            description=b.description, version=version,
         ))
     await db.flush()
     return version

@@ -9,7 +9,9 @@ import pytest
 from fastapi import HTTPException
 
 from app.auth import AuthContext
+from app.constants import SYSTEM_USER_ID
 from app.models.provider_connection import ProviderConnection
+from app.models.tenant import Tenant
 from app.routes import crm as crm_routes
 from app.schemas.scheduled_job import ScheduleSourcesResponse
 from app.services.crm import scheduling as crm_scheduling
@@ -32,7 +34,8 @@ def _auth(tenant_id: uuid.UUID | None = None) -> AuthContext:
     )
 
 
-def _connection(tenant_id: uuid.UUID, *, provider: str = "lsq", app_id: str = "inside-sales", name: str = "LSQ Prod") -> ProviderConnection:
+def _connection(tenant_id: uuid.UUID, *, provider: str = "lsq", app_id: str = "inside-sales",
+                name: str = "LSQ Prod", created_by: uuid.UUID | None = None) -> ProviderConnection:
     return ProviderConnection(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -41,8 +44,13 @@ def _connection(tenant_id: uuid.UUID, *, provider: str = "lsq", app_id: str = "i
         name=name,
         config_encrypted=b"x",
         active=True,
-        created_by=uuid.uuid4(),
+        created_by=created_by or uuid.uuid4(),
     )
+
+
+async def _seed_tenant(db, tenant_id: uuid.UUID) -> None:
+    db.add(Tenant(id=tenant_id, name=f"t-{tenant_id.hex[:8]}", slug=f"t-{tenant_id.hex[:8]}", is_active=True))
+    await db.flush()
 
 
 class _FakeScalarResult:
@@ -90,21 +98,26 @@ def test_sync_crm_source_is_source_bound_workload():
 
 
 @pytest.mark.asyncio
-async def test_schedule_sources_lists_one_item_per_dataset():
-    tenant = uuid.uuid4()
-    conn = _connection(tenant, name="LSQ Prod")
-    db = _FakeSession(connections=[conn])
-    resp = await crm_routes.list_schedule_sources(app_id=None, auth=_auth(tenant), db=db)
+async def test_schedule_sources_lists_one_item_per_dataset(db_session):
+    # Live DB so the route's tenant_id WHERE clause is actually exercised: a foreign tenant's
+    # connection must NOT surface for the caller (a mock that ignores the predicate can't prove this).
+    tenant, foreign = uuid.uuid4(), uuid.uuid4()
+    await _seed_tenant(db_session, tenant)
+    await _seed_tenant(db_session, foreign)
+    conn = _connection(tenant, name="LSQ Prod", created_by=SYSTEM_USER_ID)
+    foreign_conn = _connection(foreign, name="Foreign LSQ", created_by=SYSTEM_USER_ID)
+    db_session.add_all([conn, foreign_conn])
+    await db_session.flush()
+
+    resp = await crm_routes.list_schedule_sources(app_id=None, auth=_auth(tenant), db=db_session)
     assert isinstance(resp, ScheduleSourcesResponse)
-    assert len(resp.items) == 2
     ids = {i.id for i in resp.items}
-    assert f"{conn.id}:lead" in ids
-    assert f"{conn.id}:activity" in ids
+    assert ids == {f"{conn.id}:lead", f"{conn.id}:activity"}  # only the caller tenant's dataset
+    assert all(i.params["connection_id"] == str(conn.id) for i in resp.items)
     lead = next(i for i in resp.items if i.id == f"{conn.id}:lead")
     assert lead.label == "LSQ Prod · Lead"
     assert lead.sublabel == "LSQ Prod"
     assert lead.schedule_key == f"{conn.id}:lead"
-    assert lead.params["connection_id"] == str(conn.id)
     assert lead.params["source_objects"] == ["Lead"]
 
 
@@ -120,11 +133,18 @@ async def test_schedule_sources_only_lists_crm_source_connections():
 
 
 @pytest.mark.asyncio
-async def test_schedule_sources_filters_by_app_id():
+async def test_schedule_sources_filters_by_app_id(db_session):
+    # Live DB so the optional app_id WHERE clause is actually exercised: a connection in another
+    # app must be excluded when app_id is supplied.
     tenant = uuid.uuid4()
-    conn = _connection(tenant, app_id="inside-sales")
-    db = _FakeSession(connections=[conn])
-    resp = await crm_routes.list_schedule_sources(app_id="inside-sales", auth=_auth(tenant), db=db)
+    await _seed_tenant(db_session, tenant)
+    inside = _connection(tenant, app_id="inside-sales", name="Inside", created_by=SYSTEM_USER_ID)
+    voice = _connection(tenant, app_id="voice-rx", name="Voice", created_by=SYSTEM_USER_ID)
+    db_session.add_all([inside, voice])
+    await db_session.flush()
+
+    resp = await crm_routes.list_schedule_sources(app_id="inside-sales", auth=_auth(tenant), db=db_session)
+    assert {i.params["connection_id"] for i in resp.items} == {str(inside.id)}  # voice-rx filtered out
     assert len(resp.items) == 2
 
 

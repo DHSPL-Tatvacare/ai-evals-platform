@@ -7,14 +7,21 @@ The closed list is INTROSPECTED from the ORM so it can never drift from the sche
 """
 from __future__ import annotations
 
+import re
+
 from app.models.crm import (
     CrmActivity,
     CrmActivityExt,
     CrmLead,
     CrmLeadExt,
 )
+from app.services.crm.grain_schema import registered_record_types
 
-ALLOWED_RECORD_TYPES = frozenset({"lead", "activity"})
+ALLOWED_RECORD_TYPES = frozenset(registered_record_types("crm"))
+
+# A semantic_key becomes a SQL alias in the resolved matview/view DDL, so it must be a safe,
+# lowercase SQL identifier within Postgres' 63-byte limit — never free text that could break out.
+_SEMANTIC_KEY_RE = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 
 # Columns that are scope/identity plumbing, never a bind target.
 _NON_TARGET_COLUMNS = frozenset({"id", "tenant_id", "app_id", "crm_lead_id", "crm_activity_id"})
@@ -36,6 +43,19 @@ def allowed_targets(record_type: str) -> frozenset[str]:
     return frozenset(names)
 
 
+def validate_semantic_key(semantic_key: str) -> None:
+    """Raise ``ValueError`` unless ``semantic_key`` is a safe lowercase SQL identifier.
+
+    The key is interpolated as the output alias in the resolved matview/view DDL; an unvalidated
+    value would be a raw-SQL identifier-injection vector, so it is closed-listed by grammar here.
+    """
+    if not _SEMANTIC_KEY_RE.fullmatch(semantic_key or ""):
+        raise ValueError(
+            f"semantic_key {semantic_key!r} must be a lowercase identifier "
+            "(letters, digits, underscore; starting with a letter or underscore; max 63 chars)"
+        )
+
+
 def validate_binding(record_type: str, slot: str) -> None:
     """Raise ``ValueError`` if the binding targets anything outside the closed list."""
     if record_type not in ALLOWED_RECORD_TYPES:
@@ -49,4 +69,4 @@ def validate_binding(record_type: str, slot: str) -> None:
         )
 
 
-__all__ = ["ALLOWED_RECORD_TYPES", "allowed_targets", "validate_binding"]
+__all__ = ["ALLOWED_RECORD_TYPES", "allowed_targets", "validate_binding", "validate_semantic_key"]

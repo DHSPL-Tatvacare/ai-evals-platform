@@ -61,6 +61,11 @@ def _slug(tenant_id: uuid.UUID, app_id: str) -> str:
     return hashlib.sha1(f"{tenant_id}:{app_id}".encode()).hexdigest()[:12]
 
 
+def _quote_ident(name: str) -> str:
+    """Quote a SQL identifier for raw-DDL interpolation (defense-in-depth for the alias)."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def resolved_matview_name(grain: str, tenant_id: uuid.UUID, app_id: str) -> str:
     return f"{_GRAINS[grain].base}__{_slug(tenant_id, app_id)}"
 
@@ -110,7 +115,7 @@ def _select_body(
     predicate: Any | None = None,
 ) -> str:
     spec = _GRAINS[grain]
-    select = ", ".join(f"{expr} AS {alias}" for expr, alias in resolved_projection(grain, bindings))
+    select = ", ".join(f"{expr} AS {_quote_ident(alias)}" for expr, alias in resolved_projection(grain, bindings))
     app_lit = app_id.replace("'", "''")
     where = f"l.tenant_id = '{tenant_id}'::uuid AND l.app_id = '{app_lit}'"
     if predicate is not None:
@@ -229,6 +234,20 @@ async def refresh_resolved_matviews(
     return refreshed
 
 
+async def matview_columns(db: AsyncSession, name: str) -> list[str]:
+    """Live column names of an analytics matview, in ordinal order (empty if not built). Read-only."""
+    rows = (await db.execute(
+        text(
+            "SELECT a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'analytics' AND c.relname = :n AND c.relkind = 'm' "
+            "AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum"
+        ),
+        {"n": name},
+    )).all()
+    return [r[0] for r in rows]
+
+
 async def resolved_sample(
     db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str, grain: str, limit: int = 20
 ) -> tuple[list[str], list[dict[str, str | None]]]:
@@ -238,16 +257,7 @@ async def resolved_sample(
     stringified for display. Empty when no matview is built yet (no published map). Read-only.
     """
     mv = resolved_matview_name(grain, tenant_id, app_id)
-    col_rows = (await db.execute(
-        text(
-            "SELECT a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
-            "JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = 'analytics' AND c.relname = :n AND c.relkind = 'm' "
-            "AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum"
-        ),
-        {"n": mv},
-    )).all()
-    cols = [r[0] for r in col_rows if r[0] not in ("tenant_id", "app_id")]
+    cols = [c for c in await matview_columns(db, mv) if c not in ("tenant_id", "app_id")]
     if not cols:
         return [], []
     select_list = ", ".join(cols)  # identifiers come from pg_catalog for our own matview — safe
@@ -285,6 +295,7 @@ __all__ = [
     "resolved_projection",
     "build_matview_ddl",
     "build_live_view_ddl",
+    "matview_columns",
     "rebuild_resolved_surfaces",
     "refresh_resolved_matviews",
     "resolved_sample",

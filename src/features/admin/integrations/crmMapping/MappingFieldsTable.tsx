@@ -6,7 +6,7 @@ import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
 import { Input } from '@/components/ui/Input';
 import { TableToolbar } from '@/components/ui/TableToolbar';
 import { type CrmGrainSchema } from '@/services/api/crmSource';
-import { slotTypeOf, useCrmMappingDraftStore } from '@/stores/crmMappingDraftStore';
+import { slotTypeOf, useCrmMappingDraftStore, type CrmBindingDraft } from '@/stores/crmMappingDraftStore';
 
 const FIELDS_PER_PAGE = 25;
 
@@ -63,14 +63,7 @@ function targetOptionsFor(grain: CrmGrainSchema): ComboboxOption[] {
   ];
 }
 
-interface Binding {
-  targetKind: 'standard' | 'slot' | 'ignore';
-  target: string;
-  semanticKey: string;
-  valueMap: Record<string, string> | null;
-}
-
-function targetValueOf(binding: Binding | undefined): string {
+function targetValueOf(binding: CrmBindingDraft | undefined): string {
   if (!binding) return 'ignore';
   if (binding.targetKind === 'standard') return `std:${binding.target}`;
   if (binding.targetKind === 'slot') return `slot:${slotTypeOf(binding.target) ?? 'text'}`;

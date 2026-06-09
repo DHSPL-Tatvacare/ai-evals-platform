@@ -84,14 +84,14 @@ def test_matview_ddl_is_schema_qualified_and_tenant_scoped():
     assert "LEFT JOIN platform.crm_lead_ext e ON e.crm_lead_id = l.id" in ddl
     assert f"l.tenant_id = '{_TENANT}'::uuid" in ddl
     assert f"l.app_id = '{_APP}'" in ddl
-    assert "e.txt_01 AS condition" in ddl
+    assert 'e.txt_01 AS "condition"' in ddl  # alias is quoted (defense-in-depth identifier safety)
 
 
 def test_activity_ddl_joins_the_activity_tables():
     ddl = build_matview_ddl("activity", _TENANT, _APP, [])
     assert "FROM platform.crm_activity l" in ddl
     assert "LEFT JOIN platform.crm_activity_ext e ON e.crm_activity_id = l.id" in ddl
-    assert "l.duration_seconds AS duration_seconds" in ddl
+    assert 'l.duration_seconds AS "duration_seconds"' in ddl
 
 
 def test_live_view_ddl_is_create_or_replace_view():

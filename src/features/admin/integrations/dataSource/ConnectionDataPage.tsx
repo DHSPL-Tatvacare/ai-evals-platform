@@ -15,7 +15,7 @@ import { useConnection } from '../queries';
 import { useConnectionDatasets } from '../queries/crmSourceQueries';
 import type { CrmDatasetSummary } from '@/services/api/crmSource';
 import { DatasetSections } from './DatasetSections';
-import type { DatasetStatus } from './DatasetFooter';
+import type { DatasetStatus } from './datasetStatus';
 
 function statusVariant(status: string): 'success' | 'neutral' {
   return status === 'active' ? 'success' : 'neutral';

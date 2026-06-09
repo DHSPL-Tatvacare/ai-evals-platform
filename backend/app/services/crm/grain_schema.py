@@ -46,6 +46,11 @@ def target_model(domain: str, record_type: str) -> dict:
 def registered_target_models() -> list[tuple[str, str]]:
     return sorted(_REGISTRY)
 
+
+def registered_record_types(domain: str = "crm") -> tuple[str, ...]:
+    """The closed list of record_types for a domain, in registration order (registry is truth)."""
+    return tuple(rt for (d, rt) in _REGISTRY if d == domain)
+
 _SLOT_TYPE_BY_PREFIX = {"txt": "text", "int": "int", "num": "num", "dt": "dt", "bool": "bool", "json": "json"}
 
 
@@ -118,6 +123,7 @@ __all__ = [
     "all_grain_schemas",
     "grain_schema",
     "register_target_model",
+    "registered_record_types",
     "registered_target_models",
     "target_model",
 ]

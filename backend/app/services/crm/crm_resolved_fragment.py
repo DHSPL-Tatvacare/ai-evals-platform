@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.crm import CrmFieldMap
 from app.services.crm.crm_resolved_populator import (
     grain_models,
+    matview_columns,
     resolved_matview_name,
     standard_columns,
 )
@@ -147,20 +148,6 @@ async def build_crm_fragment(
     return CrmResolvedFragment(app_id=app_id, version=version, grains=tuple(grains), exemplars=tuple(exemplars))
 
 
-async def _matview_columns(db: AsyncSession, name: str) -> set[str]:
-    from sqlalchemy import text
-    rows = await db.execute(
-        text(
-            "SELECT a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
-            "JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = 'analytics' AND c.relname = :n AND c.relkind = 'm' "
-            "AND a.attnum > 0 AND NOT a.attisdropped"
-        ),
-        {"n": name},
-    )
-    return {r[0] for r in rows.all()}
-
-
 async def validate_resolved_contract(
     db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str
 ) -> CrmResolvedFragment | None:
@@ -177,7 +164,7 @@ async def validate_resolved_contract(
         return None
 
     for g in fragment.grains:
-        cols = await _matview_columns(db, g.matview_table)
+        cols = set(await matview_columns(db, g.matview_table))
         if not cols:
             raise ValueError(f"resolved matview analytics.{g.matview_table} is not built")
         missing = {c.name for c in g.columns} - cols

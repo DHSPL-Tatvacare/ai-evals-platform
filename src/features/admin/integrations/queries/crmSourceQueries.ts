@@ -232,9 +232,10 @@ export function useSaveDraft(connectionId: string) {
   const queryClient = useQueryClient();
   return useMutation<CrmDatasetDraftResult, Error, CrmDatasetDraftBody>({
     mutationFn: (body) => saveCrmDatasetDraft(connectionId, body),
-    onSuccess: (result) => {
+    onSuccess: () => {
+      // Only the status pill depends on the draft save. Do NOT invalidate the mapping query — the
+      // draft store already holds the latest edits; refetching it would re-hydrate and wipe them.
       queryClient.invalidateQueries({ queryKey: crmSourceKeys.datasets(connectionId) });
-      queryClient.invalidateQueries({ queryKey: crmSourceKeys.mapping(connectionId, result.recordType) });
     },
   });
 }

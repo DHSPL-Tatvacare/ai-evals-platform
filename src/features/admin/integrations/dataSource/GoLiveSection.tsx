@@ -7,7 +7,7 @@ import { notificationService } from '@/services/notifications';
 import type { CrmChainJob } from '@/services/api/crmSource';
 
 import { useActivateDataset, useDatasetJobs, useTriggerCrmSync } from '../queries/crmSourceQueries';
-import type { DatasetStatus } from './DatasetFooter';
+import type { DatasetStatus } from './datasetStatus';
 import { ScheduleSection } from './ScheduleSection';
 
 // The canonical ingestion chain — always shown in full so the operator sees every stage,
@@ -16,7 +16,7 @@ const PIPELINE_STAGES: { jobType: string; label: string }[] = [
   { jobType: 'sync-crm-source', label: 'Sync' },
   { jobType: 'unpack-crm-source', label: 'Unpack' },
   { jobType: 'populate-crm-resolved', label: 'Resolved rebuild' },
-  { jobType: 'populate-analytics', label: 'Analytics' },
+  { jobType: 'backfill-stage-transitions', label: 'Analytics' },
 ];
 
 const STATUS_VARIANT: Record<string, 'success' | 'error' | 'info' | 'warning' | 'neutral'> = {

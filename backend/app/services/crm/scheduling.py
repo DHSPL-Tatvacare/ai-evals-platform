@@ -14,13 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.provider_connection import ProviderConnection
+from app.services.crm.grain_schema import registered_record_types
 from app.services.scheduler.launch_sources import (
     LaunchSpec,
     register_launch_source_resolver,
 )
 
 SYNC_JOB_TYPE = "sync-crm-source"
-RECORD_TYPES = ("lead", "activity")
+RECORD_TYPES = registered_record_types("crm")
 
 
 def parse_source_id(source_id: str) -> tuple[uuid.UUID, str]:
