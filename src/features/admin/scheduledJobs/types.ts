@@ -89,6 +89,20 @@ export interface ScheduleRegistryResponse {
   onExhaustModes: string[];
 }
 
+/** A launchable source for a source-bound workload (the workload's `sourceListEndpoint` returns these).
+ *  The backend re-resolves the canonical params + key from the chosen `id` at create time. */
+export interface ScheduleSourceItem {
+  id: string;
+  label: string;
+  sublabel: string | null;
+  scheduleKey: string;
+  params: Record<string, unknown>;
+}
+
+export interface ScheduleSourcesResponse {
+  items: ScheduleSourceItem[];
+}
+
 export interface ScheduleCreateInput {
   appId: string;
   jobType: string;
@@ -96,6 +110,8 @@ export interface ScheduleCreateInput {
   name: string;
   description?: string | null;
   cron: string;
+  /** For source-bound workloads: the chosen source. The backend re-resolves params + key from it. */
+  sourceId?: string;
   params?: Record<string, unknown>;
   override?: ScheduleOverride;
   enabled?: boolean;

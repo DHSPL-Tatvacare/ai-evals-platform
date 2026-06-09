@@ -37,3 +37,6 @@ __all__ = [
 
 # Kept last: register_adapter must exist before these import-for-side-effect lines run.
 from app.services.crm.adapters import lsq as _lsq  # noqa: E402,F401
+
+# Register the source-bound launch resolver for sync-crm-source (import side-effect).
+from app.services.crm import scheduling as _crm_scheduling  # noqa: E402,F401

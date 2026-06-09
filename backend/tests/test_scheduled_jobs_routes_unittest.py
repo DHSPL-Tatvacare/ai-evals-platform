@@ -154,25 +154,178 @@ async def test_create_schedule_sets_tenant_id_and_next_check_at():
 async def test_create_schedule_accepts_app_agnostic_workload_under_any_app():
     # sync-crm-source registers under app_id="" so any app owning a CRM
     # connection can schedule a per-dataset sync; validation must fall back to
-    # the app-agnostic workload rather than requiring an exact app match.
+    # the app-agnostic workload rather than requiring an exact app match. The
+    # workload is source-bound, so the backend re-resolves params from source_id.
+    from app.services.scheduler import launch_sources
     from app.services.scheduler.workloads import ensure_handler_workloads_registered
 
     ensure_handler_workloads_registered()
+
+    async def _resolver(db, *, tenant_id, app_id, source_id):
+        return launch_sources.LaunchSpec(
+            params={"connection_id": "c", "source_objects": ["Lead"]},
+            schedule_key=source_id,
+            name="Lead sync",
+        )
+
+    saved = dict(launch_sources._RESOLVERS)
+    launch_sources.register_launch_source_resolver("sync-crm-source", _resolver)
+    try:
+        auth = _auth()
+        db = _FakeSession()
+        payload = ScheduledJobCreate(
+            app_id="voice-rx",
+            job_type="sync-crm-source",
+            schedule_key="voice-rx-leads",
+            name="Lead sync",
+            cron="0 */6 * * *",
+            source_id=f"{uuid.uuid4()}:lead",
+        )
+        row = await scheduled_jobs_routes.create_schedule(payload=payload, auth=auth, db=db)
+
+        assert row.app_id == "voice-rx"
+        assert row.job_type == "sync-crm-source"
+        assert db.commits == 1
+    finally:
+        launch_sources._RESOLVERS.clear()
+        launch_sources._RESOLVERS.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_source_bound_reresolves_and_ignores_client_params():
+    from app.services.scheduler import launch_sources, workloads
+
+    ensure = __import__(
+        "app.services.scheduler.workloads", fromlist=["register_workload"]
+    )
+    ensure.register_workload(
+        workloads.ScheduledWorkload(
+            app_id="",
+            job_type="source-bound-test",
+            label="Source-bound",
+            description="x",
+            launch_source="canonical_config",
+            source_list_endpoint="/api/things",
+        )
+    )
+
+    async def _resolver(db, *, tenant_id, app_id, source_id):
+        return launch_sources.LaunchSpec(
+            params={"resolved": True, "source_id": source_id},
+            schedule_key=f"resolved:{source_id}",
+            name="Resolved Name",
+        )
+
+    saved = dict(launch_sources._RESOLVERS)
+    launch_sources._RESOLVERS.clear()
+    launch_sources.register_launch_source_resolver("source-bound-test", _resolver)
+    try:
+        auth = _auth()
+        db = _FakeSession()
+        payload = ScheduledJobCreate(
+            app_id="voice-rx",
+            job_type="source-bound-test",
+            schedule_key="client-key",
+            name="   ",
+            cron="0 */6 * * *",
+            params={"client": "ignored"},
+            source_id="src-123",
+        )
+        row = await scheduled_jobs_routes.create_schedule(payload=payload, auth=auth, db=db)
+        added = db.added[0]
+        assert added.params == {"resolved": True, "source_id": "src-123"}
+        assert added.schedule_key == "resolved:src-123"
+        assert added.name == "Resolved Name"
+    finally:
+        launch_sources._RESOLVERS.clear()
+        launch_sources._RESOLVERS.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_source_bound_requires_source_id():
+    from app.services.scheduler import workloads
+
+    workloads.register_workload(
+        workloads.ScheduledWorkload(
+            app_id="",
+            job_type="source-bound-test-missing",
+            label="Source-bound",
+            description="x",
+            launch_source="canonical_config",
+            source_list_endpoint="/api/things",
+        )
+    )
     auth = _auth()
     db = _FakeSession()
     payload = ScheduledJobCreate(
         app_id="voice-rx",
-        job_type="sync-crm-source",
-        schedule_key="voice-rx-leads",
-        name="Lead sync",
+        job_type="source-bound-test-missing",
+        schedule_key="k",
+        name="N",
         cron="0 */6 * * *",
-        params={"connection_id": str(uuid.uuid4()), "source_objects": ["Leads"]},
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await scheduled_jobs_routes.create_schedule(payload=payload, auth=auth, db=db)
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_source_bound_resolver_value_error_400():
+    from app.services.scheduler import launch_sources, workloads
+
+    workloads.register_workload(
+        workloads.ScheduledWorkload(
+            app_id="",
+            job_type="source-bound-test-err",
+            label="Source-bound",
+            description="x",
+            launch_source="canonical_config",
+            source_list_endpoint="/api/things",
+        )
+    )
+
+    async def _resolver(db, *, tenant_id, app_id, source_id):
+        raise ValueError("No such source")
+
+    saved = dict(launch_sources._RESOLVERS)
+    launch_sources.register_launch_source_resolver("source-bound-test-err", _resolver)
+    try:
+        auth = _auth()
+        db = _FakeSession()
+        payload = ScheduledJobCreate(
+            app_id="voice-rx",
+            job_type="source-bound-test-err",
+            schedule_key="k",
+            name="N",
+            cron="0 */6 * * *",
+            source_id="bad",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await scheduled_jobs_routes.create_schedule(payload=payload, auth=auth, db=db)
+        assert exc_info.value.status_code == 400
+    finally:
+        launch_sources._RESOLVERS.clear()
+        launch_sources._RESOLVERS.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_explicit_params_unchanged_with_source_id_present():
+    # explicit_params workloads keep client params + client schedule_key even if
+    # a stray source_id is sent.
+    auth = _auth()
+    db = _FakeSession()
+    payload = ScheduledJobCreate(
+        app_id="inside-sales",
+        job_type="sync-external-source",
+        schedule_key="explicit-key",
+        name="Explicit",
+        cron="0 */6 * * *",
+        params={"source_family": "calls"},
+        source_id="ignored-here",
     )
     row = await scheduled_jobs_routes.create_schedule(payload=payload, auth=auth, db=db)
-
-    assert row.app_id == "voice-rx"
-    assert row.job_type == "sync-crm-source"
-    assert db.commits == 1
+    assert row.params == {"source_family": "calls"}
+    assert row.schedule_key == "explicit-key"
 
 
 @pytest.mark.asyncio

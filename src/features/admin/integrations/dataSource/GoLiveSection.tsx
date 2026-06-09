@@ -34,12 +34,14 @@ export function GoLiveSection({
   connectionId,
   recordType,
   sourceObject,
+  appId,
   status,
   canActivate,
 }: {
   connectionId: string;
   recordType: string;
   sourceObject: string;
+  appId: string;
   status: DatasetStatus;
   canActivate: boolean;
 }) {
@@ -129,7 +131,7 @@ export function GoLiveSection({
       </section>
 
       <section className="border-t border-[var(--border-default)] pt-4">
-        <ScheduleSection connectionId={connectionId} sourceObject={sourceObject} />
+        <ScheduleSection connectionId={connectionId} recordType={recordType} appId={appId} />
       </section>
     </div>
   );

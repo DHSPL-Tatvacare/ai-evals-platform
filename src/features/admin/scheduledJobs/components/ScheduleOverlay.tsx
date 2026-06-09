@@ -17,13 +17,23 @@ import type {
   ScheduleOverride,
   SkipCriterion,
 } from '../types';
+import { useScheduleSources } from '../queries';
 import { NotifyOnFailureSection } from './NotifyOnFailureSection';
 import { useAuthStore } from '@/stores/authStore';
 import { adminApi } from '@/services/api/adminApi';
 
+/** Opens the overlay pre-bound to a source-bound workload (+ optionally a locked source) so a
+ *  surface like the data-source Go-live step can hand in its exact dataset. */
+export interface ScheduleLaunchContext {
+  appId: string;
+  jobType: string;
+  sourceId?: string;
+}
+
 interface Props {
   schedule: Schedule | null;
   onClose: () => void;
+  launchContext?: ScheduleLaunchContext;
 }
 
 function humanPreview(expression: string): { text: string; valid: boolean } {
@@ -41,7 +51,7 @@ function defaultArgsFor(predicate: RegisteredPredicate): Record<string, unknown>
   return {};
 }
 
-export function ScheduleOverlay({ schedule, onClose }: Props) {
+export function ScheduleOverlay({ schedule, onClose, launchContext }: Props) {
   const titleId = useId();
   const loadRegistry = useScheduledJobsStore((state) => state.loadRegistry);
   const registry = useScheduledJobsStore((state) => state.registry);
@@ -59,8 +69,9 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
 
   const [name, setName] = useState(schedule?.name ?? '');
   const [description, setDescription] = useState(schedule?.description ?? '');
-  const [appId, setAppId] = useState(schedule?.appId ?? '');
-  const [jobType, setJobType] = useState(schedule?.jobType ?? '');
+  const [appId, setAppId] = useState(schedule?.appId ?? launchContext?.appId ?? '');
+  const [jobType, setJobType] = useState(schedule?.jobType ?? launchContext?.jobType ?? '');
+  const [sourceId, setSourceId] = useState<string | null>(launchContext?.sourceId ?? null);
   const [scheduleKey, setScheduleKey] = useState(schedule?.scheduleKey ?? '');
   const [cron, setCron] = useState(schedule?.cron ?? '0 */6 * * *');
   const [paramsText, setParamsText] = useState(
@@ -148,6 +159,20 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
   const predicates = registry?.predicates ?? [];
   const onExhaustModes = registry?.onExhaustModes ?? ['wait_next_tick'];
 
+  // Source-bound workloads pick a source from the workload's endpoint; the backend re-resolves
+  // params + key from it. `locked` freezes identity in the hooked (launchContext) flow so a
+  // schedule can only ever target the dataset it was opened from.
+  const isSourceBound = Boolean(
+    selectedWorkload && selectedWorkload.launchSource !== 'explicit_params' && selectedWorkload.sourceListEndpoint,
+  );
+  const sourcesQuery = useScheduleSources(
+    isSourceBound ? selectedWorkload!.sourceListEndpoint : null,
+    appId,
+  );
+  const sources = sourcesQuery.data?.items ?? [];
+  const pickedSource = sources.find((s) => s.id === sourceId) ?? null;
+  const locked = isEdit || Boolean(launchContext);
+
   // Auto-pick a workload when the app changes and only one is available.
   useEffect(() => {
     if (!isEdit && appId && workloadsForApp.length === 1) {
@@ -156,11 +181,19 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
   }, [appId, workloadsForApp, isEdit]);
 
   useEffect(() => {
-    if (isEdit || !selectedWorkload) {
+    if (isEdit || !selectedWorkload || isSourceBound) {
       return;
     }
     setParamsText(JSON.stringify(selectedWorkload.defaultParams ?? {}, null, 2));
-  }, [isEdit, selectedWorkload]);
+  }, [isEdit, selectedWorkload, isSourceBound]);
+
+  // Source-bound: the picked source fills the read-only params preview, the schedule key, and a name suggestion.
+  useEffect(() => {
+    if (isEdit || !isSourceBound || !pickedSource) return;
+    setParamsText(JSON.stringify(pickedSource.params ?? {}, null, 2));
+    setScheduleKey(pickedSource.scheduleKey);
+    setName((prev) => prev || pickedSource.label);
+  }, [isEdit, isSourceBound, pickedSource]);
 
   const cronPreview = humanPreview(cron);
   const paramsAreEditable = !selectedWorkload || selectedWorkload.launchSource === 'explicit_params';
@@ -200,7 +233,8 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
   if (!name.trim()) missingFields.push('Name');
   if (!isEdit && !appId) missingFields.push('App');
   if (!isEdit && !jobType) missingFields.push('Workload');
-  if (!isEdit && !scheduleKey.trim()) missingFields.push('Schedule key');
+  if (!isEdit && isSourceBound && !sourceId) missingFields.push('Source');
+  if (!isEdit && !isSourceBound && !scheduleKey.trim()) missingFields.push('Schedule key');
   if (!cron.trim()) missingFields.push('Cron');
   const canSave = missingFields.length === 0 && cronPreview.valid && !saving;
 
@@ -244,11 +278,12 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
           name,
           description,
           cron,
-          params,
           override,
           enabled,
           notifyOwnerOnFailure,
           notifyEmailsOnFailure,
+          // Source-bound: hand the chosen source; the backend re-resolves params + key and ignores client params.
+          ...(isSourceBound ? { sourceId: sourceId ?? undefined } : { params }),
         });
         notificationService.success('Schedule created.');
       }
@@ -323,8 +358,8 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
           <Field label="App" required>
             <Select
               value={appId}
-              onChange={(v: string) => { setAppId(v); setJobType(''); }}
-              disabled={identityDisabled}
+              onChange={(v: string) => { setAppId(v); setJobType(''); setSourceId(null); }}
+              disabled={locked}
               placeholder="Select app…"
               options={apps.map((a) => ({ value: a, label: a }))}
             />
@@ -333,8 +368,8 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
           <Field label="Workload" required>
             <Select
               value={jobType}
-              onChange={setJobType}
-              disabled={identityDisabled || !appId}
+              onChange={(v: string) => { setJobType(v); setSourceId(null); }}
+              disabled={locked || !appId}
               placeholder={appId ? 'Select workload…' : 'Pick an app first'}
               options={workloadsForApp.map((w) => ({
                 value: w.jobType,
@@ -346,17 +381,38 @@ export function ScheduleOverlay({ schedule, onClose }: Props) {
             ) : null}
           </Field>
 
-          <Field label="Schedule key" required>
-            <Input
-              value={scheduleKey}
-              onChange={(e) => setScheduleKey(e.target.value)}
-              disabled={identityDisabled}
-              placeholder="nightly-crm-sync"
-            />
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-              Stable identifier — unique per (app, workload). Cannot change after creation.
-            </p>
-          </Field>
+          {isSourceBound ? (
+            <Field label="Source" required>
+              <Select
+                value={sourceId ?? ''}
+                onChange={(v: string) => setSourceId(v)}
+                disabled={isEdit || Boolean(launchContext?.sourceId)}
+                placeholder={sourcesQuery.isFetching ? 'Loading sources…' : 'Select a source…'}
+                options={sources.map((s) => ({ value: s.id, label: s.label }))}
+              />
+              {pickedSource?.sublabel ? (
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">{pickedSource.sublabel}</p>
+              ) : (
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                  The job&rsquo;s params are derived from the chosen source on the server.
+                </p>
+              )}
+            </Field>
+          ) : null}
+
+          {!isSourceBound ? (
+            <Field label="Schedule key" required>
+              <Input
+                value={scheduleKey}
+                onChange={(e) => setScheduleKey(e.target.value)}
+                disabled={identityDisabled}
+                placeholder="nightly-crm-sync"
+              />
+              <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                Stable identifier — unique per (app, workload). Cannot change after creation.
+              </p>
+            </Field>
+          ) : null}
 
           <Field label="Cron" required>
             <Input

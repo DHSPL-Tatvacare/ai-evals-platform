@@ -48,7 +48,9 @@ class ScheduledJobBase(CamelModel):
 
 
 class ScheduledJobCreate(ScheduledJobBase):
-    pass
+    # For source-bound workloads (launch_source != 'explicit_params') the backend
+    # re-resolves params + schedule_key from this source; client params are ignored.
+    source_id: str | None = None
 
 
 class ScheduledJobUpdate(CamelModel):
@@ -146,3 +148,23 @@ class ScheduledJobsRegistryResponse(CamelModel):
     workloads: list[RegisteredWorkloadEntry]
     apps: list[str]
     on_exhaust_modes: list[str] = Field(default_factory=lambda: sorted(VALID_ON_EXHAUST))
+
+
+class ScheduleSourceItem(CamelModel):
+    """One source the create-schedule overlay can pick for a source-bound workload.
+
+    Framework contract — not capability-specific. ``schedule_key`` is the per-source
+    uniqueness key; ``params`` are the canonical launch params the backend will
+    re-resolve at create time (client-sent params are ignored for source-bound
+    workloads, so the picker shows them read-only).
+    """
+
+    id: str
+    label: str
+    sublabel: str | None = None
+    schedule_key: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScheduleSourcesResponse(CamelModel):
+    items: list[ScheduleSourceItem]

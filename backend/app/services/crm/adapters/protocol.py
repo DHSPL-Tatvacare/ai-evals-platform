@@ -64,6 +64,9 @@ class CrmSourceAdapter(Protocol):
     capability: ClassVar[str]
     vendor: ClassVar[str]
 
+    @classmethod
+    def source_object_for(cls, record_type: str) -> str: ...
+
     async def discover_objects(
         self, *, creds: dict[str, Any], sample_size: int = 50
     ) -> list[DiscoveredObject]: ...

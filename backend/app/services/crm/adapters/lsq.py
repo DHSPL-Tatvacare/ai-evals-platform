@@ -110,6 +110,17 @@ class LsqCrmSourceAdapter:
     capability = "crm_source"
     vendor = "lsq"
 
+    # Provider-truth record_type → source_object map. Static (no creds) so source
+    # listing / scheduling can derive datasets without a live discovery call.
+    _SOURCE_OBJECTS: dict[str, str] = {"lead": "Lead", "activity": "Activity"}
+
+    @classmethod
+    def source_object_for(cls, record_type: str) -> str:
+        try:
+            return cls._SOURCE_OBJECTS[record_type]
+        except KeyError:
+            raise ValueError(f"lsq adapter has no source object for record_type {record_type!r}")
+
     def __init__(self, *, transport: CrmTransport | None = None) -> None:
         self._transport = transport or _HttpxTransport()
 

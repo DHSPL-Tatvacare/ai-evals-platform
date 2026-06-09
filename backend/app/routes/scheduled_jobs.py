@@ -34,6 +34,7 @@ from app.services.scheduler.engine import (
     next_cron_tick,
     validate_cron_expression,
 )
+from app.services.scheduler.launch_sources import resolve_launch_source
 from app.services.scheduler.predicates import get_registered_predicates
 from app.services.scheduler.workloads import (
     ensure_handler_workloads_registered,
@@ -333,16 +334,46 @@ async def create_schedule(
     override = _override_to_jsonb(payload.override)
     now = datetime.now(timezone.utc)
 
+    # Source-bound workloads are driven by a single source authority: the
+    # backend re-resolves params + schedule_key from ``source_id`` and ignores
+    # any client-sent params. ``explicit_params`` workloads are unchanged.
+    workload = get_workload(payload.app_id, payload.job_type) or get_workload(
+        "", payload.job_type
+    )
+    params = payload.params or {}
+    schedule_key = payload.schedule_key
+    name = payload.name
+    if workload is not None and workload.launch_source != "explicit_params":
+        if not payload.source_id:
+            raise HTTPException(
+                status_code=400,
+                detail="source_id is required for this scheduled workload.",
+            )
+        try:
+            spec = await resolve_launch_source(
+                db,
+                job_type=payload.job_type,
+                tenant_id=auth.tenant_id,
+                app_id=payload.app_id,
+                source_id=payload.source_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        params = spec.params
+        schedule_key = spec.schedule_key
+        if not name.strip():
+            name = spec.name
+
     schedule = ScheduledJobDefinition(
         id=uuid.uuid4(),
         tenant_id=auth.tenant_id,
         app_id=payload.app_id,
         job_type=payload.job_type,
-        schedule_key=payload.schedule_key,
-        name=payload.name,
+        schedule_key=schedule_key,
+        name=name,
         description=payload.description,
         cron=cron,
-        params=payload.params or {},
+        params=params,
         override=override,
         enabled=payload.enabled,
         next_check_at=next_cron_tick(cron, now),

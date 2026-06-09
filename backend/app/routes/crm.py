@@ -23,6 +23,7 @@ from app.models.job import BackgroundJob
 from app.models.provider_connection import ProviderConnection
 from app.models.scheduled_job import ScheduledJobDefinition
 from app.models.source_records import LogCrmSourceSync
+from app.schemas.scheduled_job import ScheduleSourceItem, ScheduleSourcesResponse
 from app.schemas.crm import (
     ActivateRequest,
     ActivateResponse,
@@ -60,8 +61,10 @@ from app.services.crm.crm_source_unpacker import _columns, _resolve, _GRAINS as 
 from app.services.crm.field_map_service import BindingInput, publish_field_map
 from app.services.crm.field_values import distinct_field_values
 from app.services.crm.grain_schema import all_grain_schemas, grain_schema
+from app.services.crm.scheduling import source_object_for
 from app.services.job_worker import get_job_submission_metadata
 from app.services.orchestration.adapters import AdapterNotRegisteredError
+from app.services.orchestration.connections.provider_specs import get_spec
 from app.services.orchestration.connections.resolver import ConnectionResolver
 from app.services.orchestration.predicate_contract import PredicateError, parse as parse_predicate
 
@@ -144,6 +147,52 @@ async def get_grains(
     auth: AuthContext = require_permission("orchestration:manage"),  # noqa: ARG001
 ):
     return GrainsResponse(grains=[GrainSchemaOut(**g) for g in all_grain_schemas()])
+
+
+@router.get(
+    "/schedule-sources",
+    response_model=ScheduleSourcesResponse,
+    summary="Datasets this tenant can schedule a sync for (source list for the sync-crm-source workload)",
+)
+async def list_schedule_sources(
+    app_id: str | None = Query(default=None, alias="appId"),
+    auth: AuthContext = require_permission("orchestration:manage"),
+    db: AsyncSession = Depends(get_db),
+) -> ScheduleSourcesResponse:
+    """One source item per (CRM connection, record type) the tenant can sync.
+
+    Record types are derived statically from the grain registry + provider-truth
+    source-object map — no live provider call. The create-schedule overlay reads
+    this list; the backend re-resolves canonical params from the picked source_id.
+    """
+    stmt = select(ProviderConnection).where(
+        ProviderConnection.tenant_id == auth.tenant_id,
+        ProviderConnection.active.is_(True),
+    )
+    if app_id:
+        stmt = stmt.where(ProviderConnection.app_id == app_id)
+    stmt = stmt.order_by(ProviderConnection.name)
+    connections = (await db.execute(stmt)).scalars().all()
+
+    items: list[ScheduleSourceItem] = []
+    for conn in connections:
+        if get_spec(conn.provider).kind != "crm_source":
+            continue
+        for record_type in _RECORD_TYPES:
+            try:
+                source_object = source_object_for(conn.provider, record_type)
+            except ValueError:
+                continue
+            items.append(
+                ScheduleSourceItem(
+                    id=f"{conn.id}:{record_type}",
+                    label=f"{conn.name} · {record_type.capitalize()}",
+                    sublabel=conn.name,
+                    schedule_key=f"{conn.id}:{record_type}",
+                    params={"connection_id": str(conn.id), "source_objects": [source_object]},
+                )
+            )
+    return ScheduleSourcesResponse(items=items)
 
 
 @router.get(

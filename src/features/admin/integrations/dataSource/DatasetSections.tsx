@@ -37,10 +37,12 @@ const STEP_LABELS: Record<SetupStep, string> = {
  *  hard-gated, revisitable stepper (Map → Filter → Preview → Go live) over one step body. */
 export function DatasetSections({
   connectionId,
+  appId,
   dataset,
   onStatusChange,
 }: {
   connectionId: string;
+  appId: string;
   dataset: CrmDatasetSummary;
   onStatusChange: (status: DatasetStatus | null) => void;
 }) {
@@ -165,6 +167,7 @@ export function DatasetSections({
                     connectionId={connectionId}
                     recordType={dataset.recordType}
                     sourceObject={discovered.sourceObject}
+                    appId={appId}
                     status={status}
                     canActivate={canActivate}
                   />

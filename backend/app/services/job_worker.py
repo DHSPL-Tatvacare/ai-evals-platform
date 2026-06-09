@@ -1570,6 +1570,10 @@ async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.U
         "platform on each run. Target a specific dataset with the connection "
         "and source objects in the schedule's parameters."
     ),
+    # Source-bound: the create-schedule overlay picks a dataset from the source
+    # list; the backend re-resolves canonical params from that source_id.
+    schedule_launch_source="canonical_config",
+    schedule_source_list_endpoint="/api/crm/schedule-sources",
     schedule_default_params={
         "connection_id": "",
         "source_objects": [],

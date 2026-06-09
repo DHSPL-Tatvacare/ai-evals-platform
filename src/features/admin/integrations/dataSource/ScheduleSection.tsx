@@ -21,10 +21,12 @@ function cadence(cron: string): string {
  *  backend-side). */
 export function ScheduleSection({
   connectionId,
-  sourceObject,
+  recordType,
+  appId,
 }: {
   connectionId: string;
-  sourceObject: string;
+  recordType: string;
+  appId: string;
 }) {
   const schedules = useScheduledJobsStore((s) => s.schedules);
   const load = useScheduledJobsStore((s) => s.load);
@@ -34,16 +36,12 @@ export function ScheduleSection({
     void load();
   }, [load]);
 
-  // Schedules that sync this exact source object for this connection.
+  // The per-dataset source id == its schedule key (backend resolver). Matching strictly on the key
+  // means one dataset never lists — or can overwrite — another dataset's or connection's schedule.
+  const sourceId = `${connectionId}:${recordType}`;
   const matching = useMemo(
-    () =>
-      schedules.filter((s) => {
-        if (s.jobType !== 'sync-crm-source') return false;
-        if (s.params?.connection_id !== connectionId) return false;
-        const objects = s.params?.source_objects;
-        return Array.isArray(objects) && objects.includes(sourceObject);
-      }),
-    [schedules, connectionId, sourceObject],
+    () => schedules.filter((s) => s.jobType === 'sync-crm-source' && s.scheduleKey === sourceId),
+    [schedules, sourceId],
   );
 
   return (
@@ -87,7 +85,13 @@ export function ScheduleSection({
         </ul>
       )}
 
-      {creating ? <ScheduleOverlay schedule={null} onClose={() => setCreating(false)} /> : null}
+      {creating ? (
+        <ScheduleOverlay
+          schedule={null}
+          launchContext={{ appId, jobType: 'sync-crm-source', sourceId }}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
     </div>
   );
 }

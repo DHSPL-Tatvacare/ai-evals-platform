@@ -8,6 +8,7 @@ import type {
   ScheduleCreateInput,
   ScheduleDetailResponse,
   ScheduleRegistryResponse,
+  ScheduleSourcesResponse,
   ScheduleUpdateInput,
 } from '@/features/admin/scheduledJobs/types';
 
@@ -55,5 +56,11 @@ export const scheduledJobsApi = {
 
   async registry(): Promise<ScheduleRegistryResponse> {
     return apiRequest<ScheduleRegistryResponse>(`${BASE}/registry`);
+  },
+
+  /** Source-bound workloads expose a `sourceListEndpoint`; this fetches its launchable sources. */
+  async sources(endpoint: string, appId: string): Promise<ScheduleSourcesResponse> {
+    const qs = appId ? `?appId=${encodeURIComponent(appId)}` : '';
+    return apiRequest<ScheduleSourcesResponse>(`${endpoint}${qs}`);
   },
 };

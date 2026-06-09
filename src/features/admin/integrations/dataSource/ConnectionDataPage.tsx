@@ -148,6 +148,7 @@ export function ConnectionDataPage() {
             <DatasetSections
               key={selectedDataset.recordType}
               connectionId={connectionId}
+              appId={connection?.appId ?? ''}
               dataset={selectedDataset}
               onStatusChange={setStatus}
             />
