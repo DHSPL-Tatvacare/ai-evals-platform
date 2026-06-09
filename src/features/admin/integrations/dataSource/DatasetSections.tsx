@@ -126,7 +126,7 @@ export function DatasetSections({
   const objectsError = objectsQuery.isError;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 px-6 pt-5 pb-4">
         <Stepper steps={steps} onSelect={setStep} aria-label="Dataset setup" />
       </div>
