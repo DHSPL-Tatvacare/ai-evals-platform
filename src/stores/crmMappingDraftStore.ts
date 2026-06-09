@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 
 import type { CrmFieldBinding, CrmGrainSchema } from '@/services/api/crmSource';
+import type { PredicateAst } from '@/features/orchestration/types';
 
 export type CrmTargetKind = 'standard' | 'slot' | 'ignore';
 
@@ -48,6 +49,8 @@ interface CrmMappingDraftState {
   grain: CrmGrainSchema | null;
   bindings: Record<string, CrmBindingDraft>;
   valueMapField: string | null;
+  /** Optional row-level filter over the mapped fields; undefined = no filter. */
+  filterPredicate: PredicateAst | undefined;
 
   startDraft(input: {
     connectionId: string;
@@ -63,6 +66,7 @@ interface CrmMappingDraftState {
   setValueMap(sourceField: string, valueMap: Record<string, string> | null): void;
   openValueMap(sourceField: string): void;
   closeValueMap(): void;
+  setFilterPredicate(predicate: PredicateAst | undefined): void;
   reset(): void;
 }
 
@@ -86,6 +90,7 @@ export const useCrmMappingDraftStore = create<CrmMappingDraftState>()((set, get)
   grain: null,
   bindings: {},
   valueMapField: null,
+  filterPredicate: undefined,
 
   startDraft: ({ connectionId, recordType, sourceObject, grain, serverBindings }) => {
     const standardTargets = new Set(grain.standardColumns.map((c) => c.target));
@@ -100,7 +105,7 @@ export const useCrmMappingDraftStore = create<CrmMappingDraftState>()((set, get)
         valueMap: b.valueMap,
       };
     }
-    set({ connectionId, recordType, sourceObject, grain, bindings, valueMapField: null });
+    set({ connectionId, recordType, sourceObject, grain, bindings, valueMapField: null, filterPredicate: undefined });
   },
 
   setTargetStandard: (sourceField, column) => {
@@ -170,6 +175,8 @@ export const useCrmMappingDraftStore = create<CrmMappingDraftState>()((set, get)
   openValueMap: (sourceField) => set({ valueMapField: sourceField }),
   closeValueMap: () => set({ valueMapField: null }),
 
+  setFilterPredicate: (predicate) => set({ filterPredicate: predicate }),
+
   reset: () =>
     set({
       connectionId: null,
@@ -178,6 +185,7 @@ export const useCrmMappingDraftStore = create<CrmMappingDraftState>()((set, get)
       grain: null,
       bindings: {},
       valueMapField: null,
+      filterPredicate: undefined,
     }),
 }));
 

@@ -72,7 +72,68 @@ export interface CrmResolvedPreview {
   rows: Record<string, string | null>[];
 }
 
+/** One record type a connection exposes + its lifecycle state (drives the left rail). */
+export interface CrmDatasetSummary {
+  recordType: string;
+  sourceObject: string;
+  status: string;
+  version: number;
+  hasSchedule: boolean;
+  lastSyncAt: string | null;
+}
+
+export interface CrmRawSampleRecord {
+  sourceRecordId: string;
+  rawPayload: Record<string, unknown>;
+}
+
+export interface CrmRawSample {
+  recordType: string;
+  sourceObject: string;
+  records: CrmRawSampleRecord[];
+}
+
+export interface CrmUnpackedSample {
+  recordType: string;
+  columns: string[];
+  rows: Record<string, string | null>[];
+}
+
+export interface CrmFilterableField {
+  field: string;
+  operators: string[];
+  pushable: boolean;
+}
+
+export interface CrmFilterCapabilities {
+  recordType: string;
+  sourceObject: string;
+  fields: CrmFilterableField[];
+}
+
+/** Draft / activate request body: the in-progress bindings + optional filter predicate. */
+export interface CrmDatasetDraftBody {
+  recordType: string;
+  bindings: CrmFieldBinding[];
+  filterPredicate?: Record<string, unknown> | null;
+}
+
+export interface CrmDatasetDraftResult {
+  recordType: string;
+  status: string;
+  version: number;
+}
+
+export interface CrmDatasetActivateResult {
+  recordType: string;
+  status: string;
+  version: number;
+  resolvedGrains: string[];
+}
+
 const base = (connectionId: string) => `/api/crm/connections/${connectionId}`;
+const dataset = (connectionId: string, recordType: string) =>
+  `${base(connectionId)}/datasets/${encodeURIComponent(recordType)}`;
 
 export function getCrmGrains(): Promise<{ grains: CrmGrainSchema[] }> {
   return apiRequest('/api/crm/grains');
@@ -128,4 +189,64 @@ export function getCrmResolvedPreview(
   recordType: string,
 ): Promise<CrmResolvedPreview> {
   return apiRequest(`${base(connectionId)}/resolved-preview?recordType=${encodeURIComponent(recordType)}`);
+}
+
+export function listCrmDatasets(connectionId: string): Promise<{ datasets: CrmDatasetSummary[] }> {
+  return apiRequest(`${base(connectionId)}/datasets`);
+}
+
+export function getCrmRawSample(connectionId: string, recordType: string): Promise<CrmRawSample> {
+  return apiRequest(`${dataset(connectionId, recordType)}/raw-sample`);
+}
+
+export function getCrmUnpackedSample(
+  connectionId: string,
+  body: CrmDatasetDraftBody,
+): Promise<CrmUnpackedSample> {
+  return apiRequest(`${dataset(connectionId, body.recordType)}/unpacked-sample`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function getCrmFilterCapabilities(
+  connectionId: string,
+  recordType: string,
+): Promise<CrmFilterCapabilities> {
+  return apiRequest(`${dataset(connectionId, recordType)}/filter-capabilities`);
+}
+
+export function getCrmDatasetFieldValues(
+  connectionId: string,
+  recordType: string,
+  field: string,
+): Promise<{ field: string; values: string[] }> {
+  return apiRequest(`${dataset(connectionId, recordType)}/field-values?field=${encodeURIComponent(field)}`);
+}
+
+export function saveCrmDatasetDraft(
+  connectionId: string,
+  body: CrmDatasetDraftBody,
+): Promise<CrmDatasetDraftResult> {
+  return apiRequest(`${dataset(connectionId, body.recordType)}/draft`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function activateCrmDataset(
+  connectionId: string,
+  recordType: string,
+): Promise<CrmDatasetActivateResult> {
+  return apiRequest(`${dataset(connectionId, recordType)}/activate`, {
+    method: 'POST',
+    body: JSON.stringify({ recordType }),
+  });
+}
+
+export function getCrmDatasetPreview(
+  connectionId: string,
+  recordType: string,
+): Promise<CrmResolvedPreview> {
+  return apiRequest(`${dataset(connectionId, recordType)}/preview`);
 }

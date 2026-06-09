@@ -59,6 +59,7 @@ const WorkflowBuilderPage = lazyWithRetry(() => import('@/features/orchestration
 const CampaignRunsPage = lazyWithRetry(() => import('@/features/orchestration/components/CampaignRunsPage').then(m => ({ default: m.CampaignRunsPage })));
 const LegacyRunDetailRedirect = lazyWithRetry(() => import('@/features/orchestration/components/runs/LegacyRunDetailRedirect').then(m => ({ default: m.LegacyRunDetailRedirect })));
 const ConnectionsPage = lazyWithRetry(() => import('@/features/admin/integrations/ConnectionsPage').then(m => ({ default: m.ConnectionsPage })));
+const ConnectionDataPage = lazyWithRetry(() => import('@/features/admin/integrations/dataSource/ConnectionDataPage').then(m => ({ default: m.ConnectionDataPage })));
 const DatasetDetail = lazyWithRetry(() => import('@/features/orchestration/components/datasets/DatasetDetail').then(m => ({ default: m.DatasetDetail })));
 const AdminNotificationsPage = lazyWithRetry(() => import('@/features/admin/notifications/pages/AdminNotificationsPage').then(m => ({ default: m.AdminNotificationsPage })));
 const CommCapPage = lazyWithRetry(() => import('@/features/admin/orchestration/CommCapPage').then(m => ({ default: m.CommCapPage })));
@@ -332,6 +333,16 @@ export function Router() {
               <RequirePermission action="orchestration:manage">
                 <Suspense fallback={ROUTE_FALLBACK}>
                   <ConnectionsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/integrations/connections/:connectionId/data"
+            element={
+              <RequirePermission action="orchestration:manage">
+                <Suspense fallback={ROUTE_FALLBACK}>
+                  <ConnectionDataPage />
                 </Suspense>
               </RequirePermission>
             }

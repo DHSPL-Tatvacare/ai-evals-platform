@@ -20,6 +20,8 @@ export const routes = {
   adminAnalyticsMappings: '/admin/analytics/mappings',
   adminAnalyticsSignals: '/admin/analytics/signals',
   adminIntegrations: '/admin/integrations',
+  connectionData: (connectionId: string) =>
+    `/admin/integrations/connections/${connectionId}/data`,
   adminCommCap: '/admin/orchestration/comm-cap',
   adminCampaignAnalytics: '/admin/orchestration/campaign-analytics',
   adminLlmProviders: '/admin/llm/providers',

@@ -1,6 +1,8 @@
 import { useEffect, useId, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Archive, Copy, Lock, Pencil, PlugZap, RefreshCw, Share2, Waypoints, X } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Archive, Copy, Database, Lock, Pencil, PlugZap, RefreshCw, Share2, X } from 'lucide-react';
+
+import { routes } from '@/config/routes';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -22,7 +24,6 @@ import { useAuthStore } from '@/stores/authStore';
 import { CONNECTION_PROVIDER_KINDS } from '@/constants/connectionProviders';
 
 import { ConnectionForm } from './ConnectionForm';
-import { CrmMappingEditor } from './crmMapping/CrmMappingEditor';
 import { getConnectionProviderLabel } from './providerOptions';
 import {
   useConnections,
@@ -73,6 +74,7 @@ export function ConnectionsPage() {
   // and an optional `?app=` query param filters the list (and supplies the
   // app the create form binds new connections to).
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const appId = searchParams.get('app') ?? undefined;
   const { icon, title } = usePageMetadata('connections');
   const user = useAuthStore((s) => s.user);
@@ -83,7 +85,6 @@ export function ConnectionsPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Connection | null>(null);
-  const [mappingTarget, setMappingTarget] = useState<Connection | null>(null);
   // Single-open per page — opening a row's menu closes any other row's.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -281,14 +282,15 @@ export function ConnectionsPage() {
             onClick: () => setEditing(c),
           },
           {
-            // CRM-source connections carry a field mapping; managing it is part
-            // of managing the connection (same orchestration:manage gate).
-            id: 'mapping',
-            icon: Waypoints,
-            label: 'Field mapping',
+            // CRM-source connections carry a data surface (mapping + filter +
+            // schedule); managing it is part of managing the connection (same
+            // orchestration:manage gate). Opens the full-page data surface.
+            id: 'manageData',
+            icon: Database,
+            label: 'Manage data',
             disabled: !canEdit,
             hidden: CONNECTION_PROVIDER_KINDS[c.provider] !== 'crm_source',
-            onClick: () => setMappingTarget(c),
+            onClick: () => navigate(routes.connectionData(c.id)),
           },
           {
             id: 'rotate',
@@ -457,13 +459,6 @@ export function ConnectionsPage() {
         confirmLabel="Archive"
         variant="danger"
       />
-
-      {mappingTarget ? (
-        <CrmMappingEditor
-          connection={mappingTarget}
-          onClose={() => setMappingTarget(null)}
-        />
-      ) : null}
     </>
   );
 }

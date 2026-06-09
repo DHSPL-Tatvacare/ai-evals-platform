@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   archiveConnection,
   createConnection,
+  getConnection,
   listConnections,
   rotateWebhookToken,
   testConnection,
@@ -25,6 +26,14 @@ export function useConnections(params: ListConnectionsParams) {
   return useQuery<Connection[]>({
     queryKey: [...CONNECTIONS_KEY, params],
     queryFn: () => listConnections(params),
+  });
+}
+
+export function useConnection(id: string | undefined) {
+  return useQuery<Connection>({
+    queryKey: [...CONNECTIONS_KEY, 'detail', id],
+    queryFn: () => getConnection(id!),
+    enabled: Boolean(id),
   });
 }
 
