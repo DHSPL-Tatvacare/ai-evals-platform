@@ -1583,6 +1583,20 @@ async def handle_unpack_crm_source(job_id, params: dict, *, tenant_id: uuid.UUID
 
 
 @register_job_handler(
+    "populate-crm-resolved",
+    queue_class="standard",
+    priority=120,
+    retry_safe=True,
+    required_permissions=("orchestration:manage",),
+)
+async def handle_populate_crm_resolved(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """(Re)build or refresh the per-tenant resolved CRM matviews from the field map."""
+    from app.services.crm.crm_resolved_populator import run_crm_resolved_populate
+
+    return await run_crm_resolved_populate(job_id, params, tenant_id=tenant_id, user_id=user_id)
+
+
+@register_job_handler(
     "generate-report",
     queue_class="interactive",
     priority=10,

@@ -102,3 +102,10 @@ class SyncActivityOut(CamelModel):
 
 class SyncActivityResponse(CamelModel):
     runs: list[SyncActivityOut]
+
+
+class ResolvedPreviewResponse(CamelModel):
+    """A sample of the per-tenant resolved matview — the 'what Sherlock will see' editor panel."""
+    record_type: str
+    columns: list[str]
+    rows: list[dict[str, Any]]

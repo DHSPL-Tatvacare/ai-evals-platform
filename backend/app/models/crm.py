@@ -27,7 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, TimestampMixin
 
 
 class CrmSourceRecord(Base):
@@ -209,6 +209,33 @@ class CrmFieldMap(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class SourceDatasetDefinition(Base, TimestampMixin):
+    """Per-dataset ingestion definition: one row per tenant+app+connection+record_type (filter + lifecycle)."""
+    __tablename__ = "source_dataset_definition"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "app_id", "connection_id", "record_type",
+            name="uq_source_dataset_definition_scope",
+        ),
+        Index("ix_source_dataset_definition_scope", "tenant_id", "app_id", "connection_id"),
+        {"schema": "platform"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    app_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    record_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    filter_predicate: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    schedule_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
 __all__ = [
     "CrmSourceRecord",
     "CrmLead",
@@ -216,4 +243,5 @@ __all__ = [
     "CrmActivity",
     "CrmActivityExt",
     "CrmFieldMap",
+    "SourceDatasetDefinition",
 ]

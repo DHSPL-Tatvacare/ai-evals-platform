@@ -33,6 +33,23 @@ class FetchPage:
     has_more: bool
 
 
+@dataclass(frozen=True)
+class FilterableField:
+    """One field an adapter can filter on, the ops it allows, and whether the provider pushes it down."""
+
+    field: str
+    operators: tuple[str, ...]
+    pushable: bool
+
+
+@dataclass(frozen=True)
+class FilterCapability:
+    """A source object's honest filter surface — pushable leaves optimize the fetch; the rest run at resolve-time."""
+
+    source_object: str
+    fields: tuple[FilterableField, ...]
+
+
 class CrmTransport(Protocol):
     """The HTTP seam — faked in tests so adapter logic runs against verbatim fixtures."""
 
@@ -51,6 +68,16 @@ class CrmSourceAdapter(Protocol):
         self, *, creds: dict[str, Any], sample_size: int = 50
     ) -> list[DiscoveredObject]: ...
 
+    def filter_capabilities(self, source_object: str) -> FilterCapability: ...
+
+    async def field_values(
+        self, *, creds: dict[str, Any], source_object: str, field: str, limit: int = 50
+    ) -> list[str]: ...
+
+    async def sample_records(
+        self, *, creds: dict[str, Any], source_object: str, limit: int = 20
+    ) -> list[SourceRecordDraft]: ...
+
     async def fetch_records(
         self,
         *,
@@ -59,6 +86,7 @@ class CrmSourceAdapter(Protocol):
         watermark: str | None = None,
         page: int = 1,
         page_size: int = 200,
+        predicate: Any | None = None,
     ) -> FetchPage: ...
 
 
@@ -67,5 +95,7 @@ __all__ = [
     "CrmTransport",
     "DiscoveredObject",
     "FetchPage",
+    "FilterCapability",
+    "FilterableField",
     "SourceRecordDraft",
 ]

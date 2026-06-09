@@ -13,6 +13,8 @@ from app.services.crm.adapters.protocol import (
     CrmTransport,
     DiscoveredObject,
     FetchPage,
+    FilterableField,
+    FilterCapability,
     SourceRecordDraft,
 )
 
@@ -27,6 +29,8 @@ __all__ = [
     "CrmTransport",
     "DiscoveredObject",
     "FetchPage",
+    "FilterableField",
+    "FilterCapability",
     "SourceRecordDraft",
     "resolve_crm_adapter",
 ]

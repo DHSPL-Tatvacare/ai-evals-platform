@@ -33,11 +33,14 @@ from app.schemas.crm import (
     GrainSchemaOut,
     GrainsResponse,
     JobSubmittedResponse,
+    ResolvedPreviewResponse,
     SyncActivityOut,
     SyncActivityResponse,
     SyncRequest,
 )
 from app.services.crm.adapters import resolve_crm_adapter
+from app.services.crm.crm_resolved_fragment import validate_resolved_contract
+from app.services.crm.crm_resolved_populator import rebuild_resolved_surfaces, resolved_sample
 from app.services.crm.field_map_service import BindingInput, publish_field_map
 from app.services.crm.field_values import distinct_field_values
 from app.services.crm.grain_schema import all_grain_schemas
@@ -204,6 +207,16 @@ async def publish_field_map_route(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # Rebuild the resolved surfaces from the new map and gate publish on the contract: the matview
+    # must match the projected fragment AND resolved-column SQL must pass the same enforcers Sherlock
+    # runs. A map that can't be served is refused here, not at a turn. (Rolls back with the request.)
+    await rebuild_resolved_surfaces(db, tenant_id=auth.tenant_id, app_id=row.app_id, connection_id=connection_id)
+    try:
+        await validate_resolved_contract(db, tenant_id=auth.tenant_id, app_id=row.app_id)
+    except Exception as exc:  # noqa: BLE001 — surface a clean 400, never a 500
+        raise HTTPException(status_code=400, detail=f"resolved-layer validation failed: {exc}"[:300])
+
     job = await _submit_job(
         db, auth, "unpack-crm-source",
         {"app_id": row.app_id, "connection_id": str(connection_id)},
@@ -247,6 +260,26 @@ async def trigger_unpack(
         {"app_id": row.app_id, "connection_id": str(connection_id)}, "Unpack queued",
     )
     return JobSubmittedResponse(job_id=str(job.id), status=job.status)
+
+
+@router.get(
+    "/connections/{connection_id}/resolved-preview",
+    response_model=ResolvedPreviewResponse,
+    summary="Sample of the resolved layer for a grain (what Sherlock will see)",
+)
+async def get_resolved_preview(
+    connection_id: uuid.UUID,
+    record_type: str = Query(..., alias="recordType", description="lead | activity"),
+    auth: AuthContext = require_permission("orchestration:manage"),
+    db: AsyncSession = Depends(get_db),
+):
+    if record_type not in _RECORD_TYPES:
+        raise HTTPException(status_code=400, detail="record_type must be lead | activity")
+    row = await _load_connection(db, auth, connection_id)
+    columns, rows = await resolved_sample(
+        db, tenant_id=auth.tenant_id, app_id=row.app_id, grain=record_type,
+    )
+    return ResolvedPreviewResponse(record_type=record_type, columns=columns, rows=rows)
 
 
 @router.get(

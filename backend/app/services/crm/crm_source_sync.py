@@ -15,9 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.crm import CrmSourceRecord
+from app.models.crm import CrmSourceRecord, SourceDatasetDefinition
 from app.models.source_records import LogCrmSourceSync
+from app.services.crm.adapters import resolve_crm_adapter
 from app.services.crm.adapters.protocol import SourceRecordDraft
+from app.services.orchestration.connections.resolver import ConnectionResolver
 
 _PAGE_CAP_DEFAULT = 50
 
@@ -77,11 +79,24 @@ async def _latest_watermark(
     )).scalar_one_or_none()
 
 
+async def _active_filter_predicate(
+    db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str, connection_id: uuid.UUID, record_type: str
+) -> dict | None:
+    """Active dataset definition's filter predicate for this grain, or None. Read-only, tenant+app scoped."""
+    return (await db.execute(
+        select(SourceDatasetDefinition.filter_predicate).where(
+            SourceDatasetDefinition.tenant_id == tenant_id,
+            SourceDatasetDefinition.app_id == app_id,
+            SourceDatasetDefinition.connection_id == connection_id,
+            SourceDatasetDefinition.record_type == record_type,
+            SourceDatasetDefinition.status == "active",
+        )
+    )).scalar_one_or_none()
+
+
 async def run_crm_source_sync(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:
     """Land new/updated records for a connection. tenant + connection scoped via params."""
     from app.database import async_session
-    from app.services.crm.adapters import resolve_crm_adapter
-    from app.services.orchestration.connections.resolver import ConnectionResolver
 
     app_id = str(params.get("app_id") or "").strip()
     connection_id = uuid.UUID(str(params["connection_id"]))
@@ -95,11 +110,15 @@ async def run_crm_source_sync(job_id, params: dict, *, tenant_id: uuid.UUID, use
         provider = creds.pop("__provider__", "")
         adapter = resolve_crm_adapter(vendor=provider)
 
-        source_objects = params.get("source_objects") or [
-            o.source_object for o in await adapter.discover_objects(creds=creds)
-        ]
+        discovered = await adapter.discover_objects(creds=creds)
+        record_type_of = {o.source_object: o.record_type for o in discovered}
+        source_objects = params.get("source_objects") or [o.source_object for o in discovered]
 
         for obj in source_objects:
+            predicate = await _active_filter_predicate(
+                db, tenant_id=tenant_id, app_id=app_id, connection_id=connection_id,
+                record_type=record_type_of.get(obj, obj),
+            )
             source_key = f"{connection_id}:{obj}"
             watermark = await _latest_watermark(db, tenant_id=tenant_id, app_id=app_id, source_key=source_key)
             started = datetime.now(timezone.utc)
@@ -107,7 +126,7 @@ async def run_crm_source_sync(job_id, params: dict, *, tenant_id: uuid.UUID, use
             capped = False
             while True:
                 fetched = await adapter.fetch_records(
-                    creds=creds, source_object=obj, watermark=watermark, page=page
+                    creds=creds, source_object=obj, watermark=watermark, page=page, predicate=predicate
                 )
                 scanned += len(fetched.records)
                 landed_total += await land_records(

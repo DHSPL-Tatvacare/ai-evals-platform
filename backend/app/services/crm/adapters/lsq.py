@@ -16,13 +16,24 @@ from app.services.crm.adapters.protocol import (
     CrmTransport,
     DiscoveredObject,
     FetchPage,
+    FilterableField,
+    FilterCapability,
     SourceRecordDraft,
 )
+from app.services.orchestration.predicate_contract import LeafPredicate, parse
 
 _LEADS_PATH = "LeadManagement.svc/Leads.Get"
 _ACTIVITY_PATH = "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
 _CALL_EVENT_CODES = (21, 22)  # 21 = inbound call, 22 = outbound call
 _WATERMARK_FLOOR = "2000-01-01 00:00:00"
+
+# The narrow server-pushable surface of the single Leads.Get Parameter/SqlOperator lookup.
+_PUSHABLE_LEAD_FIELDS: dict[str, tuple[str, ...]] = {
+    "ModifiedOn": ("gte", "lte"),
+    "ProspectStage": ("eq", "in"),
+    "OwnerIdName": ("eq", "in"),
+}
+_SQL_OPERATOR = {"gte": ">=", "lte": "<=", "eq": "=", "in": "in"}
 
 
 def lsq_lead_draft(raw: dict[str, Any]) -> SourceRecordDraft:
@@ -59,6 +70,31 @@ def _fields_of(records: list[dict[str, Any]]) -> list[str]:
     return sorted(names)
 
 
+def _pushable_lead_parameter(predicate: Any | None) -> dict[str, Any] | None:
+    """The single Leads.Get Parameter for the first pushable leaf, or None to leave the fetch as-is."""
+    if predicate is None:
+        return None
+    leaf = _first_pushable_leaf(parse(predicate))
+    if leaf is None:
+        return None
+    value = ",".join(str(v) for v in leaf.value) if leaf.op == "in" else str(leaf.value)
+    return {"LookupName": leaf.field, "LookupValue": value, "SqlOperator": _SQL_OPERATOR[leaf.op]}
+
+
+def _first_pushable_leaf(node: Any) -> LeafPredicate | None:
+    """LSQ exposes one Parameter slot, so a single pushable leaf is honoured; everything else stays local."""
+    if isinstance(node, LeafPredicate):
+        ops = _PUSHABLE_LEAD_FIELDS.get(node.field)
+        return node if ops and node.op in ops else None
+    children = getattr(node, "and_", None) or getattr(node, "or_", None)
+    if children:
+        for child in children:
+            found = _first_pushable_leaf(child)
+            if found is not None:
+                return found
+    return None
+
+
 class _HttpxTransport:
     async def post(
         self, *, base_url: str, path: str, params: dict[str, str], json: dict[str, Any]
@@ -88,11 +124,18 @@ class LsqCrmSourceAdapter:
         )
 
     async def _get_leads(
-        self, creds: dict[str, Any], *, watermark: str | None, page: int, page_size: int
+        self,
+        creds: dict[str, Any],
+        *,
+        watermark: str | None,
+        page: int,
+        page_size: int,
+        parameter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         base, params = self._auth(creds)
         body = {
-            "Parameter": {
+            "Parameter": parameter
+            or {
                 "LookupName": "ModifiedOn",
                 "LookupValue": watermark or _WATERMARK_FLOOR,
                 "SqlOperator": ">=",
@@ -135,6 +178,36 @@ class LsqCrmSourceAdapter:
             DiscoveredObject(source_object="Activity", record_type="activity", fields=_fields_of(activities)),
         ]
 
+    def filter_capabilities(self, source_object: str) -> FilterCapability:
+        if source_object == "Lead":
+            fields = [
+                FilterableField(field=name, operators=ops, pushable=True)
+                for name, ops in _PUSHABLE_LEAD_FIELDS.items()
+            ]
+            fields.append(FilterableField(field="mx_City", operators=("eq", "in"), pushable=False))
+            return FilterCapability(source_object="Lead", fields=tuple(fields))
+        # Activities expose no server-side lookup beyond the date window, so all filters run local.
+        return FilterCapability(source_object=source_object, fields=())
+
+    async def field_values(
+        self, *, creds: dict[str, Any], source_object: str, field: str, limit: int = 50
+    ) -> list[str]:
+        sample = await self.sample_records(creds=creds, source_object=source_object, limit=limit)
+        seen = {
+            str(r.raw_payload[field])
+            for r in sample
+            if r.raw_payload.get(field) not in (None, "")
+        }
+        return sorted(seen)[:limit]
+
+    async def sample_records(
+        self, *, creds: dict[str, Any], source_object: str, limit: int = 20
+    ) -> list[SourceRecordDraft]:
+        page = await self.fetch_records(
+            creds=creds, source_object=source_object, page=1, page_size=limit
+        )
+        return page.records[:limit]
+
     async def fetch_records(
         self,
         *,
@@ -143,9 +216,16 @@ class LsqCrmSourceAdapter:
         watermark: str | None = None,
         page: int = 1,
         page_size: int = 200,
+        predicate: Any | None = None,
     ) -> FetchPage:
         if source_object == "Lead":
-            leads = await self._get_leads(creds, watermark=watermark, page=page, page_size=page_size)
+            leads = await self._get_leads(
+                creds,
+                watermark=watermark,
+                page=page,
+                page_size=page_size,
+                parameter=_pushable_lead_parameter(predicate),
+            )
             return FetchPage(
                 records=[lsq_lead_draft(l) for l in leads],
                 next_watermark=_max_field(leads, "ModifiedOn"),
