@@ -109,3 +109,71 @@ class ResolvedPreviewResponse(CamelModel):
     record_type: str
     columns: list[str]
     rows: list[dict[str, Any]]
+
+
+class DatasetSummary(CamelModel):
+    """One record_type a connection exposes + its definition lifecycle state (drives the left rail)."""
+    record_type: str
+    source_object: str
+    status: str
+    version: int
+    has_schedule: bool
+    last_sync_at: Optional[datetime] = None
+
+
+class DatasetsResponse(CamelModel):
+    datasets: list[DatasetSummary]
+
+
+class RawSampleRecordOut(CamelModel):
+    source_record_id: str
+    raw_payload: dict[str, Any]
+
+
+class RawSampleResponse(CamelModel):
+    record_type: str
+    source_object: str
+    records: list[RawSampleRecordOut]
+
+
+class UnpackedSampleResponse(CamelModel):
+    """Sample run through the DRAFT map without persisting — the 'Unpacked' toggle."""
+    record_type: str
+    columns: list[str]
+    rows: list[dict[str, Any]]
+
+
+class FilterableFieldOut(CamelModel):
+    field: str
+    operators: list[str]
+    pushable: bool
+
+
+class FilterCapabilityResponse(CamelModel):
+    record_type: str
+    source_object: str
+    fields: list[FilterableFieldOut]
+
+
+class DraftDefinitionRequest(CamelModel):
+    """Draft upsert: the in-progress field map + an optional filter predicate (status stays draft)."""
+    record_type: str
+    bindings: list[FieldBindingIn]
+    filter_predicate: Optional[dict[str, Any]] = None
+
+
+class DraftDefinitionResponse(CamelModel):
+    record_type: str
+    status: str
+    version: int
+
+
+class ActivateRequest(CamelModel):
+    record_type: str
+
+
+class ActivateResponse(CamelModel):
+    record_type: str
+    status: str
+    version: int
+    resolved_grains: list[str]
