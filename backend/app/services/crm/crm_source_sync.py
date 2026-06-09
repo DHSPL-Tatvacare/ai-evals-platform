@@ -150,6 +150,16 @@ async def run_crm_source_sync(job_id, params: dict, *, tenant_id: uuid.UUID, use
                 completed_at=datetime.now(timezone.utc), requested_by_user_id=user_id,
                 is_scheduled_run=is_scheduled, details={"page_cap_reached": capped},
             ))
+
+        # Chain head: a sync that landed records enqueues the unpack, which itself chains the
+        # resolved refresh + analytics populate. Idempotent, so re-running the chain is safe.
+        if landed_total:
+            from app.services.crm.crm_chain import build_unpack_job
+
+            db.add(build_unpack_job(
+                tenant_id=tenant_id, user_id=user_id, app_id=app_id,
+                connection_id=str(connection_id),
+            ))
         await db.commit()
     return {"landed": landed_total}
 

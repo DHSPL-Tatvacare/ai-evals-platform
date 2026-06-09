@@ -177,3 +177,30 @@ class ActivateResponse(CamelModel):
     status: str
     version: int
     resolved_grains: list[str]
+
+
+class ChainJobOut(CamelModel):
+    """One job in a dataset's ingestion chain (sync → unpack → resolved → analytics)."""
+    id: str
+    job_type: str
+    status: str
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class DatasetScheduleOut(CamelModel):
+    """The active recurring schedule bound to a dataset, if one exists."""
+    id: str
+    name: str
+    cron: str
+    enabled: bool
+    next_check_at: Optional[datetime] = None
+    last_fire_at: Optional[datetime] = None
+
+
+class DatasetJobsResponse(CamelModel):
+    """The dataset's recent chain jobs (newest first) + its active schedule (the 'Job chain' panel)."""
+    record_type: str
+    jobs: list[ChainJobOut]
+    schedule: Optional[DatasetScheduleOut] = None

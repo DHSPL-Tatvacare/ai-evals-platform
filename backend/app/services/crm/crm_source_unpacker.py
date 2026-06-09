@@ -253,6 +253,12 @@ async def run_crm_source_unpack(job_id, params: dict, *, tenant_id: uuid.UUID, u
         # Refresh the resolved surfaces so the matview reflects the freshly unpacked rows.
         from app.services.crm.crm_resolved_populator import refresh_resolved_matviews
         await refresh_resolved_matviews(db, tenant_id=tenant_id, app_id=app_id, connection_id=connection_id)
+
+        # Analytics tail of the chain: rebuild the deterministic lead facts for this app.
+        if app_id:
+            from app.services.crm.crm_chain import build_analytics_populate_job
+
+            db.add(build_analytics_populate_job(tenant_id=tenant_id, user_id=user_id, app_id=app_id))
         await db.commit()
     return {
         "scanned": result.scanned, "upserted": result.upserted,

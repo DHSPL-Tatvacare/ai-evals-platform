@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { Alert } from '@/components/ui/Alert';
-import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import { Button } from '@/components/ui/Button';
+import { Stepper, type StepperStep } from '@/components/ui/Stepper';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import type { CrmDatasetSummary } from '@/services/api/crmSource';
-import {
-  boundTargets,
-  draftToPublishBindings,
-  requiredTargets,
-  useCrmMappingDraftStore,
-} from '@/stores/crmMappingDraftStore';
+import { draftToPublishBindings, useCrmMappingDraftStore } from '@/stores/crmMappingDraftStore';
 
 import { CrmValueMapEditor } from '../crmMapping/CrmValueMapEditor';
 import {
@@ -17,32 +13,33 @@ import {
   useCrmFieldMap,
   useCrmGrains,
 } from '../queries/crmSourceQueries';
-import { DatasetFooter, type DatasetStatus } from './DatasetFooter';
+import type { DatasetStatus } from './DatasetFooter';
 import { FilterSection } from './FilterSection';
 import { MapSection } from './MapSection';
 import { PreviewSection } from './PreviewSection';
 import { ScheduleSection } from './ScheduleSection';
+import { SETUP_STEPS, useStepGating, type SetupStep } from './useStepGating';
 import { useDraftAutosave } from './useDraftAutosave';
 
-type DatasetView = 'map' | 'filter' | 'preview';
+const STEP_LABELS: Record<SetupStep, string> = {
+  map: 'Map',
+  filter: 'Filter',
+  preview: 'Preview',
+  golive: 'Go live',
+};
 
-const VIEW_OPTIONS: { value: DatasetView; label: string }[] = [
-  { value: 'map', label: 'Map fields' },
-  { value: 'filter', label: 'Filter' },
-  { value: 'preview', label: 'Preview' },
-];
-
-/** The selected dataset's lifecycle sections. Hydrates the mapping draft from the grain
- *  schema, discovered fields, and any saved bindings, then renders Map / Filter / Preview,
- *  a recurring schedule, and the run-control footer. */
+/** The selected dataset's gated setup lifecycle: hydrates the mapping draft, then drives a
+ *  hard-gated, revisitable stepper (Map → Filter → Preview → Go live) over one step body. */
 export function DatasetSections({
   connectionId,
   dataset,
+  onStatusChange,
 }: {
   connectionId: string;
   dataset: CrmDatasetSummary;
+  onStatusChange: (status: DatasetStatus | null) => void;
 }) {
-  const [view, setView] = useState<DatasetView>('map');
+  const [step, setStep] = useState<SetupStep>('map');
 
   const grainsQuery = useCrmGrains();
   const objectsQuery = useCrmDiscoveredObjects(connectionId, true);
@@ -85,8 +82,6 @@ export function DatasetSections({
   const publishBindings = useMemo(() => draftToPublishBindings(bindings), [bindings]);
 
   const ready = Boolean(grain && discovered);
-  const missingRequired = requiredTargets(grain).filter((t) => !boundTargets(bindings).has(t));
-  const canActivate = ready && missingRequired.length === 0;
 
   const { saving, dirty } = useDraftAutosave({
     connectionId,
@@ -99,60 +94,103 @@ export function DatasetSections({
   const status: DatasetStatus =
     dataset.status === 'active' ? (dirty ? 'active_edited' : 'active') : 'draft';
 
+  // Surface the derived status to the page header (status pill lives at the top).
+  useEffect(() => {
+    onStatusChange(ready ? status : null);
+  }, [ready, status, onStatusChange]);
+
+  const gating = useStepGating();
+
+  // Clamp the selected step to the highest currently-unlocked step.
+  useEffect(() => {
+    if (!gating.unlocked[step]) setStep('map');
+  }, [gating, step]);
+
+  const steps: StepperStep<SetupStep>[] = SETUP_STEPS.map((s) => ({
+    value: s,
+    label: STEP_LABELS[s],
+    state: s === step ? 'current' : gating.unlocked[s] ? 'done' : 'locked',
+  }));
+
   const objectsError = objectsQuery.isError;
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <SegmentedControl options={VIEW_OPTIONS} value={view} onChange={setView} aria-label="Dataset section" />
+    <div className="flex min-h-0 flex-1 flex-col gap-5">
+      <Stepper steps={steps} onSelect={setStep} aria-label="Dataset setup" />
 
-        {objectsError ? (
-          <Alert variant="error" title="Couldn&rsquo;t reach the CRM">
-            {summarizeApiErrorBody(decodeApiError(objectsQuery.error), 'Check the connection credentials and try again.')}
-          </Alert>
-        ) : !ready ? (
-          <p className="text-[13px] text-[var(--text-secondary)]">Loading dataset…</p>
-        ) : (
-          <>
-            {view === 'map' && grain && discovered ? (
-              <MapSection
-                connectionId={connectionId}
-                recordType={dataset.recordType}
-                grain={grain}
-                fields={discovered.fields}
-                mappingLoading={mappingQuery.isLoading}
-              />
-            ) : null}
-            {view === 'filter' ? (
-              <FilterSection
-                connectionId={connectionId}
-                recordType={dataset.recordType}
-                mappedFields={mappedFields}
-              />
-            ) : null}
-            {view === 'preview' ? (
-              <PreviewSection connectionId={connectionId} recordType={dataset.recordType} />
-            ) : null}
-          </>
-        )}
-      </div>
-
-      {ready && discovered ? (
+      {objectsError ? (
+        <Alert variant="error" title="Couldn&rsquo;t reach the CRM">
+          {summarizeApiErrorBody(decodeApiError(objectsQuery.error), 'Check the connection credentials and try again.')}
+        </Alert>
+      ) : !ready || !grain || !discovered ? (
+        <p className="text-[13px] text-[var(--text-secondary)]">Loading dataset…</p>
+      ) : (
         <>
-          <ScheduleSection connectionId={connectionId} sourceObject={discovered.sourceObject} />
-          <DatasetFooter
-            connectionId={connectionId}
-            recordType={dataset.recordType}
-            sourceObject={discovered.sourceObject}
-            status={status}
-            version={dataset.version}
-            canActivate={canActivate}
+          {step === 'map' ? (
+            <MapSection
+              connectionId={connectionId}
+              recordType={dataset.recordType}
+              grain={grain}
+              fields={discovered.fields}
+              mappingLoading={mappingQuery.isLoading}
+            />
+          ) : null}
+          {step === 'filter' ? (
+            <FilterSection
+              connectionId={connectionId}
+              recordType={dataset.recordType}
+              mappedFields={mappedFields}
+            />
+          ) : null}
+          {step === 'preview' ? (
+            <PreviewSection connectionId={connectionId} recordType={dataset.recordType} />
+          ) : null}
+          {step === 'golive' ? (
+            <ScheduleSection connectionId={connectionId} sourceObject={discovered.sourceObject} />
+          ) : null}
+
+          <StepFooter
+            step={step}
+            gating={gating}
             saving={saving}
-            lastSyncAt={dataset.lastSyncAt}
+            onContinue={(next) => setStep(next)}
           />
           <CrmValueMapEditor connectionId={connectionId} recordType={dataset.recordType} />
         </>
-      ) : null}
+      )}
+    </div>
+  );
+}
+
+const NEXT_STEP: Record<SetupStep, { next: SetupStep; label: string } | null> = {
+  map: { next: 'filter', label: 'Continue to Filter →' },
+  filter: { next: 'preview', label: 'Continue to Preview →' },
+  preview: { next: 'golive', label: 'Continue to Go live →' },
+  golive: null,
+};
+
+/** One consistent primary action per step (bottom-right). Advances to the next step when unlocked. */
+function StepFooter({
+  step,
+  gating,
+  saving,
+  onContinue,
+}: {
+  step: SetupStep;
+  gating: ReturnType<typeof useStepGating>;
+  saving: boolean;
+  onContinue: (next: SetupStep) => void;
+}) {
+  const advance = NEXT_STEP[step];
+  if (!advance) return null;
+  const enabled = gating.unlocked[advance.next];
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] pt-4">
+      <span className="text-[12px] text-[var(--text-muted)]">{saving ? 'Saving draft…' : null}</span>
+      <Button disabled={!enabled} onClick={() => onContinue(advance.next)}>
+        {advance.label}
+      </Button>
     </div>
   );
 }

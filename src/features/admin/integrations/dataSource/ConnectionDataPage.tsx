@@ -14,6 +14,7 @@ import { useConnection } from '../queries';
 import { useConnectionDatasets } from '../queries/crmSourceQueries';
 import type { CrmDatasetSummary } from '@/services/api/crmSource';
 import { DatasetSections } from './DatasetSections';
+import type { DatasetStatus } from './DatasetFooter';
 
 function statusVariant(status: string): 'success' | 'neutral' {
   return status === 'active' ? 'success' : 'neutral';
@@ -25,6 +26,28 @@ function statusLabel(status: string): string {
 
 function datasetLabel(recordType: string): string {
   return recordType.charAt(0).toUpperCase() + recordType.slice(1);
+}
+
+function StatusPill({ status, version }: { status: DatasetStatus; version: number }) {
+  if (status === 'active') {
+    return (
+      <Badge variant="success" size="sm">
+        Active · v{version}
+      </Badge>
+    );
+  }
+  if (status === 'active_edited') {
+    return (
+      <Badge variant="warning" size="sm">
+        Active · edited
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="neutral" size="sm">
+      Draft
+    </Badge>
+  );
 }
 
 interface DatasetRailProps {
@@ -75,6 +98,7 @@ export function ConnectionDataPage() {
   const connectionQuery = useConnection(connectionId);
   const datasetsQuery = useConnectionDatasets(connectionId);
   const [picked, setPicked] = useState<string | null>(null);
+  const [status, setStatus] = useState<DatasetStatus | null>(null);
 
   const datasets = datasetsQuery.data?.datasets ?? [];
   // Effective selection: explicit user pick, else default to the first dataset.
@@ -101,9 +125,14 @@ export function ConnectionDataPage() {
         connection ? (
           <span className="flex items-center gap-2">
             <ConnectionProviderLogo provider={connection.provider} size={16} />
-            <span className="text-[12px] text-[var(--text-secondary)]">Manage mapping, filter, and schedule</span>
+            <span className="text-[12px] text-[var(--text-secondary)]">
+              {selectedDataset ? datasetLabel(selectedDataset.recordType) : 'Manage mapping, filter, and schedule'}
+            </span>
           </span>
         ) : undefined
+      }
+      actions={
+        status && selectedDataset ? <StatusPill status={status} version={selectedDataset.version} /> : undefined
       }
       bleed
     >
@@ -120,6 +149,7 @@ export function ConnectionDataPage() {
               key={selectedDataset.recordType}
               connectionId={connectionId}
               dataset={selectedDataset}
+              onStatusChange={setStatus}
             />
           ) : (
             <div className="text-[13px] text-[var(--text-secondary)]">

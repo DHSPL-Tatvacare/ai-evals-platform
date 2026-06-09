@@ -21,10 +21,14 @@ from app.database import get_db
 from app.models.crm import CrmFieldMap, SourceDatasetDefinition
 from app.models.job import BackgroundJob
 from app.models.provider_connection import ProviderConnection
+from app.models.scheduled_job import ScheduledJobDefinition
 from app.models.source_records import LogCrmSourceSync
 from app.schemas.crm import (
     ActivateRequest,
     ActivateResponse,
+    ChainJobOut,
+    DatasetJobsResponse,
+    DatasetScheduleOut,
     DatasetSummary,
     DatasetsResponse,
     DiscoverResponse,
@@ -678,3 +682,82 @@ async def get_dataset_preview(
         db, tenant_id=auth.tenant_id, app_id=row.app_id, grain=record_type,
     )
     return ResolvedPreviewResponse(record_type=record_type, columns=columns, rows=rows)
+
+
+@router.get(
+    "/connections/{connection_id}/datasets/{record_type}/jobs",
+    response_model=DatasetJobsResponse,
+    summary="The ingestion chain jobs (sync→unpack→resolved→analytics) + active schedule for a dataset",
+)
+async def get_dataset_jobs(
+    connection_id: uuid.UUID,
+    record_type: str,
+    auth: AuthContext = require_permission("orchestration:manage"),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.crm.crm_chain import CHAIN_JOB_TYPES
+
+    _require_record_type(record_type)
+    row = await _load_connection(db, auth, connection_id)
+
+    candidates = (await db.execute(
+        select(BackgroundJob).where(
+            BackgroundJob.tenant_id == auth.tenant_id,
+            BackgroundJob.app_id == row.app_id,
+            BackgroundJob.job_type.in_(CHAIN_JOB_TYPES),
+        ).order_by(BackgroundJob.created_at.desc()).limit(100)
+    )).scalars().all()
+
+    # Connection-keyed steps (sync/unpack/resolved) carry connection_id in params; the analytics
+    # tail is app-scoped (no connection_id) and belongs to every dataset on the app. Keep both.
+    conn_str = str(connection_id)
+    jobs = [
+        j for j in candidates
+        if (j.params or {}).get("connection_id") in (None, conn_str)
+    ][:50]
+
+    # The dataset's recurring sync schedule. Prefer the definition's explicit ``schedule_id`` link;
+    # fall back to the schedule_key convention (``{connection_id}:{record_type}`` on the sync job_type)
+    # so a schedule created before the link is backfilled still surfaces.
+    schedule: DatasetScheduleOut | None = None
+    defn = await db.scalar(
+        select(SourceDatasetDefinition).where(
+            SourceDatasetDefinition.tenant_id == auth.tenant_id,
+            SourceDatasetDefinition.app_id == row.app_id,
+            SourceDatasetDefinition.connection_id == connection_id,
+            SourceDatasetDefinition.record_type == record_type,
+        )
+    )
+    sched = None
+    if defn is not None and defn.schedule_id is not None:
+        sched = await db.scalar(
+            select(ScheduledJobDefinition).where(
+                ScheduledJobDefinition.id == defn.schedule_id,
+                ScheduledJobDefinition.tenant_id == auth.tenant_id,
+            )
+        )
+    if sched is None:
+        sched = await db.scalar(
+            select(ScheduledJobDefinition).where(
+                ScheduledJobDefinition.tenant_id == auth.tenant_id,
+                ScheduledJobDefinition.app_id == row.app_id,
+                ScheduledJobDefinition.job_type == "sync-crm-source",
+                ScheduledJobDefinition.schedule_key == f"{connection_id}:{record_type}",
+            )
+        )
+    if sched is not None:
+        schedule = DatasetScheduleOut(
+            id=str(sched.id), name=sched.name, cron=sched.cron, enabled=sched.enabled,
+            next_check_at=sched.next_check_at, last_fire_at=sched.last_fire_at,
+        )
+
+    return DatasetJobsResponse(
+        record_type=record_type,
+        jobs=[
+            ChainJobOut(
+                id=str(j.id), job_type=j.job_type, status=j.status,
+                created_at=j.created_at, started_at=j.started_at, completed_at=j.completed_at,
+            ) for j in jobs
+        ],
+        schedule=schedule,
+    )
