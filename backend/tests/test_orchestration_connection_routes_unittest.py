@@ -329,19 +329,39 @@ async def test_webhook_connection_rejects_half_auth_pair(client):
 
 
 @pytest.mark.asyncio
-async def test_archive_sets_active_false(client):
+async def test_delete_route_is_gone(client):
     create = await client.post("/api/orchestration/connections", json=_bolna_create_body())
     cid = create.json()["id"]
     d = await client.delete(f"/api/orchestration/connections/{cid}")
-    assert d.status_code == 204
-    # listing without includeInactive: archived row is hidden.
+    assert d.status_code == 405
+
+
+@pytest.mark.asyncio
+async def test_patch_active_round_trips_both_directions(client):
+    create = await client.post("/api/orchestration/connections", json=_bolna_create_body())
+    cid = create.json()["id"]
+    assert create.json()["active"] is True
+
+    off = await client.patch(
+        f"/api/orchestration/connections/{cid}", json={"active": False},
+    )
+    assert off.status_code == 200, off.text
+    assert off.json()["active"] is False
+    # Deactivated row is hidden from the default listing, visible with includeInactive.
     listing = await client.get("/api/orchestration/connections?appId=inside-sales")
     assert all(r["id"] != cid for r in listing.json())
-    # listing with includeInactive: archived row is visible.
     listing_all = await client.get(
         "/api/orchestration/connections?appId=inside-sales&includeInactive=true",
     )
     assert any(r["id"] == cid and r["active"] is False for r in listing_all.json())
+
+    on = await client.patch(
+        f"/api/orchestration/connections/{cid}", json={"active": True},
+    )
+    assert on.status_code == 200, on.text
+    assert on.json()["active"] is True
+    listing_back = await client.get("/api/orchestration/connections?appId=inside-sales")
+    assert any(r["id"] == cid for r in listing_back.json())
 
 
 @pytest.mark.asyncio
@@ -429,3 +449,110 @@ async def test_validation_error_on_missing_required(client):
     body["config"].pop("api_key")
     r = await client.post("/api/orchestration/connections", json=body)
     assert r.status_code == 400
+
+
+def _lsq_create_body(name: str | None = None) -> dict[str, Any]:
+    return {
+        "appId": "inside-sales",
+        "provider": "lsq",
+        "name": name or f"lsq-{uuid.uuid4().hex[:8]}",
+        "config": {
+            "access_key": "ak-secret",
+            "secret_key": "sk-secret",
+            "region_host": "https://api-in21.leadsquared.com",
+        },
+        "active": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_comm_connection_round_trips_scope_fields(client):
+    body = _bolna_create_body()
+    body["tenantWide"] = True
+    body["appScopes"] = ["kaira-bot"]
+    r = await client.post("/api/orchestration/connections", json=body)
+    assert r.status_code == 201, r.text
+    payload = r.json()
+    assert payload["tenantWide"] is True
+    assert payload["appScopes"] == ["kaira-bot"]
+
+
+@pytest.mark.asyncio
+async def test_crm_connection_allows_app_scopes_on_create(client):
+    # CRM is no longer single-app: every provider gets the same multi-app reach.
+    body = _lsq_create_body()
+    body["appScopes"] = ["kaira-bot"]
+    r = await client.post("/api/orchestration/connections", json=body)
+    assert r.status_code == 201, r.text
+    assert r.json()["appScopes"] == ["kaira-bot"]
+
+
+@pytest.mark.asyncio
+async def test_make_default_sets_flag_and_overrides_prior(client):
+    a_body = _bolna_create_body()
+    a_body["name"] = "Voice A"
+    a_body["isDefault"] = True
+    a = await client.post("/api/orchestration/connections", json=a_body)
+    assert a.status_code == 201, a.text
+    assert a.json()["isDefault"] is True
+
+    # A second default for the same provider+app overrides the first.
+    b_body = _bolna_create_body()
+    b_body["name"] = "Voice B"
+    b_body["isDefault"] = True
+    b = await client.post("/api/orchestration/connections", json=b_body)
+    assert b.status_code == 201, b.text
+    assert b.json()["isDefault"] is True
+
+    a_after = await client.get(f"/api/orchestration/connections/{a.json()['id']}")
+    assert a_after.json()["isDefault"] is False
+
+
+@pytest.mark.asyncio
+async def test_unset_default_via_patch(client):
+    body = _bolna_create_body()
+    body["isDefault"] = True
+    created = await client.post("/api/orchestration/connections", json=body)
+    cid = created.json()["id"]
+    assert created.json()["isDefault"] is True
+    cleared = await client.patch(
+        f"/api/orchestration/connections/{cid}", json={"isDefault": False},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["isDefault"] is False
+
+
+@pytest.mark.asyncio
+async def test_app_scopes_unregistered_app_rejected(client):
+    body = _bolna_create_body()
+    body["appScopes"] = ["not-a-real-app"]
+    r = await client.post("/api/orchestration/connections", json=body)
+    assert r.status_code in (400, 404), r.text
+
+
+@pytest.mark.asyncio
+async def test_admin_list_by_app_returns_scoped_and_tenant_wide(client):
+    # Home-app row on inside-sales.
+    home = await client.post("/api/orchestration/connections", json=_bolna_create_body())
+    assert home.status_code == 201, home.text
+    home_id = home.json()["id"]
+
+    # Tenant-wide row whose home app is inside-sales.
+    tw_body = _bolna_create_body()
+    tw_body["tenantWide"] = True
+    tw = await client.post("/api/orchestration/connections", json=tw_body)
+    tw_id = tw.json()["id"]
+
+    # Scoped row whose home is inside-sales but scoped to kaira-bot.
+    sc_body = _bolna_create_body()
+    sc_body["appScopes"] = ["kaira-bot"]
+    sc = await client.post("/api/orchestration/connections", json=sc_body)
+    sc_id = sc.json()["id"]
+
+    # Listing for kaira-bot: tenant-wide + scoped appear; the inside-sales-only home row does not.
+    r = await client.get("/api/orchestration/connections?appId=kaira-bot")
+    assert r.status_code == 200, r.text
+    ids = {row["id"] for row in r.json()}
+    assert tw_id in ids
+    assert sc_id in ids
+    assert home_id not in ids

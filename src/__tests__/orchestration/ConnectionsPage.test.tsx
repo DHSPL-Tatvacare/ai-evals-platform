@@ -3,7 +3,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/api/orchestrationConnections', () => ({
-  archiveConnection: vi.fn(),
   listConnections: vi.fn(),
   rotateWebhookToken: vi.fn(),
   testConnection: vi.fn(),
@@ -71,7 +70,6 @@ describe('ConnectionsPage', () => {
       expect(mockedListConnections).toHaveBeenCalledWith({
         appId: 'inside-sales',
         includeInactive: true,
-        visibility: 'all',
       }),
     );
 

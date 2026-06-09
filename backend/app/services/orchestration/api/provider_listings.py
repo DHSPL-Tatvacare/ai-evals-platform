@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.provider_connection import ProviderConnection
 from app.services.orchestration.adapters import VariableSurface
 from app.services.orchestration.connections import crypto
+from app.services.orchestration.connections.scope import connection_app_scope_clause
 
 
 # Approved provider templates/agents are near-static — refresh is operator-driven,
@@ -90,7 +91,7 @@ async def _load_connection(
         select(ProviderConnection).where(
             ProviderConnection.id == connection_id,
             ProviderConnection.tenant_id == tenant_id,
-            ProviderConnection.app_id == app_id,
+            connection_app_scope_clause(app_id),
             ProviderConnection.active.is_(True),
             ProviderConnection.provider == expected_provider,
         )

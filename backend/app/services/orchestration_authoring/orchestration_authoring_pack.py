@@ -1330,13 +1330,16 @@ async def _list_provider_connections_handler(ctx: Any, args: str) -> str:
 
         from app.database import async_session
         from app.models.provider_connection import ProviderConnection
+        from app.services.orchestration.connections.scope import (
+            connection_app_scope_clause,
+        )
 
         async with async_session() as db:
             rows = (
                 await db.execute(
                     select(ProviderConnection).where(
                         ProviderConnection.tenant_id == auth.tenant_id,
-                        ProviderConnection.app_id == builder_context.app_id,
+                        connection_app_scope_clause(builder_context.app_id),
                         ProviderConnection.provider == provider,
                         ProviderConnection.active.is_(True),
                     )
@@ -1714,13 +1717,16 @@ async def _resolve_connection_handler(ctx: Any, args: str) -> str:
         from app.database import async_session
         from app.models.channel_default_connection import ChannelDefaultConnection
         from app.models.provider_connection import ProviderConnection
+        from app.services.orchestration.connections.scope import (
+            connection_app_scope_clause,
+        )
 
         async with async_session() as db:
             rows = (
                 await db.execute(
                     select(ProviderConnection).where(
                         ProviderConnection.tenant_id == auth.tenant_id,
-                        ProviderConnection.app_id == builder_context.app_id,
+                        connection_app_scope_clause(builder_context.app_id),
                         ProviderConnection.provider.in_(providers),
                         ProviderConnection.active.is_(True),
                     )

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
+import { Combobox } from '@/components/ui/Combobox';
 import { ConnectionProviderLogo } from '@/components/ui/ConnectionProviderLogo';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { VisibilityToggle } from '@/components/ui/VisibilityToggle';
+import { Switch } from '@/components/ui/Switch';
 import { ApiError } from '@/services/api/client';
 import {
   createConnection,
@@ -16,7 +17,6 @@ import {
 } from '@/services/api/orchestrationConnections';
 import { notificationService } from '@/services/notifications';
 import { APPS, APP_IDS, type AppId } from '@/types/app.types';
-import type { AssetVisibility } from '@/types/settings.types';
 import { useAuthStore } from '@/stores/authStore';
 
 import {
@@ -84,12 +84,6 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
       })),
     [],
   );
-  // `appId` prop wins (deep-linked `?app=`); otherwise let the admin pick.
-  const [selectedAppId, setSelectedAppId] = useState<string>(
-    existing?.appId ?? appId ?? appOptions[0]?.value ?? '',
-  );
-  const effectiveAppId = existing?.appId ?? appId ?? selectedAppId;
-  const showAppPicker = !isEdit && !appId;
   const [provider, setProvider] = useState<string>(
     existing?.provider ?? 'bolna',
   );
@@ -98,9 +92,21 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
   const [config, setConfig] = useState<Record<string, unknown>>(
     existing ? { ...existing.configRedacted } : {},
   );
-  const [visibility, setVisibility] = useState<AssetVisibility>(
-    existing?.visibility ?? 'private',
+  // The apps this connection serves. Home app stays first; the rest become
+  // app_scopes. Comm picks many; CRM is single-app.
+  const [servedApps, setServedApps] = useState<string[]>(
+    existing
+      ? [existing.appId, ...existing.appScopes]
+      : appId
+        ? [appId]
+        : [],
   );
+  // Home app is immutable in edit mode (PATCH can't move it); in create it's
+  // the deep-linked `?app=` or the first app picked.
+  const homeAppId = existing?.appId ?? appId ?? servedApps[0] ?? '';
+  const effectiveAppId = homeAppId;
+  // Default for its provider in every app it serves. Overrides any prior default.
+  const [isDefault, setIsDefault] = useState<boolean>(existing?.isDefault ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,6 +134,14 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
     if (!isEdit) setConfig({});
   }, [provider, isEdit]);
 
+  // Home app stays selected in edit mode — PATCH can't move it.
+  function handleAppsChange(next: string[]) {
+    if (existing && !next.includes(existing.appId)) {
+      setServedApps([existing.appId, ...next]);
+    } else {
+      setServedApps(next);
+    }
+  }
   const jsonSchema = useMemo<JsonSchema | null>(
     () => (schema ? (schema.jsonSchema as unknown as JsonSchema) : null),
     [schema],
@@ -177,20 +191,26 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
     setError(null);
     try {
       const payloadConfig = stripUndefined(config);
+      // Apps beyond the home app become app_scopes — same for every provider.
+      const effectiveAppScopes = servedApps.filter((id) => id !== homeAppId);
       let saved: Connection;
       if (existing) {
         saved = await updateConnection(existing.id, {
           name,
           config: payloadConfig,
-          visibility,
+          tenantWide: false,
+          appScopes: effectiveAppScopes,
+          isDefault,
         });
       } else {
         saved = await createConnection({
-          appId: effectiveAppId,
+          appId: homeAppId,
           provider,
           name,
           config: payloadConfig,
-          visibility,
+          tenantWide: false,
+          appScopes: effectiveAppScopes,
+          isDefault,
         });
       }
       notificationService.success(
@@ -212,19 +232,16 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      {showAppPicker ? (
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-[var(--text-primary)]">
-            App
-          </label>
-          <Select
-            value={selectedAppId}
-            onChange={(next) => setSelectedAppId(next)}
-            options={appOptions}
-            placeholder="Select an app"
-          />
-        </div>
-      ) : null}
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-[var(--text-primary)]">
+          Name
+        </label>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Bolna — Production"
+        />
+      </div>
       <div className="flex flex-col gap-1">
         <label className="text-sm font-medium text-[var(--text-primary)]">
           Provider
@@ -239,19 +256,31 @@ export function ConnectionForm({ appId, existing, onClose, onSaved }: Props) {
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-sm font-medium text-[var(--text-primary)]">
-          Name
+          Apps
         </label>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. TatvaCare Bolna — Production"
+        <Combobox
+          multi
+          value={servedApps}
+          onChange={handleAppsChange}
+          options={appOptions}
+          placeholder="Select apps"
         />
       </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium text-[var(--text-primary)]">
-          Visibility
-        </label>
-        <VisibilityToggle value={visibility} onChange={setVisibility} />
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium text-[var(--text-primary)]">
+            Make default
+          </span>
+          <span className="text-xs text-[var(--text-secondary)]">
+            Use this connection by default in the selected apps. Replaces any
+            existing default for this provider there.
+          </span>
+        </div>
+        <Switch
+          checked={isDefault}
+          onCheckedChange={setIsDefault}
+          aria-label="Make default"
+        />
       </div>
       {jsonSchema ? (
         <>

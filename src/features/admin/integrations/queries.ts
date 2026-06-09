@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
-  archiveConnection,
   createConnection,
   getConnection,
   listConnections,
@@ -51,16 +50,6 @@ export function useUpdateConnection() {
   const queryClient = useQueryClient();
   return useMutation<Connection, Error, { id: string; body: UpdateConnectionBody }>({
     mutationFn: ({ id, body }) => updateConnection(id, body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: CONNECTIONS_KEY });
-    },
-  });
-}
-
-export function useDeleteConnection() {
-  const queryClient = useQueryClient();
-  return useMutation<void, Error, string>({
-    mutationFn: archiveConnection,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: CONNECTIONS_KEY });
     },

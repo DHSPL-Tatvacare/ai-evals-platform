@@ -25,14 +25,13 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from app.models.base import Base
-from app.models.mixins.shareable import ShareableMixin
 
 
-class ProviderConnection(ShareableMixin, Base):
+class ProviderConnection(Base):
     asset_family = "connection"
     __tablename__ = "provider_connections"
     __table_args__ = (
@@ -54,14 +53,15 @@ class ProviderConnection(ShareableMixin, Base):
             unique=False,
         ),
         Index(
-            "idx_provider_connections_tenant_app_visibility_active_orm",
-            "tenant_id", "app_id", "visibility", "active",
-            unique=False,
-        ),
-        Index(
             "idx_provider_connections_tenant_app_created_by_active_orm",
             "tenant_id", "app_id", "created_by", "active",
             unique=False,
+        ),
+        Index(
+            "idx_provider_connections_app_scopes",
+            "app_scopes",
+            unique=False,
+            postgresql_using="gin",
         ),
         {"schema": "orchestration"},
     )
@@ -75,6 +75,12 @@ class ProviderConnection(ShareableMixin, Base):
         nullable=False,
     )
     app_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Comm connections may serve more apps than their home app_id: tenant_wide
+    # reaches every app; app_scopes lists extra apps beyond the home one.
+    tenant_wide: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    app_scopes: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list,
+    )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     config_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

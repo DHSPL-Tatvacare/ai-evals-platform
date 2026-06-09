@@ -1,6 +1,6 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Archive, Copy, Database, Lock, Pencil, PlugZap, RefreshCw, Share2, X } from 'lucide-react';
+import { Copy, Database, Pencil, PlugZap, Power, PowerOff, RefreshCw, X } from 'lucide-react';
 
 import { routes } from '@/config/routes';
 
@@ -9,11 +9,9 @@ import { Button } from '@/components/ui/Button';
 import { ConnectionProviderLogo } from '@/components/ui/ConnectionProviderLogo';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable';
-import { FilterPills } from '@/components/ui/FilterPills';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import { RowActionsMenu, type RowAction } from '@/components/ui/RowActionsMenu';
-import { VisibilityBadge } from '@/components/ui/VisibilityBadge';
 import { usePageMetadata } from '@/config/pageMetadata';
 import { ApiError } from '@/services/api/client';
 import { type Connection } from '@/services/api/orchestrationConnections';
@@ -27,7 +25,6 @@ import { ConnectionForm } from './ConnectionForm';
 import { getConnectionProviderLabel } from './providerOptions';
 import {
   useConnections,
-  useDeleteConnection,
   useRotateToken,
   useTestConnection,
   useUpdateConnection,
@@ -37,13 +34,12 @@ import {
   canManageOrchestration,
 } from '@/features/orchestration/utils/access';
 
-type VisibilityFilter = 'all' | 'private' | 'shared';
+// One row per connection; the Category column distinguishes comm vs data.
+const COMM_KINDS = new Set(['voice', 'messaging']);
 
-const VISIBILITY_FILTERS: Array<{ id: VisibilityFilter; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'private', label: 'Private' },
-  { id: 'shared', label: 'Shared' },
-];
+function isCommConnection(c: Connection): boolean {
+  return COMM_KINDS.has(CONNECTION_PROVIDER_KINDS[c.provider] ?? 'messaging');
+}
 
 function fmtDate(s: string | null): string {
   if (!s) return '—';
@@ -69,7 +65,7 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function ConnectionsPage() {
-  // Relocated to the admin sidebar (Phase 12). The app slug is no longer
+  // Relocated to the admin sidebar. The app slug is no longer
   // taken from the URL path — tenant scoping comes from the bearer token,
   // and an optional `?app=` query param filters the list (and supplies the
   // app the create form binds new connections to).
@@ -81,20 +77,18 @@ export function ConnectionsPage() {
   const canManage = canManageOrchestration(user);
   const createTitleId = useId();
   const editTitleId = useId();
-  const [visibility, setVisibility] = useState<VisibilityFilter>('all');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Connection | null>(null);
-  const [archiveTarget, setArchiveTarget] = useState<Connection | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<Connection | null>(null);
   // Single-open per page — opening a row's menu closes any other row's.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const connectionsQuery = useConnections({ appId, includeInactive: true, visibility });
+  const connectionsQuery = useConnections({ appId, includeInactive: true });
   const testMutation = useTestConnection();
   const rotateMutation = useRotateToken();
   const updateMutation = useUpdateConnection();
-  const deleteMutation = useDeleteConnection();
 
-  const rows = connectionsQuery.data ?? [];
+  const rows = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data]);
   const loading = connectionsQuery.isLoading;
 
   useEffect(() => {
@@ -136,42 +130,25 @@ export function ConnectionsPage() {
     });
   }
 
-  function handleVisibilityChange(
-    connection: Connection,
-    nextVisibility: 'private' | 'shared',
-  ) {
-    if (connection.visibility === nextVisibility) return;
+  function setActive(connection: Connection, active: boolean) {
     updateMutation.mutate(
-      { id: connection.id, body: { visibility: nextVisibility } },
+      { id: connection.id, body: { active } },
       {
         onSuccess: () => {
           notificationService.success(
-            nextVisibility === 'shared'
-              ? `"${connection.name}" is now shared`
-              : `"${connection.name}" is now private`,
+            active
+              ? `"${connection.name}" is now active`
+              : `"${connection.name}" is now inactive`,
           );
+          setDeactivateTarget(null);
         },
         onError: (err) => {
           notificationService.error(
-            errorMessage(err, 'Failed to update connection visibility'),
+            errorMessage(err, 'Failed to update connection'),
           );
         },
       },
     );
-  }
-
-  function handleArchive() {
-    if (!archiveTarget) return;
-    const target = archiveTarget;
-    deleteMutation.mutate(target.id, {
-      onSuccess: () => {
-        notificationService.success(`Archived "${target.name}"`);
-        setArchiveTarget(null);
-      },
-      onError: (err) => {
-        notificationService.error(errorMessage(err, 'Failed to archive'));
-      },
-    });
   }
 
   const columns: ColumnDef<Connection>[] = [
@@ -179,12 +156,7 @@ export function ConnectionsPage() {
       key: 'name',
       header: 'Name',
       render: (c) => (
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[var(--text-primary)]">{c.name}</span>
-          {!c.active ? (
-            <span className="text-[11px] text-[var(--text-secondary)]">Archived</span>
-          ) : null}
-        </div>
+        <span className="text-[var(--text-primary)]">{c.name}</span>
       ),
     },
     {
@@ -200,10 +172,18 @@ export function ConnectionsPage() {
       ),
     },
     {
-      key: 'visibility',
-      header: 'Visibility',
-      width: 'w-[120px]',
-      render: (c) => <VisibilityBadge visibility={c.visibility} compact />,
+      key: 'category',
+      header: 'Category',
+      render: (c) =>
+        isCommConnection(c) ? (
+          <Badge variant="info" size="sm">
+            Communication
+          </Badge>
+        ) : (
+          <Badge variant="neutral" size="sm">
+            Data &amp; CRM
+          </Badge>
+        ),
     },
     {
       key: 'active',
@@ -248,7 +228,7 @@ export function ConnectionsPage() {
             <span className="truncate">{c.webhookUrl}</span>
           </button>
         ) : (
-          <span className="text-[11px] text-[var(--text-muted)]">—</span>
+          <span className="text-[length:var(--text-table-header)] text-[var(--text-muted)]">—</span>
         ),
     },
     {
@@ -259,10 +239,9 @@ export function ConnectionsPage() {
       cellClassName: 'text-right',
       render: (c) => {
         const canEdit = canEditOrchestrationAsset(user, c.createdBy);
-        const isShared = c.visibility === 'shared';
         const testing = testMutation.isPending && testMutation.variables === c.id;
         const rotating = rotateMutation.isPending && rotateMutation.variables === c.id;
-        const updatingVisibility =
+        const updating =
           updateMutation.isPending && updateMutation.variables?.id === c.id;
         const actions: RowAction[] = [
           {
@@ -306,27 +285,17 @@ export function ConnectionsPage() {
             },
           },
           {
-            // Visibility toggle — same shape as the workflow list so
-            // operators learn one action across orchestration assets.
-            id: 'visibility',
-            icon: isShared ? Lock : Share2,
-            label: isShared ? 'Make private' : 'Share with team',
-            disabled: updatingVisibility,
-            hidden: !canEdit,
+            // Reversible lifecycle: deactivate halts live dispatch/webhooks
+            // (confirm), activate is immediate. Both ride the PATCH active.
+            id: 'toggleActive',
+            icon: c.active ? PowerOff : Power,
+            label: c.active ? 'Deactivate' : 'Activate',
+            danger: c.active,
+            disabled: !canEdit || updating,
             onClick: () => {
-              handleVisibilityChange(c, isShared ? 'private' : 'shared');
+              if (c.active) setDeactivateTarget(c);
+              else setActive(c, true);
             },
-          },
-          {
-            id: 'archive',
-            icon: Archive,
-            label: 'Archive',
-            danger: true,
-            disabled: !canEdit,
-            // Archived connections are read-only — hide the action so
-            // we don't surface a no-op or a confusing repeated archive.
-            hidden: !c.active,
-            onClick: () => setArchiveTarget(c),
           },
         ];
         return (
@@ -347,13 +316,6 @@ export function ConnectionsPage() {
       <PageSurface
         icon={icon}
         title={title}
-        filters={(
-          <FilterPills
-            options={VISIBILITY_FILTERS}
-            active={visibility}
-            onChange={(id) => setVisibility(id as VisibilityFilter)}
-          />
-        )}
         actions={
           canManage ? (
             <Button onClick={() => setCreating(true)}>New Connection</Button>
@@ -367,7 +329,7 @@ export function ConnectionsPage() {
             keyExtractor={(c) => c.id}
             loading={loading}
             emptyTitle="No connections yet"
-            emptyDescription="Create a provider connection to wire campaigns to Bolna, WATI, LSQ, or SMS providers."
+            emptyDescription="Connect a provider — Bolna or WATI for campaigns, LeadSquared or another CRM to sync leads."
           />
         </div>
       </PageSurface>
@@ -380,7 +342,7 @@ export function ConnectionsPage() {
         <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
           <h2
             id={createTitleId}
-            className="text-[16px] font-semibold text-[var(--text-primary)]"
+            className="text-sm font-semibold text-[var(--text-primary)]"
           >
             New Connection
           </h2>
@@ -418,7 +380,7 @@ export function ConnectionsPage() {
             ) : null}
             <h2
               id={editTitleId}
-              className="truncate text-[16px] font-semibold text-[var(--text-primary)]"
+              className="truncate text-sm font-semibold text-[var(--text-primary)]"
             >
               {editing ? `Edit ${editing.name}` : ''}
             </h2>
@@ -447,16 +409,16 @@ export function ConnectionsPage() {
       </RightSlideOverShell>
 
       <ConfirmDialog
-        isOpen={Boolean(archiveTarget)}
-        onClose={() => setArchiveTarget(null)}
-        onConfirm={handleArchive}
-        title="Archive connection"
+        isOpen={Boolean(deactivateTarget)}
+        onClose={() => setDeactivateTarget(null)}
+        onConfirm={() => deactivateTarget && setActive(deactivateTarget, false)}
+        title="Deactivate connection"
         description={
-          archiveTarget
-            ? `Archive "${archiveTarget.name}"? Webhooks for this connection will stop matching incoming requests immediately. Workflows referencing it will fail until rebound.`
+          deactivateTarget
+            ? `Deactivate "${deactivateTarget.name}"? Live dispatch and incoming webhooks for this connection stop immediately. You can reactivate it any time.`
             : ''
         }
-        confirmLabel="Archive"
+        confirmLabel="Deactivate"
         variant="danger"
       />
     </>

@@ -14,7 +14,6 @@ from typing import Any, Optional
 
 from pydantic import Field
 
-from app.models.mixins.shareable import Visibility
 from app.schemas.base import CamelModel, CamelORMModel
 
 
@@ -24,13 +23,20 @@ class ConnectionCreateRequest(CamelModel):
     name: str
     config: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
-    visibility: Visibility = Visibility.PRIVATE
+    # Apps this connection serves beyond its home app_id. Same for every
+    # provider; tenant_wide retained for back-compat but no longer UI-set.
+    tenant_wide: bool = False
+    app_scopes: list[str] = Field(default_factory=list)
+    # Make this the default connection for its provider in every app it serves.
+    is_default: bool = False
 
 
 class ConnectionUpdateRequest(CamelModel):
     name: Optional[str] = None
     active: Optional[bool] = None
-    visibility: Optional[Visibility] = None
+    tenant_wide: Optional[bool] = None
+    app_scopes: Optional[list[str]] = None
+    is_default: Optional[bool] = None
     # Partial plaintext config. Omitted secret keys are preserved, blank
     # secret strings are rejected at the service layer (never overwrite a
     # stored credential with empty).
@@ -52,6 +58,10 @@ class ConnectionResponse(CamelORMModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
     app_id: str
+    tenant_wide: bool
+    app_scopes: list[str]
+    # True when this connection is the default for its provider in >= 1 served app.
+    is_default: bool = False
     provider: str
     name: str
     active: bool
@@ -79,9 +89,6 @@ class ConnectionResponse(CamelORMModel):
     # forms without fetching the schema endpoint separately.
     fields: list[ConnectionFieldDescriptor]
     created_by: uuid.UUID
-    visibility: Visibility
-    shared_by: Optional[uuid.UUID] = None
-    shared_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

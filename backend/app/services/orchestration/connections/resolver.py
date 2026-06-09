@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.provider_connection import ProviderConnection
 from app.services.orchestration.connections.crypto import decrypt
+from app.services.orchestration.connections.scope import connection_app_scope_clause
 
 
 _log = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ class ConnectionResolver:
             select(ProviderConnection).where(
                 ProviderConnection.id == connection_id,
                 ProviderConnection.tenant_id == self._tenant_id,
-                ProviderConnection.app_id == self._app_id,
+                connection_app_scope_clause(self._app_id),
                 ProviderConnection.active.is_(True),
             )
         )
@@ -88,7 +89,7 @@ class ConnectionResolver:
             select(ProviderConnection).where(
                 ProviderConnection.id == connection_id,
                 ProviderConnection.tenant_id == self._tenant_id,
-                ProviderConnection.app_id == self._app_id,
+                connection_app_scope_clause(self._app_id),
                 ProviderConnection.active.is_(True),
             )
         )

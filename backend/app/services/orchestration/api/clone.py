@@ -24,7 +24,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,9 @@ from app.constants import SYSTEM_TENANT_ID
 from app.models.mixins.shareable import Visibility
 from app.models.orchestration import Workflow, WorkflowVersion
 from app.models.provider_connection import ProviderConnection
+from app.services.orchestration.connections.scope import (
+    connection_app_scope_clause,
+)
 
 
 class CloneError(ValueError):
@@ -40,23 +43,19 @@ class CloneError(ValueError):
 
 
 async def _allowed_connection_ids(
-    db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str, user_id: uuid.UUID,
+    db: AsyncSession, *, tenant_id: uuid.UUID, app_id: str,
 ) -> set[uuid.UUID]:
     """Connection ids the cloned workflow may legally reference.
 
-    Per phase-10 §1.4: ``connection_id`` is a tenant-local pointer. Cloning
-    a system workflow into tenant T may keep an id only if the row is
-    visible to (T, target_app_id) — i.e. T already has an equivalent
-    connection of its own. Otherwise the id is stripped.
+    ``connection_id`` is a tenant-local pointer. Cloning a system workflow
+    into tenant T may keep an id only if the row is reachable by
+    (T, target_app_id) — its home app, an app_scope, or tenant-wide.
+    Otherwise the id is stripped.
     """
     rows = await db.scalars(
         select(ProviderConnection.id).where(
             ProviderConnection.tenant_id == tenant_id,
-            ProviderConnection.app_id == app_id,
-            or_(
-                ProviderConnection.created_by == user_id,
-                ProviderConnection.visibility == Visibility.SHARED,
-            ),
+            connection_app_scope_clause(app_id),
         )
     )
     return set(rows.all())
@@ -125,7 +124,7 @@ async def clone_system_workflow(
         raise CloneError("source workflow's current_published_version_id is dangling")
 
     allowed = await _allowed_connection_ids(
-        db, tenant_id=tenant_id, app_id=target_app_id, user_id=created_by,
+        db, tenant_id=tenant_id, app_id=target_app_id,
     )
     sanitized_definition, cleared = _strip_foreign_connection_ids(
         src_version.definition, allowed,

@@ -17,19 +17,19 @@ Tenant + app scoping is enforced on every read and write. The unique index
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.mixins.shareable import Visibility
+from app.models.channel_default_connection import ChannelDefaultConnection
 from app.models.provider_connection import ProviderConnection
 from app.utils.secret_masking import mask_secret_value
 from app.utils.webhook_token import generate_webhook_token
 from app.services.orchestration.connections import crypto, health, provider_specs
+from app.services.orchestration.connections.scope import connection_app_scope_clause
 
 
 from app.services.orchestration.adapters import capability_for_vendor
@@ -125,12 +125,17 @@ def _field_descriptors(provider: str) -> list[dict[str, Any]]:
     ]
 
 
-def _serialize(row: ProviderConnection, base_url: str) -> dict[str, Any]:
+def _serialize(
+    row: ProviderConnection, base_url: str, *, is_default: bool = False,
+) -> dict[str, Any]:
     plaintext = crypto.decrypt(row.config_encrypted)
     return {
         "id": row.id,
         "tenant_id": row.tenant_id,
         "app_id": row.app_id,
+        "tenant_wide": row.tenant_wide,
+        "app_scopes": list(row.app_scopes or []),
+        "is_default": is_default,
         "provider": row.provider,
         "name": row.name,
         "active": row.active,
@@ -144,16 +149,76 @@ def _serialize(row: ProviderConnection, base_url: str) -> dict[str, Any]:
         "secret_previews": _secret_previews(row.provider, plaintext),
         "fields": _field_descriptors(row.provider),
         "created_by": row.created_by,
-        "visibility": row.visibility,
-        "shared_by": row.shared_by,
-        "shared_at": row.shared_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
 
 
-def serialize_connection(row: ProviderConnection, base_url: str) -> dict[str, Any]:
-    return _serialize(row, base_url)
+def serialize_connection(
+    row: ProviderConnection, base_url: str, *, is_default: bool = False,
+) -> dict[str, Any]:
+    return _serialize(row, base_url, is_default=is_default)
+
+
+def _channel_key_for_provider(provider: str) -> str:
+    """Canonical channel a provider dispatches on (whatsapp/voice); falls back
+    to the provider key for providers with no channel (e.g. CRM)."""
+    from app.services.orchestration import channel_taxonomy
+
+    for channel, providers in channel_taxonomy.channel_provider_map().items():
+        if provider in providers:
+            return channel
+    return provider
+
+
+async def _default_connection_ids(
+    db: AsyncSession, tenant_id: uuid.UUID, app_id: Optional[str] = None,
+) -> set[uuid.UUID]:
+    stmt = select(ChannelDefaultConnection.connection_id).where(
+        ChannelDefaultConnection.tenant_id == tenant_id,
+    )
+    if app_id is not None:
+        stmt = stmt.where(ChannelDefaultConnection.app_id == app_id)
+    return set((await db.execute(stmt)).scalars().all())
+
+
+async def default_connection_ids(
+    db: AsyncSession, tenant_id: uuid.UUID, app_id: Optional[str] = None,
+) -> set[uuid.UUID]:
+    return await _default_connection_ids(db, tenant_id, app_id)
+
+
+async def _apply_default(
+    db: AsyncSession, row: ProviderConnection, is_default: bool,
+) -> None:
+    """Sync this connection's default rows to the served-app set. Drops every
+    prior default for it, then (when on) claims (tenant, app, channel) for each
+    served app — overriding whatever connection held it before."""
+    await db.execute(
+        delete(ChannelDefaultConnection).where(
+            ChannelDefaultConnection.tenant_id == row.tenant_id,
+            ChannelDefaultConnection.connection_id == row.id,
+        )
+    )
+    if not is_default:
+        return
+    channel = _channel_key_for_provider(row.provider)
+    for app_id in [row.app_id, *(row.app_scopes or [])]:
+        await db.execute(
+            delete(ChannelDefaultConnection).where(
+                ChannelDefaultConnection.tenant_id == row.tenant_id,
+                ChannelDefaultConnection.app_id == app_id,
+                ChannelDefaultConnection.channel == channel,
+            )
+        )
+        db.add(
+            ChannelDefaultConnection(
+                tenant_id=row.tenant_id,
+                app_id=app_id,
+                channel=channel,
+                connection_id=row.id,
+            )
+        )
 
 
 async def _load_owned(
@@ -231,9 +296,12 @@ async def create_connection(
     base_url: str,
     active: bool = True,
     webhook_token: Optional[str] = None,
-    visibility: Visibility = Visibility.PRIVATE,
+    tenant_wide: bool = False,
+    app_scopes: Optional[list[str]] = None,
+    is_default: bool = False,
 ) -> dict[str, Any]:
     spec = provider_specs.get_spec(provider)  # raises ValueError → caller maps
+    app_scopes = list(app_scopes or [])
     # Fill in spec-declared defaults (e.g. bolna ``base_url``) before
     # validation + encryption so the stored config is always complete.
     # Otherwise a create body that omitted an optional-but-defaulted key
@@ -241,7 +309,6 @@ async def create_connection(
     # ``None`` for a field the spec promised was always set.
     config = provider_specs.apply_defaults(provider, config)
     _validate_full_config(provider, config)
-    normalized_visibility = Visibility.normalize(visibility) or Visibility.PRIVATE
 
     token: Optional[str] = None
     if spec.supports_webhook:
@@ -257,16 +324,13 @@ async def create_connection(
         webhook_token=token,
         active=active,
         created_by=created_by,
-        visibility=normalized_visibility,
-        shared_by=created_by if normalized_visibility == Visibility.SHARED else None,
-        shared_at=(
-            datetime.now(timezone.utc)
-            if normalized_visibility == Visibility.SHARED
-            else None
-        ),
+        tenant_wide=tenant_wide,
+        app_scopes=app_scopes,
     )
     db.add(row)
     try:
+        await db.flush()
+        await _apply_default(db, row, is_default)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -275,7 +339,7 @@ async def create_connection(
             f"app_id={app_id!r} provider={provider!r}"
         ) from exc
     await db.refresh(row)
-    return _serialize(row, base_url)
+    return _serialize(row, base_url, is_default=is_default)
 
 
 async def list_connections(
@@ -283,34 +347,21 @@ async def list_connections(
     *,
     tenant_id: uuid.UUID,
     base_url: str,
-    user_id: Optional[uuid.UUID] = None,
     app_id: Optional[str] = None,
     providers: Optional[Iterable[str]] = None,
     include_inactive: bool = False,
-    visibility: str = "all",
 ) -> list[dict[str, Any]]:
     stmt = select(ProviderConnection).where(ProviderConnection.tenant_id == tenant_id)
-    if user_id is not None:
-        if visibility == "private":
-            stmt = stmt.where(ProviderConnection.created_by == user_id)
-        elif visibility == "shared":
-            stmt = stmt.where(ProviderConnection.visibility == Visibility.SHARED)
-        else:
-            stmt = stmt.where(
-                or_(
-                    ProviderConnection.created_by == user_id,
-                    ProviderConnection.visibility == Visibility.SHARED,
-                )
-            )
     if app_id is not None:
-        stmt = stmt.where(ProviderConnection.app_id == app_id)
+        stmt = stmt.where(connection_app_scope_clause(app_id))
     if providers:
         stmt = stmt.where(ProviderConnection.provider.in_(list(providers)))
     if not include_inactive:
         stmt = stmt.where(ProviderConnection.active.is_(True))
     stmt = stmt.order_by(ProviderConnection.created_at.desc())
     rows = (await db.execute(stmt)).scalars().all()
-    return [_serialize(r, base_url) for r in rows]
+    default_ids = await _default_connection_ids(db, tenant_id, app_id)
+    return [_serialize(r, base_url, is_default=r.id in default_ids) for r in rows]
 
 
 async def get_connection(
@@ -321,7 +372,8 @@ async def get_connection(
     base_url: str,
 ) -> dict[str, Any]:
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
-    return _serialize(row, base_url)
+    default_ids = await _default_connection_ids(db, tenant_id)
+    return _serialize(row, base_url, is_default=row.id in default_ids)
 
 
 async def update_connection(
@@ -333,27 +385,27 @@ async def update_connection(
     name: Optional[str] = None,
     active: Optional[bool] = None,
     config: Optional[dict[str, Any]] = None,
-    visibility: Optional[Visibility] = None,
+    tenant_wide: Optional[bool] = None,
+    app_scopes: Optional[list[str]] = None,
+    is_default: Optional[bool] = None,
 ) -> dict[str, Any]:
     row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
     if name is not None:
         row.name = name
     if active is not None:
         row.active = active
-    if visibility is not None:
-        normalized_visibility = Visibility.normalize(visibility) or Visibility.PRIVATE
-        row.visibility = normalized_visibility
-        if normalized_visibility == Visibility.SHARED:
-            row.shared_by = row.created_by
-            row.shared_at = row.shared_at or datetime.now(timezone.utc)
-        else:
-            row.shared_by = None
-            row.shared_at = None
+    if tenant_wide is not None:
+        row.tenant_wide = tenant_wide
+    if app_scopes is not None:
+        row.app_scopes = list(app_scopes)
     if config is not None:
         stored = crypto.decrypt(row.config_encrypted)
         merged = _merge_config_for_patch(row.provider, stored=stored, submitted=config)
         _validate_full_config(row.provider, merged)
         row.config_encrypted = crypto.encrypt(merged)
+    # Defaults follow the (possibly updated) served-app set.
+    if is_default is not None:
+        await _apply_default(db, row, is_default)
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -362,18 +414,8 @@ async def update_connection(
             f"connection name {name!r} already exists for this tenant + app + provider"
         ) from exc
     await db.refresh(row)
-    return _serialize(row, base_url)
-
-
-async def archive_connection(
-    db: AsyncSession, *, tenant_id: uuid.UUID, connection_id: uuid.UUID,
-) -> None:
-    """Soft-disable: sets active=false. Webhooks for this connection
-    immediately stop matching incoming requests (the partial active-index
-    on the lookup column means dispatch resolution returns 404)."""
-    row = await _load_owned(db, tenant_id=tenant_id, connection_id=connection_id)
-    row.active = False
-    await db.commit()
+    default_ids = await _default_connection_ids(db, tenant_id)
+    return _serialize(row, base_url, is_default=row.id in default_ids)
 
 
 async def rotate_webhook_token(

@@ -1,6 +1,5 @@
 import { apiRequest } from './client';
 import { apiQueryFn } from '@/features/orchestration/queries/queryFn';
-import type { AssetVisibility } from '@/types/settings.types';
 
 /** Provider known to the backend `provider_specs` registry. New providers
  *  are surfaced via the schema endpoint at runtime, but the literal union
@@ -49,6 +48,14 @@ export interface Connection {
   id: string;
   tenantId: string;
   appId: string;
+  /** Apps this connection serves beyond its home appId. Same for every
+   *  provider. tenantWide is retained on the contract but no longer set by
+   *  the UI ("all apps" = selecting them explicitly). */
+  tenantWide: boolean;
+  appScopes: string[];
+  /** True when this connection is the default for its provider in at least
+   *  one of the apps it serves. */
+  isDefault: boolean;
   provider: string;
   name: string;
   active: boolean;
@@ -66,9 +73,6 @@ export interface Connection {
   secretPreviews?: Record<string, string>;
   fields: ConnectionFieldDescriptor[];
   createdBy: string;
-  visibility: AssetVisibility;
-  sharedBy: string | null;
-  sharedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -150,13 +154,19 @@ export interface CreateConnectionBody {
   name: string;
   config: ConnectionConfig;
   active?: boolean;
-  visibility?: AssetVisibility;
+  tenantWide?: boolean;
+  appScopes?: string[];
+  /** Make this the default connection for its provider in every app it serves. */
+  isDefault?: boolean;
 }
 
 export interface UpdateConnectionBody {
   name?: string;
   active?: boolean;
-  visibility?: AssetVisibility;
+  tenantWide?: boolean;
+  appScopes?: string[];
+  /** Make this the default connection for its provider in every app it serves. */
+  isDefault?: boolean;
   /** Partial plaintext config. Omitted secret keys preserve stored values;
    *  blank-string overwrites of secret keys are rejected by the backend. */
   config?: ConnectionConfig;
@@ -169,7 +179,6 @@ export interface ListConnectionsParams {
   provider?: string;
   providers?: string[];
   includeInactive?: boolean;
-  visibility?: 'all' | 'private' | 'shared';
 }
 
 function buildListQuery(params?: ListConnectionsParams): string {
@@ -181,7 +190,6 @@ function buildListQuery(params?: ListConnectionsParams): string {
     for (const p of params.providers) q.append('provider', p);
   }
   if (params.includeInactive) q.set('includeInactive', 'true');
-  if (params.visibility) q.set('visibility', params.visibility);
   const s = q.toString();
   return s ? `?${s}` : '';
 }
@@ -224,10 +232,6 @@ export async function updateConnection(
     method: 'PATCH',
     body: JSON.stringify(body),
   }));
-}
-
-export async function archiveConnection(id: string): Promise<void> {
-  await apiRequest<void>(`/api/orchestration/connections/${id}`, { method: 'DELETE' });
 }
 
 export async function testConnection(id: string): Promise<ConnectionTestResponse> {
