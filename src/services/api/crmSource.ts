@@ -66,6 +66,12 @@ export interface CrmSyncRun {
   completedAt: string | null;
 }
 
+export interface CrmResolvedPreview {
+  recordType: string;
+  columns: string[];
+  rows: Record<string, string | null>[];
+}
+
 const base = (connectionId: string) => `/api/crm/connections/${connectionId}`;
 
 export function getCrmGrains(): Promise<{ grains: CrmGrainSchema[] }> {
@@ -115,4 +121,11 @@ export function triggerCrmUnpack(connectionId: string): Promise<CrmJobSubmitted>
 
 export function getCrmSyncActivity(connectionId: string): Promise<{ runs: CrmSyncRun[] }> {
   return apiRequest(`${base(connectionId)}/sync-activity`);
+}
+
+export function getCrmResolvedPreview(
+  connectionId: string,
+  recordType: string,
+): Promise<CrmResolvedPreview> {
+  return apiRequest(`${base(connectionId)}/resolved-preview?recordType=${encodeURIComponent(recordType)}`);
 }

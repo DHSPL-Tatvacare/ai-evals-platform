@@ -5,6 +5,7 @@ import {
   getCrmFieldMap,
   getCrmFieldValues,
   getCrmGrains,
+  getCrmResolvedPreview,
   getCrmSyncActivity,
   publishCrmFieldMap,
   triggerCrmSync,
@@ -12,6 +13,7 @@ import {
   type CrmFieldBinding,
   type CrmFieldMap,
   type CrmGrainSchema,
+  type CrmResolvedPreview,
   type CrmSyncRun,
   type DiscoveredObject,
 } from '@/services/api/crmSource';
@@ -32,6 +34,8 @@ export const crmSourceKeys = {
   sync: (connectionId: string) => [...crmSourceKeys.all, 'sync', connectionId] as const,
   fieldValues: (connectionId: string, recordType: string, field: string) =>
     [...crmSourceKeys.all, 'fieldValues', connectionId, recordType, field] as const,
+  preview: (connectionId: string, recordType: string) =>
+    [...crmSourceKeys.all, 'preview', connectionId, recordType] as const,
 };
 
 export function useCrmGrains() {
@@ -74,6 +78,15 @@ export function useCrmFieldValues(
   });
 }
 
+export function useCrmResolvedPreview(connectionId: string, recordType: string | null) {
+  return useQuery<CrmResolvedPreview>({
+    queryKey: crmSourceKeys.preview(connectionId, recordType ?? ''),
+    queryFn: () => getCrmResolvedPreview(connectionId, recordType!),
+    enabled: Boolean(connectionId && recordType),
+    staleTime: 30_000,
+  });
+}
+
 export function useCrmSyncActivity(connectionId: string, live: boolean) {
   return useQuery<{ runs: CrmSyncRun[] }>({
     queryKey: crmSourceKeys.sync(connectionId),
@@ -92,6 +105,7 @@ export function usePublishCrmFieldMap(connectionId: string) {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: crmSourceKeys.mapping(connectionId, result.recordType) });
       queryClient.invalidateQueries({ queryKey: crmSourceKeys.sync(connectionId) });
+      queryClient.invalidateQueries({ queryKey: crmSourceKeys.preview(connectionId, result.recordType) });
     },
   });
 }
@@ -112,6 +126,7 @@ export function useTriggerCrmUnpack(connectionId: string) {
     mutationFn: () => triggerCrmUnpack(connectionId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: crmSourceKeys.sync(connectionId) });
+      queryClient.invalidateQueries({ queryKey: [...crmSourceKeys.all, 'preview', connectionId] });
     },
   });
 }
