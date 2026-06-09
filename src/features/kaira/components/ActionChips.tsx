@@ -105,7 +105,7 @@ function ActionChip({
         'focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[var(--border-focus)]',
         'shadow-sm hover:shadow-md active:scale-[0.98]',
         isPrimary && [
-          'bg-[var(--interactive-primary)] text-white',
+          'bg-[var(--interactive-primary)] text-[var(--text-on-color)]',
           'hover:bg-[var(--interactive-primary-hover)]',
           'active:bg-[var(--interactive-primary-active)]',
         ],

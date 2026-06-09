@@ -48,7 +48,7 @@ export default function AdversarialBreakdown({ adversarial }: Props) {
                       key={g.goal}
                       className={
                         g.passRate < 0.5
-                          ? 'bg-red-50 dark:bg-red-950/20'
+                          ? 'bg-[var(--surface-error)]'
                           : i % 2 === 0
                             ? 'bg-[var(--bg-primary)]'
                             : 'bg-[var(--bg-secondary)]'

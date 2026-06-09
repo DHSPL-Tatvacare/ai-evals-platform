@@ -37,7 +37,7 @@ export default function EvaluatorCard({ section }: Props) {
           </p>
         </div>
         {section.errorRate > 0 && (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--surface-error)] text-[var(--color-error)]">
             {(section.errorRate * 100).toFixed(1)}% errors
           </span>
         )}

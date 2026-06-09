@@ -77,7 +77,7 @@ export function ApiDebugOverlay({
                         aria-label="Copy request"
                       >
                         {copiedSection === 'request' ? (
-                          <><Check className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-500">Copied</span></>
+                          <><Check className="h-3.5 w-3.5 text-[var(--color-success)]" /><span className="text-[var(--color-success)]">Copied</span></>
                         ) : (
                           <><Copy className="h-3.5 w-3.5" /><span>Copy</span></>
                         )}
@@ -103,7 +103,7 @@ export function ApiDebugOverlay({
                         aria-label="Copy response"
                       >
                         {copiedSection === 'response' ? (
-                          <><Check className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-500">Copied</span></>
+                          <><Check className="h-3.5 w-3.5 text-[var(--color-success)]" /><span className="text-[var(--color-success)]">Copied</span></>
                         ) : (
                           <><Copy className="h-3.5 w-3.5" /><span>Copy</span></>
                         )}

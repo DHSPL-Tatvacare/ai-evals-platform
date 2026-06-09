@@ -26,9 +26,9 @@ export function MqlScoreBadge({ score, signals, className }: MqlScoreBadgeProps)
   const isNear = score === 4;
 
   const badgeColor = isMql
-    ? 'text-emerald-400'
+    ? 'text-[var(--color-success)]'
     : isNear
-    ? 'text-amber-400'
+    ? 'text-[var(--color-warning)]'
     : 'text-[var(--text-muted)]';
 
   const tooltipContent = (
@@ -36,7 +36,7 @@ export function MqlScoreBadge({ score, signals, className }: MqlScoreBadgeProps)
       {SIGNAL_ORDER.map((key) => {
         const met = signals[key] ?? false;
         return (
-          <span key={key} className={cn('text-[11px]', met ? 'text-emerald-400' : 'text-[var(--text-muted)]')}>
+          <span key={key} className={cn('text-[11px]', met ? 'text-[var(--color-success)]' : 'text-[var(--text-muted)]')}>
             {met ? '●' : '○'} {SIGNAL_LABELS[key] ?? key}
           </span>
         );
@@ -61,9 +61,9 @@ export function MqlScoreBadge({ score, signals, className }: MqlScoreBadgeProps)
                 'inline-block h-1.5 w-1.5 rounded-full',
                 (signals[key] ?? false)
                   ? isMql
-                    ? 'bg-emerald-400'
+                    ? 'bg-[var(--color-success)]'
                     : isNear
-                    ? 'bg-amber-400'
+                    ? 'bg-[var(--color-warning)]'
                     : 'bg-[var(--color-brand-accent)]'
                   : 'bg-[var(--border-default)]'
               )}

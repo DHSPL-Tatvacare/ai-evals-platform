@@ -202,7 +202,7 @@ export function NewTemplateOverlay({ open, appId, onClose, onCreated }: NewTempl
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-[var(--z-overlay)] bg-black/30"
+        className="fixed inset-0 z-[var(--z-overlay)] bg-[var(--bg-overlay)]"
         onClick={onClose}
       />
 

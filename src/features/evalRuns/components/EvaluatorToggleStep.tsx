@@ -124,7 +124,7 @@ export function EvaluatorToggleStep({
                 >
                   <span
                     className={cn(
-                      'inline-block h-4 w-4 rounded-full bg-white shadow transition-transform mt-0.5',
+                      'inline-block h-4 w-4 rounded-full bg-[var(--bg-elevated)] shadow transition-transform mt-0.5',
                       isActive ? 'translate-x-[18px]' : 'translate-x-0.5'
                     )}
                   />

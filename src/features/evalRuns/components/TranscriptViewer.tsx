@@ -11,7 +11,7 @@ interface ChatProps {
 
 function ImgBadge() {
   return (
-    <span className="inline-block px-1.5 py-px rounded text-xs font-semibold bg-[var(--color-accent-purple)] text-white align-middle ml-1">
+    <span className="inline-block px-1.5 py-px rounded text-xs font-semibold bg-[var(--color-accent-purple)] text-[var(--text-on-color)] align-middle ml-1">
       IMG
     </span>
   );

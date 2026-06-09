@@ -452,15 +452,15 @@ export default function ReportTab<TReport extends ReportPayloadLike>({
     <div className="w-full">
       <div className="flex items-center gap-3">
         {jobPhase === 'queued' ? (
-          <Clock className="h-5 w-5 text-white/75" />
+          <Clock className="h-5 w-5 text-[var(--text-on-color)]/75" />
         ) : (
-          <Loader2 className="h-5 w-5 animate-spin text-white" />
+          <Loader2 className="h-5 w-5 animate-spin text-[var(--text-on-color)]" />
         )}
         <div className="flex-1">
-          <p className="text-sm font-semibold text-white">
+          <p className="text-sm font-semibold text-[var(--text-on-color)]">
             {jobPhase === 'queued' ? 'Queued for generation' : 'Generating report'}
           </p>
-          <p className="mt-1 text-sm text-white/78">
+          <p className="mt-1 text-sm text-[var(--text-on-color)]/78">
             {jobPhase === 'queued'
               ? queuePosition != null && queuePosition > 0
                 ? `${queuePosition} job${queuePosition > 1 ? 's' : ''} ahead`

@@ -173,7 +173,7 @@ export default function AdversarialTable({ evaluations, runId, reviewableItems, 
                 />
               ) : (
                 <span
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold text-white"
+                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold text-[var(--text-on-color)]"
                   style={{ backgroundColor: 'var(--color-error)' }}
                 >
                   Infra Error

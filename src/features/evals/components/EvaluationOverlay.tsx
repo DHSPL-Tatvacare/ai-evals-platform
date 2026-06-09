@@ -395,7 +395,7 @@ export function EvaluationOverlay({
                 >
                   <span
                     className={cn(
-                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-[var(--bg-elevated)] shadow ring-0 transition duration-200 ease-in-out",
                       normalizationEnabled ? "translate-x-4" : "translate-x-0",
                     )}
                   />
@@ -442,7 +442,7 @@ export function EvaluationOverlay({
                 >
                   <span
                     className={cn(
-                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-[var(--bg-elevated)] shadow ring-0 transition duration-200 ease-in-out",
                       preserveCodeSwitching ? "translate-x-4" : "translate-x-0",
                     )}
                   />

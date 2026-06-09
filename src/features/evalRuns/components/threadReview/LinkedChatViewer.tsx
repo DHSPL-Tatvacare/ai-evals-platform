@@ -59,7 +59,7 @@ export default function LinkedChatViewer({
                 <span className="text-[var(--color-warning)] font-semibold">Friction</span>
               )}
               {m.has_image && (
-                <span className="px-1 py-px rounded text-[9px] font-semibold bg-[var(--color-accent-purple)] text-white">
+                <span className="px-1 py-px rounded text-[9px] font-semibold bg-[var(--color-accent-purple)] text-[var(--text-on-color)]">
                   IMG
                 </span>
               )}

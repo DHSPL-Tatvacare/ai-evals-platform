@@ -181,7 +181,7 @@ export function CsvUploadStep({
           {mappingComplete && (
             <button
               onClick={handleApplyMapping}
-              className="w-full px-4 py-2 text-[13px] font-medium rounded-md bg-[var(--interactive-primary)] text-white hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
+              className="w-full px-4 py-2 text-[13px] font-medium rounded-md bg-[var(--interactive-primary)] text-[var(--text-on-color)] hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)]"
             >
               Apply Mapping & Analyze
             </button>

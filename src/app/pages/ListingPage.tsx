@@ -334,7 +334,7 @@ export function ListingPage() {
     <span
       className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase ${
         listing.sourceType === 'upload'
-          ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+          ? 'bg-[var(--surface-accent-blue)] text-[var(--color-accent-blue)]'
           : 'bg-[var(--color-accent-purple)]/10 text-[var(--color-accent-purple)]'
       }`}
     >

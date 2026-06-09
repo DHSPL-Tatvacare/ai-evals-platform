@@ -505,7 +505,7 @@ export function CreateEvaluatorWizard({
                 className="peer sr-only"
               />
               <span className={cn(
-                'relative h-5 w-9 shrink-0 rounded-full transition-colors after:absolute after:left-[3px] after:top-[3px] after:h-3.5 after:w-3.5 after:rounded-full after:bg-white after:shadow after:transition-transform',
+                'relative h-5 w-9 shrink-0 rounded-full transition-colors after:absolute after:left-[3px] after:top-[3px] after:h-3.5 after:w-3.5 after:rounded-full after:bg-[var(--bg-elevated)] after:shadow after:transition-transform',
                 'bg-[var(--border-default)] peer-checked:bg-[var(--interactive-primary)] peer-checked:after:translate-x-3.5',
                 'peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--interactive-primary)]/50',
               )} />

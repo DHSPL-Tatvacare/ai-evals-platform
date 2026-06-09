@@ -63,7 +63,7 @@ function highlightText(text: string, query: string): ReactNode {
   while (idx !== -1) {
     if (idx > cursor) parts.push(text.slice(cursor, idx));
     parts.push(
-      <mark key={idx} className="bg-yellow-300/60 dark:bg-yellow-400/40 text-inherit rounded-sm px-0.5">
+      <mark key={idx} className="bg-[var(--surface-warning)] text-inherit rounded-sm px-0.5">
         {text.slice(idx, idx + q.length)}
       </mark>,
     );

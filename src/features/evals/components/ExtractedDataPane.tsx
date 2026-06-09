@@ -95,7 +95,7 @@ function getStatusIcon(critique?: FieldCritique) {
   }
   const iconMap: Record<CritiqueSeverity, React.ReactNode> = {
     critical: <XCircle className="h-3.5 w-3.5 shrink-0 text-[var(--color-error)]" />,
-    moderate: <AlertCircle className="h-3.5 w-3.5 shrink-0 text-orange-500" />,
+    moderate: <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--color-accent-orange)]" />,
     minor: <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--color-warning)]" />,
     none: <CheckCircle className="h-3.5 w-3.5 shrink-0 text-[var(--color-success)]" />,
   };
@@ -111,7 +111,7 @@ function getRowBgClass(critique?: FieldCritique, isSelected?: boolean) {
   }
   const bgMap: Record<CritiqueSeverity, string> = {
     critical: 'bg-[var(--color-error)]/5 hover:bg-[var(--color-error)]/10',
-    moderate: 'bg-orange-500/5 hover:bg-orange-500/10',
+    moderate: 'bg-[var(--color-accent-orange)]/5 hover:bg-[var(--color-accent-orange)]/10',
     minor: 'bg-[var(--color-warning)]/5 hover:bg-[var(--color-warning)]/10',
     none: 'hover:bg-[var(--bg-secondary)]',
   };
@@ -157,9 +157,9 @@ const FILTER_BADGES: FilterBadgeDef[] = [
     category: 'moderate',
     icon: <AlertCircle className="h-3 w-3" />,
     activeIcon: <AlertCircle className="h-3.5 w-3.5" />,
-    color: 'text-orange-500',
-    activeBg: 'bg-orange-500/20',
-    activeRing: 'ring-orange-500/40',
+    color: 'text-[var(--color-accent-orange)]',
+    activeBg: 'bg-[var(--color-accent-orange)]/20',
+    activeRing: 'ring-[var(--color-accent-orange)]/40',
     label: 'Moderate',
   },
   {
@@ -577,7 +577,7 @@ export const ExtractedDataPane = memo(function ExtractedDataPane({
             <AlertTriangle className="h-2.5 w-2.5 text-[var(--color-warning)]" /> Minor
           </span>
           <span className="flex items-center gap-1">
-            <AlertCircle className="h-2.5 w-2.5 text-orange-500" /> Moderate
+            <AlertCircle className="h-2.5 w-2.5 text-[var(--color-accent-orange)]" /> Moderate
           </span>
           <span className="flex items-center gap-1">
             <XCircle className="h-2.5 w-2.5 text-[var(--color-error)]" /> Critical

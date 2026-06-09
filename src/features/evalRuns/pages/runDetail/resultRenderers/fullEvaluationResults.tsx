@@ -87,7 +87,7 @@ export function FullEvaluationResults({ run }: { run: EvalRun }) {
     <div className="flex flex-1 min-h-0 flex-col gap-4">
       <div className="shrink-0 space-y-4">
         {warnings && warnings.length > 0 && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded p-2.5 text-xs text-amber-600 dark:text-amber-400">
+          <div className="bg-[var(--surface-warning)] border border-[var(--border-warning)] rounded p-2.5 text-xs text-[var(--color-warning)]">
             <div className="flex items-center gap-1.5 font-semibold mb-1">
               <AlertTriangle className="h-3.5 w-3.5" />
               Warnings

@@ -121,7 +121,7 @@ export default function PromptGapAnalysis({ narrative }: Props) {
           <tbody>
             {gaps.map((gap, i) => {
               const isExpanded = expandedRows.has(i);
-              const gapStyle = GAP_TYPE_COLORS[gap.gapType] ?? { bg: 'bg-gray-100', text: 'text-gray-800' };
+              const gapStyle = GAP_TYPE_COLORS[gap.gapType] ?? { bg: 'bg-[var(--bg-tertiary)]', text: 'text-[var(--text-secondary)]' };
 
               return (
                 <Fragment key={i}>

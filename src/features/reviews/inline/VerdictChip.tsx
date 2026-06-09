@@ -73,7 +73,7 @@ function DefaultBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full font-semibold text-white',
+        'inline-flex items-center rounded-full font-semibold text-[var(--text-on-color)]',
         textSize,
         padding,
       )}

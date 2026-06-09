@@ -115,7 +115,7 @@ function typeColumn(): ColumnDef<RunsListRow> {
       const config = RUN_TYPE_CONFIG[row.runType];
       return (
         <span
-          className="inline-flex items-center justify-center px-2.5 py-1 rounded text-[10px] font-bold tracking-wider text-white whitespace-nowrap"
+          className="inline-flex items-center justify-center px-2.5 py-1 rounded text-[10px] font-bold tracking-wider text-[var(--text-on-color)] whitespace-nowrap"
           style={{ backgroundColor: config.color }}
         >
           {config.label}

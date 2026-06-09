@@ -569,7 +569,7 @@ function SignalsBox({ signals, generatedAt }: SignalsBoxProps) {
     <div className="rounded-[var(--radius-lg)] border border-[var(--chip-brand-border)] bg-[var(--surface-brand-subtle)] p-5 shadow-[var(--shadow-md)]">
       <div className="mb-3.5 flex items-center gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--interactive-primary)] shadow-[var(--shadow-sm)]">
-          <Sparkles className="h-[18px] w-[18px] text-white" />
+          <Sparkles className="h-[18px] w-[18px] text-[var(--text-on-color)]" />
         </span>
         <div className="flex flex-col">
           <h3 className="text-[15px] font-semibold leading-tight text-[var(--text-primary)]">Signals to watch</h3>

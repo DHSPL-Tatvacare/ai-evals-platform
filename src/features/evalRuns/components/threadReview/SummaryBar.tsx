@@ -18,8 +18,8 @@ function MetaStatusPill({ status }: { status: 'failed' | 'skipped' }) {
     <span
       className={`inline-block rounded-full px-1.5 py-px text-[10px] font-semibold tracking-wide leading-snug ${
         isFailed
-          ? 'bg-[var(--color-error)] text-white'
-          : 'bg-[var(--text-muted)] text-white opacity-60'
+          ? 'bg-[var(--color-error)] text-[var(--text-on-color)]'
+          : 'bg-[var(--text-muted)] text-[var(--text-on-color)] opacity-60'
       }`}
     >
       {isFailed ? 'Failed' : 'Skipped'}

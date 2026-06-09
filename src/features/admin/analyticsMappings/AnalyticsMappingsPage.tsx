@@ -48,11 +48,11 @@ export function AnalyticsMappingsPage() {
         header: 'State',
         render: (row) =>
           row.enabled ? (
-            <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+            <span className="inline-flex items-center rounded-full bg-[var(--surface-success)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-success)]">
               Enabled
             </span>
           ) : (
-            <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
+            <span className="inline-flex items-center rounded-full bg-[var(--surface-warning)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-warning)]">
               Disabled
             </span>
           ),

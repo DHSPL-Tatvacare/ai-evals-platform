@@ -104,7 +104,7 @@ function RangeMonth({ viewMonth, draft, today, onPick }: RangeMonthProps) {
                 outside && !isEndpoint && !between && 'text-[var(--text-muted)]',
                 between && 'bg-[var(--surface-brand-subtle)] text-[var(--text-primary)]',
                 isToday(day) && !isEndpoint && 'ring-1 ring-[var(--border-focus)]',
-                isEndpoint && 'rounded bg-[var(--interactive-primary)] font-medium text-white',
+                isEndpoint && 'rounded bg-[var(--interactive-primary)] font-medium text-[var(--text-on-color)]',
               )}
             >
               {format(day, 'd')}

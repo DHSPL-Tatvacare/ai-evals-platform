@@ -39,8 +39,9 @@
   --color-neutral-400: #A6A6A6;
   --color-neutral-500: #5E5E5E;
   --color-neutral-600: #2E2E2E;
-  --color-neutral-700: #1F1F1F;
-  --color-neutral-800: #181818;
+  /* 700–900 are the dark-mode surface ladder (light uses 0–600 only); spaced for even perceived steps */
+  --color-neutral-700: #242424;
+  --color-neutral-800: #1A1A1A;
   --color-neutral-900: #121212;
   
   /* Spacing */
@@ -246,6 +247,21 @@
   --surface-brand-subtle: color-mix(in srgb, var(--interactive-primary) 10%, var(--bg-primary));
   --surface-brand-hover: color-mix(in srgb, var(--interactive-primary) 16%, var(--bg-primary));
 
+  /* Categorical accent surfaces — the tint half of the accent palette (paired with --color-accent-*).
+     Derived from the per-mode accent color, so they adapt to dark without a separate override. */
+  --surface-accent-purple: color-mix(in srgb, var(--color-accent-purple) 15%, transparent);
+  --surface-accent-cyan: color-mix(in srgb, var(--color-accent-cyan) 15%, transparent);
+  --surface-accent-orange: color-mix(in srgb, var(--color-accent-orange) 15%, transparent);
+  --surface-accent-pink: color-mix(in srgb, var(--color-accent-pink) 15%, transparent);
+  --surface-accent-teal: color-mix(in srgb, var(--color-accent-teal) 15%, transparent);
+  --surface-accent-indigo: color-mix(in srgb, var(--color-accent-indigo) 15%, transparent);
+  --surface-accent-lime: color-mix(in srgb, var(--color-accent-lime) 15%, transparent);
+  --surface-accent-blue: color-mix(in srgb, var(--color-accent-blue) 15%, transparent);
+  --surface-accent-amber: color-mix(in srgb, var(--color-accent-amber) 15%, transparent);
+  --surface-accent-sky: color-mix(in srgb, var(--color-accent-sky) 15%, transparent);
+  --surface-accent-fuchsia: color-mix(in srgb, var(--color-accent-fuchsia) 15%, transparent);
+  --surface-accent-rose: color-mix(in srgb, var(--color-accent-rose) 15%, transparent);
+
   /* Review mode — light needs stronger values on white bg */
   --review-glow-lo: color-mix(in srgb, var(--color-brand-primary) 28%, transparent);
   --review-glow-hi: color-mix(in srgb, var(--color-brand-primary) 44%, transparent);
@@ -359,8 +375,9 @@
   --text-brand: var(--color-brand-accent);
   --text-on-color: var(--color-neutral-0);
   
-  --border-default: var(--color-neutral-600);
-  --border-subtle: var(--color-neutral-700);
+  /* Borders sit one ladder rung above the surfaces (700=#242424); near-black contrast is compressed, so they need a bigger step than light mode to read */
+  --border-default: #404040;
+  --border-subtle: #303030;
   --border-focus: var(--color-brand-accent);
   --border-brand: var(--color-brand-accent);
 
@@ -474,7 +491,7 @@
   --bg-chat-user: transparent;
   --bg-chat-assistant: var(--color-neutral-800);
   --bg-chat-input: var(--color-neutral-800);
-  --border-chat-input: var(--color-neutral-600);
+  --border-chat-input: var(--border-default);
 
   /* Brand gradients — reused by hero CTAs, brand mark, tagline highlight */
   --gradient-brand-cta: linear-gradient(90deg, var(--color-brand-primary), var(--color-brand-secondary));

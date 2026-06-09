@@ -107,7 +107,7 @@ export default function EfficiencyTab({ evaluation, failed, skipped }: Props) {
                       </td>
                       <td className="py-1.5 px-2">
                         <span
-                          className={`inline-block px-1.5 py-px rounded text-[0.6rem] font-bold uppercase text-white ${
+                          className={`inline-block px-1.5 py-px rounded text-[0.6rem] font-bold uppercase text-[var(--text-on-color)] ${
                             isBot ? 'bg-[var(--color-warning)]' : 'bg-[var(--text-muted)]'
                           }`}
                         >

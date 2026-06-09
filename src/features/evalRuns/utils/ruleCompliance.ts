@@ -71,14 +71,14 @@ export function getRuleOutcomeMeta(status: RuleOutcomeStatus): {
       return {
         label: 'Followed',
         icon: '\u2713',
-        badgeClass: 'bg-[var(--color-success)] text-white',
+        badgeClass: 'bg-[var(--color-success)] text-[var(--text-on-color)]',
         textClass: 'text-[var(--color-success)]',
       };
     case 'VIOLATED':
       return {
         label: 'Violated',
         icon: '\u2717',
-        badgeClass: 'bg-[var(--color-error)] text-white',
+        badgeClass: 'bg-[var(--color-error)] text-[var(--text-on-color)]',
         textClass: 'text-[var(--color-error)]',
       };
     case 'NOT_APPLICABLE':

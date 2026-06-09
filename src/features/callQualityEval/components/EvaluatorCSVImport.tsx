@@ -249,10 +249,10 @@ export function EvaluatorCSVImport({ isOpen, onClose, onImported }: EvaluatorCSV
         {parsed && (
           <>
             {parsed.errors.length > 0 && (
-              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2.5">
+              <div className="rounded-md border border-[var(--border-warning)] bg-[var(--surface-warning)] p-2.5">
                 <div className="flex items-center gap-1.5 mb-1">
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
-                  <span className="text-xs font-medium text-amber-400">Parse Warnings</span>
+                  <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-warning)]" />
+                  <span className="text-xs font-medium text-[var(--color-warning)]">Parse Warnings</span>
                 </div>
                 <ul className="text-[11px] text-[var(--text-muted)] space-y-0.5">
                   {parsed.errors.map((e, i) => <li key={i}>{e}</li>)}

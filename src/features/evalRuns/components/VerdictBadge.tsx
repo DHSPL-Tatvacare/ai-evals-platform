@@ -78,7 +78,7 @@ function PlainBadge({
     <span className="inline-block">
       <span
         ref={ref}
-        className={`inline-block rounded-full font-semibold text-white tracking-wide leading-snug cursor-help transition-opacity hover:opacity-90 ${cls}`}
+        className={`inline-block rounded-full font-semibold text-[var(--text-on-color)] tracking-wide leading-snug cursor-help transition-opacity hover:opacity-90 ${cls}`}
         style={{ backgroundColor: def.color }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}

@@ -12,7 +12,7 @@ export function NoteModal({ initialNote, onSave, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--bg-overlay)]"
       onClick={onClose}
     >
       <div

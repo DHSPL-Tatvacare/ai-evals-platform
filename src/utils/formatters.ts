@@ -26,16 +26,16 @@ export function formatDuration(seconds: number): string {
 export function formatFrt(seconds: number | null): { text: string; color: string } {
   if (seconds === null) return { text: '—', color: '' };
   if (seconds <= 3600) {
-    return { text: seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`, color: 'text-emerald-400' };
+    return { text: seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`, color: 'text-[var(--color-success)]' };
   }
   if (seconds <= 10800) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-amber-400' };
+    return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-[var(--color-warning)]' };
   }
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-red-400' };
+  return { text: m > 0 ? `${h}h ${m}m` : `${h}h`, color: 'text-[var(--color-error)]' };
 }
 
 export function formatFileSize(bytes: number): string {

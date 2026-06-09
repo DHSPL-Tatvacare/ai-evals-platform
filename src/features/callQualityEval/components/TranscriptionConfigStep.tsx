@@ -77,8 +77,8 @@ export function TranscriptionConfigStep({ config, onChange, totalCalls }: Transc
   return (
     <div className="space-y-4">
       {/* Info callout */}
-      <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2.5">
-        <Info className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
+      <div className="flex items-start gap-2.5 rounded-md border border-[var(--border-info)] bg-[var(--surface-info)] px-3 py-2.5">
+        <Info className="h-4 w-4 text-[var(--color-info)] mt-0.5 shrink-0" />
         <p className="text-[12px] text-[var(--text-secondary)]">
           Speech in each recording is converted to text before evaluation. Choose the spoken language and script; calls that already have a transcript are reused unless you force re-transcription.
         </p>

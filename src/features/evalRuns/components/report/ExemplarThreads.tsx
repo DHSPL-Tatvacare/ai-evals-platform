@@ -134,16 +134,16 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
         <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
           {/* Adversarial badges */}
           {isAdversarialExemplar && thread.goalFlow && thread.goalFlow.length > 0 && (
-            <span className="px-1.5 py-px text-[10px] font-semibold rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+            <span className="px-1.5 py-px text-[10px] font-semibold rounded-full bg-[var(--surface-accent-purple)] text-[var(--color-accent-purple)]">
               {thread.goalFlow.join(' → ')}
             </span>
           )}
           {isAdversarialExemplar && thread.difficulty && (
             <span className={cn(
               'px-1.5 py-px text-[10px] font-semibold rounded-full',
-              thread.difficulty === 'HARD' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' :
-              thread.difficulty === 'MEDIUM' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
-              'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+              thread.difficulty === 'HARD' ? 'bg-[var(--surface-error)] text-[var(--color-error)]' :
+              thread.difficulty === 'MEDIUM' ? 'bg-[var(--surface-warning)] text-[var(--color-warning)]' :
+              'bg-[var(--surface-success)] text-[var(--color-success)]',
             )}>
               {thread.difficulty}
             </span>
@@ -187,7 +187,7 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
                   {thread.failureModes.map((mode, i) => (
                     <span
                       key={i}
-                      className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                      className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded bg-[var(--surface-accent-orange)] text-[var(--color-accent-orange)]"
                     >
                       {mode}
                     </span>
@@ -236,7 +236,7 @@ function ThreadCard({ thread, type, analysis, isAdversarial, runId, printMode = 
               {thread.ruleViolations.map((v, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center px-2 py-0.5 text-[11px] font-mono font-semibold rounded bg-[var(--surface-error)] text-[var(--color-error)] border border-red-200"
+                  className="inline-flex items-center px-2 py-0.5 text-[11px] font-mono font-semibold rounded bg-[var(--surface-error)] text-[var(--color-error)] border border-[var(--border-error)]"
                   title={v.evidence || undefined}
                 >
                   {v.ruleId}
@@ -311,10 +311,10 @@ function TranscriptBubble({ msg, isGood, printMode = false }: {
       className={cn(
         'border-l-2 rounded-r px-2 py-1 break-inside-avoid',
         isUser
-          ? 'border-l-blue-400 bg-blue-50 dark:bg-blue-900/20'
+          ? 'border-l-[var(--color-info)] bg-[var(--surface-info)]'
           : isGood
-            ? 'border-l-green-400 bg-green-50 dark:bg-green-900/20'
-            : 'border-l-red-400 bg-red-50 dark:bg-red-900/20',
+            ? 'border-l-[var(--color-success)] bg-[var(--surface-success)]'
+            : 'border-l-[var(--color-error)] bg-[var(--surface-error)]',
       )}
     >
       <p className="text-[9px] uppercase tracking-wider font-semibold text-[var(--text-muted)] mb-0.5">

@@ -112,7 +112,7 @@ export function ChatInput({
               'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-accent)] focus-visible:ring-offset-1',
               value.trim() && !disabled
-                ? 'bg-[var(--interactive-primary)] text-white hover:bg-[var(--interactive-primary-hover)]'
+                ? 'bg-[var(--interactive-primary)] text-[var(--text-on-color)] hover:bg-[var(--interactive-primary-hover)]'
                 : 'bg-[var(--interactive-secondary)] text-[var(--text-muted)] cursor-not-allowed'
             )}
             title="Send message"

@@ -364,7 +364,7 @@ export function RubricBuilder({ outputFields, onFieldsChange, onPromptGenerated 
                 <span className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">pts</span>
                 <button
                   onClick={() => removeDimension(dimIdx)}
-                  className="rounded p-1 text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--surface-error)] transition-colors"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -376,7 +376,7 @@ export function RubricBuilder({ outputFields, onFieldsChange, onPromptGenerated 
                   <div key={checkIdx} className="flex items-center gap-2">
                     <button
                       onClick={() => removeCheck(dimIdx, checkIdx)}
-                      className="rounded p-0.5 text-[var(--text-muted)] hover:text-red-400 transition-colors"
+                      className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--color-error)] transition-colors"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -412,7 +412,7 @@ export function RubricBuilder({ outputFields, onFieldsChange, onPromptGenerated 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <Shield className="h-3.5 w-3.5 text-red-400" />
+            <Shield className="h-3.5 w-3.5 text-[var(--color-error)]" />
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">
               Compliance Gates ({rubric.complianceGates.length})
             </h3>
@@ -426,7 +426,7 @@ export function RubricBuilder({ outputFields, onFieldsChange, onPromptGenerated 
         <div className="space-y-1.5">
           {rubric.complianceGates.map((gate, idx) => (
             <div key={idx} className="flex items-center gap-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+              <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-error)] shrink-0" />
               <input
                 value={gate}
                 onChange={(e) => updateGate(idx, e.target.value)}
@@ -435,7 +435,7 @@ export function RubricBuilder({ outputFields, onFieldsChange, onPromptGenerated 
               />
               <button
                 onClick={() => removeGate(idx)}
-                className="rounded p-1 text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--surface-error)] transition-colors"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

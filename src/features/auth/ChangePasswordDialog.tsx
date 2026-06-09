@@ -76,7 +76,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
           />
           <PasswordStrengthIndicator password={newPassword} className="mt-2" />
           {currentPassword && newPassword && currentPassword === newPassword && (
-            <p className="mt-1 text-[11px] text-red-400">New password must be different from current password</p>
+            <p className="mt-1 text-[11px] text-[var(--color-error)]">New password must be different from current password</p>
           )}
         </div>
         <div>
@@ -90,7 +90,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
             placeholder="Re-enter new password"
           />
           {confirmPassword.length > 0 && newPassword !== confirmPassword && (
-            <p className="mt-1 text-[11px] text-red-400">Passwords do not match</p>
+            <p className="mt-1 text-[11px] text-[var(--color-error)]">Passwords do not match</p>
           )}
         </div>
 

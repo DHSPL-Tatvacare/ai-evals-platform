@@ -55,12 +55,12 @@ function nextCheckLabel(schedule: Schedule): string {
 }
 
 const RUN_STATE_STYLES: Record<string, { label: string; classes: string }> = {
-  queued: { label: 'Queued', classes: 'bg-sky-500/15 text-sky-400' },
-  running: { label: 'Running', classes: 'bg-blue-500/15 text-blue-400' },
-  retryable_failed: { label: 'Retrying', classes: 'bg-amber-500/15 text-amber-400' },
-  failed: { label: 'Failed', classes: 'bg-rose-500/15 text-rose-400' },
+  queued: { label: 'Queued', classes: 'bg-[var(--surface-accent-sky)] text-[var(--color-accent-sky)]' },
+  running: { label: 'Running', classes: 'bg-[var(--surface-info)] text-[var(--color-info)]' },
+  retryable_failed: { label: 'Retrying', classes: 'bg-[var(--surface-warning)] text-[var(--color-warning)]' },
+  failed: { label: 'Failed', classes: 'bg-[var(--surface-error)] text-[var(--color-error)]' },
   cancelled: { label: 'Cancelled', classes: 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]' },
-  completed: { label: 'Completed', classes: 'bg-emerald-500/15 text-emerald-400' },
+  completed: { label: 'Completed', classes: 'bg-[var(--surface-success)] text-[var(--color-success)]' },
 };
 
 function LastFireChip({ status }: { status: string | null }) {
@@ -275,7 +275,7 @@ export function ScheduledJobsListPage() {
             className={cn(
               'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
               schedule.enabled
-                ? 'bg-emerald-500/15 text-emerald-400'
+                ? 'bg-[var(--surface-success)] text-[var(--color-success)]'
                 : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]',
               schedule.isPlatformManaged && 'cursor-not-allowed opacity-60',
             )}

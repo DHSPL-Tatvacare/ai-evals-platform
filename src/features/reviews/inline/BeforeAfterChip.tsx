@@ -19,7 +19,7 @@ export function BeforeAfterChip({ before, after, category = 'correctness', size 
       <span className={cn(padding, 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] line-through border-r border-[var(--border-subtle)]')}>
         {before}
       </span>
-      <span className={cn(padding, 'text-white')} style={{ backgroundColor: afterDef.color }}>
+      <span className={cn(padding, 'text-[var(--text-on-color)]')} style={{ backgroundColor: afterDef.color }}>
         {after}
       </span>
     </span>

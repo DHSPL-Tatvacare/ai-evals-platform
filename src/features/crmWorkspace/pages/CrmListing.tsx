@@ -425,8 +425,8 @@ function DirectionBadge({ direction }: { direction: string }) {
       className={cn(
         'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
         isInbound
-          ? 'bg-purple-500/15 text-purple-400'
-          : 'bg-blue-500/15 text-blue-400'
+          ? 'bg-[var(--surface-accent-purple)] text-[var(--color-accent-purple)]'
+          : 'bg-[var(--surface-accent-blue)] text-[var(--color-accent-blue)]'
       )}
     >
       {isInbound ? <PhoneIncoming className="h-3 w-3" /> : <PhoneOutgoing className="h-3 w-3" />}
@@ -442,8 +442,8 @@ function StatusBadge({ status }: { status: string }) {
       className={cn(
         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
         isAnswered
-          ? 'bg-emerald-500/15 text-emerald-400'
-          : 'bg-red-500/15 text-red-400'
+          ? 'bg-[var(--surface-success)] text-[var(--color-success)]'
+          : 'bg-[var(--surface-error)] text-[var(--color-error)]'
       )}
     >
       {isAnswered ? 'Answered' : 'Missed'}

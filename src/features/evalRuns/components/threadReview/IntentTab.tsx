@@ -163,7 +163,7 @@ function IntentRow({
               }
             </button>
             <span
-              className={`shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[0.6rem] font-bold text-white ${
+              className={`shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[0.6rem] font-bold text-[var(--text-on-color)] ${
                 ie.is_correct_intent ? 'bg-[var(--color-success)]' : 'bg-[var(--color-error)]'
               }`}
             >

@@ -325,7 +325,7 @@ export function CallFilterPanel({
       widthClassName="w-[380px]"
       zIndexClassName="z-[var(--z-dropdown)]"
       panelClassName="bg-[var(--bg-primary)] border-l border-[var(--border-default)]"
-      backdropClassName="bg-black/40 backdrop-blur-sm"
+      backdropClassName="bg-[var(--bg-overlay)] backdrop-blur-sm"
     >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)]">
           <h2 id={titleId} className="text-sm font-semibold text-[var(--text-primary)]">Filters</h2>

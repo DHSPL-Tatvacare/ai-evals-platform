@@ -216,8 +216,8 @@ export function SelectCallsStep({
   return (
     <div className="space-y-4">
       {/* Info callout */}
-      <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2.5">
-        <Info className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
+      <div className="flex items-start gap-2.5 rounded-md border border-[var(--border-info)] bg-[var(--surface-info)] px-3 py-2.5">
+        <Info className="h-4 w-4 text-[var(--color-info)] mt-0.5 shrink-0" />
         <p className="text-[12px] text-[var(--text-secondary)]">
           Calls are loaded from synced source data. Picks come from the full synced history; freshness is governed by the scheduled sync.
         </p>
@@ -234,7 +234,7 @@ export function SelectCallsStep({
           <Filter className="h-3.5 w-3.5" />
           Filters
           {filterCount > 0 && (
-            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[11px] font-bold text-white">
+            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-brand-accent)] text-[11px] font-bold text-[var(--text-on-color)]">
               {filterCount}
             </span>
           )}

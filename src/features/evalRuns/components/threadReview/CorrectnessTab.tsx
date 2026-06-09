@@ -196,14 +196,14 @@ function CorrectnessRow({
         </td>
         <td className="py-1.5 px-2 text-center">
           {ce.has_image_context && (
-            <span className="inline-block px-1.5 py-px rounded text-[10px] font-semibold bg-[var(--color-accent-purple)] text-white">
+            <span className="inline-block px-1.5 py-px rounded text-[10px] font-semibold bg-[var(--color-accent-purple)] text-[var(--text-on-color)]">
               IMG
             </span>
           )}
         </td>
         <td className="py-1.5 px-2 text-center">
           {violations > 0 && (
-            <span className="inline-block px-1.5 py-px rounded-full text-[10px] font-semibold bg-[var(--color-error)] text-white">
+            <span className="inline-block px-1.5 py-px rounded-full text-[10px] font-semibold bg-[var(--color-error)] text-[var(--text-on-color)]">
               {violations}
             </span>
           )}

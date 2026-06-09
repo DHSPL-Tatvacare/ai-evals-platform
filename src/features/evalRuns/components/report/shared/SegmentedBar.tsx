@@ -37,7 +37,7 @@ export default function SegmentedBar({
         {filtered.map((seg) => (
           <div
             key={seg.label}
-            className="flex items-center justify-center text-[11px] font-bold text-white min-w-[20px]"
+            className="flex items-center justify-center text-[11px] font-bold text-[var(--text-on-color)] min-w-[20px]"
             style={{ flex: seg.value, backgroundColor: seg.color }}
             title={`${seg.label}: ${formatValue(seg.value)}`}
           >

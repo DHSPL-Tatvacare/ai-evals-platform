@@ -48,7 +48,7 @@ function getExcellentThreshold(schema: EvaluatorOutputField[]): number | null {
 function TypeBadge({ evaluator }: { evaluator: EvaluatorDefinition }) {
   if (evaluator.forkedFrom) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-warning)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-warning)]">
         <GitFork className="h-3 w-3" />
         Forked
       </span>
@@ -57,7 +57,7 @@ function TypeBadge({ evaluator }: { evaluator: EvaluatorDefinition }) {
 
   if (isSystemEvaluator(evaluator)) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-medium text-purple-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-accent-purple)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent-purple)]">
         <Shield className="h-3 w-3" />
         System
       </span>
@@ -65,7 +65,7 @@ function TypeBadge({ evaluator }: { evaluator: EvaluatorDefinition }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-400">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-info)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-info)]">
       <Star className="h-3 w-3" />
       Custom
     </span>
@@ -205,15 +205,15 @@ export function EvaluatorDetailPage() {
     content: (
       <div className="space-y-4 py-3">
         {complianceGates.length > 0 && (
-          <div className="rounded-md border border-red-500/20 bg-red-500/5 p-3">
+          <div className="rounded-md border border-[var(--border-error)] bg-[var(--surface-error)] p-3">
             <div className="mb-2 flex items-center gap-1.5">
-              <Shield className="h-3.5 w-3.5 text-red-400" />
-              <span className="text-xs font-semibold text-red-400">Compliance Gates</span>
+              <Shield className="h-3.5 w-3.5 text-[var(--color-error)]" />
+              <span className="text-xs font-semibold text-[var(--color-error)]">Compliance Gates</span>
             </div>
             <ul className="space-y-1.5">
               {complianceGates.map((gate) => (
                 <li key={gate.key} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
-                  <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />
+                  <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-error)]" />
                   {gate.description}
                 </li>
               ))}
@@ -314,10 +314,10 @@ export function EvaluatorDetailPage() {
 }
 
 const BAND_COLOR_CLASSES: Record<EvaluatorDetailBandColor, string> = {
-  emerald: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
-  blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
-  amber: 'bg-amber-500/10 border-amber-500/20 text-amber-400',
-  red: 'bg-red-500/10 border-red-500/20 text-red-400',
+  emerald: 'bg-[var(--surface-success)] border-[var(--border-success)] text-[var(--color-success)]',
+  blue: 'bg-[var(--surface-info)] border-[var(--border-info)] text-[var(--color-info)]',
+  amber: 'bg-[var(--surface-warning)] border-[var(--border-warning)] text-[var(--color-warning)]',
+  red: 'bg-[var(--surface-error)] border-[var(--border-error)] text-[var(--color-error)]',
 };
 
 function ThresholdCard({ band }: { band: EvaluatorDetailBand }) {

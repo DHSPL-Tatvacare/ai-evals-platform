@@ -258,7 +258,7 @@ export function ChatWidget() {
           className={cn(
             'fixed z-[var(--z-overlay)]',
             'flex h-14 w-14 items-center justify-center rounded-full',
-            'text-white shadow-lg hover:shadow-xl',
+            'text-[var(--text-on-color)] shadow-lg hover:shadow-xl',
           )}
           aria-label={isStreaming ? 'Open Sherlock — responding…' : 'Open Sherlock'}
         >
@@ -269,7 +269,7 @@ export function ChatWidget() {
               aria-hidden="true"
             >
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-info)] opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-[var(--color-info)] border-2 border-white" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-[var(--color-info)] border-2 border-[var(--bg-primary)]" />
             </span>
           )}
         </motion.button>

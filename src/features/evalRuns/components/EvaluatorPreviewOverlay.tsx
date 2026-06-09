@@ -352,7 +352,7 @@ export function EvaluatorPreviewOverlay({
               className={cn(
                 'shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium',
                 isBuiltin
-                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                  ? 'bg-[var(--surface-info)] text-[var(--color-info)]'
                   : 'bg-[var(--color-accent-purple)]/10 text-[var(--color-accent-purple)]',
               )}
             >
@@ -442,7 +442,7 @@ export function EvaluatorPreviewOverlay({
                         <td className="px-3 py-2">
                           <code className="text-[12px] font-mono text-[var(--text-primary)]">{field.key}</code>
                           {field.isMainMetric && (
-                            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium">
+                            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--surface-warning)] text-[var(--color-warning)] font-medium">
                               main
                             </span>
                           )}
@@ -455,9 +455,9 @@ export function EvaluatorPreviewOverlay({
                         <td className="px-3 py-2 text-[var(--text-secondary)]">
                           {field.thresholds ? (
                             <span className="text-[11px]">
-                              <span className="text-green-600">≥{field.thresholds.green}</span>
+                              <span className="text-[var(--color-success)]">≥{field.thresholds.green}</span>
                               {' / '}
-                              <span className="text-yellow-600">≥{field.thresholds.yellow}</span>
+                              <span className="text-[var(--color-warning)]">≥{field.thresholds.yellow}</span>
                             </span>
                           ) : (
                             <span className="text-[var(--text-muted)]">—</span>

@@ -483,7 +483,7 @@ function UserMenu({
           onClose();
           onLogout();
         }}
-        className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors text-red-400 hover:bg-red-500/10 hover:text-red-300"
+        className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-[13px] font-medium transition-colors text-[var(--color-error)] hover:bg-[var(--surface-error)] hover:text-[var(--color-error)]"
       >
         <LogOut className="h-4 w-4" />
         Sign out

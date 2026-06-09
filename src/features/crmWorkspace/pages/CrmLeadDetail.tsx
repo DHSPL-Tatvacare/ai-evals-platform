@@ -738,7 +738,7 @@ export function CrmLeadDetail() {
   const timelineTab = (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       {lead.historyTruncated && (
-        <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-400">
+        <div className="rounded-md border border-[var(--border-warning)] bg-[var(--surface-warning)] px-3 py-2 text-[11px] text-[var(--color-warning)]">
           Showing the first 200 calls — call history may be incomplete. Metrics marked with a warning may be inaccurate.
         </div>
       )}

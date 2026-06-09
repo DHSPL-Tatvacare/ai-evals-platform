@@ -100,8 +100,8 @@ export function DebugFab({ sections, className }: DebugFabProps) {
         className={cn(
           'rounded-full p-2',
           isOpen
-            ? 'bg-orange-500 text-white'
-            : 'bg-orange-500 text-white opacity-75 hover:opacity-100',
+            ? 'bg-[var(--color-accent-orange)] text-[var(--text-on-color)]'
+            : 'bg-[var(--color-accent-orange)] text-[var(--text-on-color)] opacity-75 hover:opacity-100',
           'shadow-[var(--shadow-md)]',
           'transition-colors'
         )}

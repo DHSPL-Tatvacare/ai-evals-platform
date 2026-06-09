@@ -114,7 +114,7 @@ export function InviteUsesPanel({ invite, onClose }: InviteUsesPanelProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--bg-overlay)]" onClick={onClose} />
       <div
         {...ariaProps}
         className="relative w-full max-w-xl bg-[var(--bg-primary)] shadow-xl flex flex-col animate-in slide-in-from-right duration-200"

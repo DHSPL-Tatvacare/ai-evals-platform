@@ -122,11 +122,11 @@ export function ReportZeroState({
       };
   const cardClass = isNeutral
     ? 'border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-primary)]'
-    : 'text-white';
+    : 'text-[var(--text-on-color)]';
   const chipClass = isNeutral
     ? 'border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
-    : 'border border-white/15 bg-white/10 text-white/80';
-  const bodyTextClass = isNeutral ? 'text-[var(--text-secondary)]' : 'text-white/85';
+    : 'border border-[var(--text-on-color)]/15 bg-[var(--text-on-color)]/10 text-[var(--text-on-color)]/80';
+  const bodyTextClass = isNeutral ? 'text-[var(--text-secondary)]' : 'text-[var(--text-on-color)]/85';
 
   const blueprintLabel = config?.name?.trim() || 'Report';
   const sections = sectionsPreview ?? [];

@@ -49,7 +49,7 @@ function BarSegments({
         return (
           <div
             key={key}
-            className="flex items-center justify-center text-[0.64rem] font-semibold text-white min-w-[18px] cursor-default transition-opacity hover:opacity-85"
+            className="flex items-center justify-center text-[0.64rem] font-semibold text-[var(--text-on-color)] min-w-[18px] cursor-default transition-opacity hover:opacity-85"
             style={{
               width: `${widthPct}%`,
               backgroundColor: getVerdictColor(key),

@@ -165,7 +165,7 @@ export function BatchCustomEvaluatorPicker({
                           ? "bg-[var(--interactive-primary)] border-[var(--interactive-primary)]"
                           : "border-[var(--border-default)]"
                       )}>
-                        {isSelected && <Check className="h-3.5 w-3.5 text-white" />}
+                        {isSelected && <Check className="h-3.5 w-3.5 text-[var(--text-on-color)]" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="font-medium text-[var(--text-primary)] truncate">
