@@ -1559,6 +1559,21 @@ async def handle_sync_external_source(job_id, params: dict, *, tenant_id: uuid.U
     queue_class="standard",
     priority=120,
     retry_safe=True,
+    # App-agnostic: any app owning a CRM source connection can schedule this.
+    # The schedule's params (app_id + connection_id + source_objects) target a
+    # specific dataset, so Leads and Activities run on independent cadences.
+    schedulable=True,
+    schedule_app_id="",
+    schedule_label="Data source sync",
+    schedule_description=(
+        "Pulls new and updated records from a connected data source into the "
+        "platform on each run. Target a specific dataset with the connection "
+        "and source objects in the schedule's parameters."
+    ),
+    schedule_default_params={
+        "connection_id": "",
+        "source_objects": [],
+    },
     required_permissions=("orchestration:manage",),
 )
 async def handle_sync_crm_source(job_id, params: dict, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> dict:

@@ -149,7 +149,10 @@ def _override_to_jsonb(override: ScheduleOverride | dict[str, Any] | None) -> di
 
 
 def _validate_workload(app_id: str, job_type: str) -> None:
-    if get_workload(app_id, job_type) is None:
+    # App-agnostic workloads register under app_id="" — any app that owns the
+    # underlying resource (e.g. a CRM connection) can schedule them, so an
+    # exact-app miss falls back to the empty-app registration.
+    if get_workload(app_id, job_type) is None and get_workload("", job_type) is None:
         raise HTTPException(
             status_code=400,
             detail=(

@@ -117,6 +117,8 @@ def _make_schedule(**overrides) -> ScheduledJobDefinition:
         last_fire_job_id=None,
         last_skip_reason=None,
         created_by=uuid.uuid4(),
+        notify_owner_on_failure=False,
+        notify_emails_on_failure=[],
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -146,6 +148,31 @@ async def test_create_schedule_sets_tenant_id_and_next_check_at():
     assert row.next_check_at is not None
     assert db.commits == 1
     assert len(db.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_accepts_app_agnostic_workload_under_any_app():
+    # sync-crm-source registers under app_id="" so any app owning a CRM
+    # connection can schedule a per-dataset sync; validation must fall back to
+    # the app-agnostic workload rather than requiring an exact app match.
+    from app.services.scheduler.workloads import ensure_handler_workloads_registered
+
+    ensure_handler_workloads_registered()
+    auth = _auth()
+    db = _FakeSession()
+    payload = ScheduledJobCreate(
+        app_id="voice-rx",
+        job_type="sync-crm-source",
+        schedule_key="voice-rx-leads",
+        name="Lead sync",
+        cron="0 */6 * * *",
+        params={"connection_id": str(uuid.uuid4()), "source_objects": ["Leads"]},
+    )
+    row = await scheduled_jobs_routes.create_schedule(payload=payload, auth=auth, db=db)
+
+    assert row.app_id == "voice-rx"
+    assert row.job_type == "sync-crm-source"
+    assert db.commits == 1
 
 
 @pytest.mark.asyncio
