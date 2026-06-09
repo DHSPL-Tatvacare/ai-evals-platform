@@ -7,7 +7,10 @@ question→SQL examples and the app/tenant instructions block.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.services.crm.crm_resolved_fragment import CrmResolvedFragment
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,9 @@ class GroundingContext:
     user_message: str
     verified_examples: tuple[VerifiedExampleRef, ...] = field(default_factory=tuple)
     instructions_block: str = ''
+    # Per-tenant resolved CRM fragment (DQ-10): swaps the lead/activity surfaces onto this
+    # tenant's resolved matview for the turn. None when the tenant has no published CRM map.
+    crm_fragment: 'CrmResolvedFragment | None' = None
 
     def telemetry_dict(self) -> dict[str, Any]:
         """Serializable view of the grounding decision for log lines."""
@@ -44,6 +50,7 @@ class GroundingContext:
             'verified_example_ids': [v.id for v in self.verified_examples],
             'instructions_present': bool(self.instructions_block),
             'instructions_chars': len(self.instructions_block),
+            'crm_fragment_version': self.crm_fragment.version if self.crm_fragment else None,
         }
 
 

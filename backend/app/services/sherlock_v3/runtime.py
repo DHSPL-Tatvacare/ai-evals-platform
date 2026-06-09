@@ -97,6 +97,7 @@ async def _compute_grounding(
 ) -> GroundingContext | None:
     try:
         from app.database import async_session
+        from app.services.crm.crm_resolved_fragment import build_crm_fragment
         from app.services.sherlock_v3.instructions import load_instructions
         from app.services.sherlock_v3.verified_queries import retrieve_top_k
 
@@ -111,6 +112,7 @@ async def _compute_grounding(
             instructions_block = await load_instructions(
                 app_id, tenant_id=tenant_id, db=db,
             )
+            crm_fragment = await build_crm_fragment(db, tenant_id=tenant_id, app_id=app_id)
         verified = tuple(
             VerifiedExampleRef(
                 id=str(h.id), question=h.question, sql=h.sql,
@@ -123,6 +125,7 @@ async def _compute_grounding(
             user_message=user_message,
             verified_examples=verified,
             instructions_block=instructions_block,
+            crm_fragment=crm_fragment,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(

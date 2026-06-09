@@ -240,12 +240,8 @@ def _make_submit_sql_handler(
             raw_args=args, parsed_args=parsed,
         )
 
-        from app.services.chat_engine.workbench_catalog import (
-            load_workbench_catalog_strict,
-        )
-
         try:
-            workbench_catalog = load_workbench_catalog_strict(app_id)
+            workbench_catalog = _catalog_for_turn(app_id, grounding)
         except Exception as exc:  # noqa: BLE001 — top-level tool boundary
             logger.exception('sherlock_v3 workbench catalog load failed')
             attempt = Attempt(
@@ -1194,6 +1190,28 @@ async def extract_data_specialist_output(run_result: Any) -> str:
 _MAX_EXEMPLARS = 10
 
 
+def _catalog_for_turn(app_id: str, grounding: GroundingContext | None):
+    """Load the static catalog, composing the tenant's resolved CRM fragment when present.
+
+    The fragment swaps the lead/activity surfaces onto this tenant's resolved matview for the turn
+    (DQ-10). Used by BOTH the prompt builder and the submit_sql pipeline so the bouncer validates
+    against the same composed catalog the LLM was taught. Any compose failure falls back to the
+    static catalog — a tenant without a CRM map is unaffected.
+    """
+    from app.services.chat_engine.workbench_catalog import load_workbench_catalog_strict
+
+    catalog = load_workbench_catalog_strict(app_id)
+    fragment = getattr(grounding, 'crm_fragment', None) if grounding is not None else None
+    if fragment is None:
+        return catalog
+    try:
+        from app.services.crm.crm_resolved_fragment import compose_catalog
+        return compose_catalog(catalog, fragment)
+    except Exception:  # noqa: BLE001 — never let a fragment compose break the turn
+        logger.exception('sherlock_v3 crm fragment compose failed; using static catalog')
+        return catalog
+
+
 def _merge_exemplars(
     verified: tuple[Any, ...],
     static: list[dict[str, str]],
@@ -1233,15 +1251,12 @@ def build_data_specialist(
     The agent has ONE tool: ``submit_sql``. No second LLM call.
     """
     from app.services.chat_engine.sql_agent import MAX_RESULT_ROWS
-    from app.services.chat_engine.workbench_catalog import (
-        load_workbench_catalog_strict,
-        workbench_to_prompt_inputs,
-    )
+    from app.services.chat_engine.workbench_catalog import workbench_to_prompt_inputs
 
     instructions_block: str | None = None
     grounding_header: str | None = None
 
-    catalog = load_workbench_catalog_strict(app_id)
+    catalog = _catalog_for_turn(app_id, grounding)
     schema_context, allowed_tables, role_hints, exemplars = (
         workbench_to_prompt_inputs(catalog)
     )

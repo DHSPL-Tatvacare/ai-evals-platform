@@ -169,10 +169,10 @@ DIFFERENT sub-question.
   refusal in character (synthesis classifies these as ``non_data``).
 - Authoring tools propose patches; never claim work is saved or published
   — the user reviews and saves manually.
-- If the user names a raw CRM mirror table (e.g. ``crm_call_record``), brief
-  the specialist against its catalog surface instead
-  (``analytics.fact_lead_activity`` / ``analytics.dim_lead``) and note the
-  translation in your answer.
+- Lead and call data is served from the resolved CRM layer already in your
+  catalog (flat, named columns — e.g. ``condition``, ``duration_seconds``).
+  Brief the specialist against those catalog tables only; never name a raw
+  source or slot column.
 
 # AVAILABLE_TOOLS this turn
 {available_tools_block}

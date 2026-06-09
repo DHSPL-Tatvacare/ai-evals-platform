@@ -482,14 +482,12 @@ catalog_tables:
         type: text
         data_type: nominal
         semantic_type: category
-  # CRM mirror tables (`crm_call_record`, `crm_lead_record`) are hidden
-  # from this Sherlock-visible catalog by design. The mirrors still exist
-  # physically and back the sync pipeline + CRM workspace pages, but
-  # Sherlock generates SQL only against the fact + dim surface below.
-  # The supervisor prompt's hidden-mirror recovery rule translates user
-  # mentions of `crm_call_record` → `fact_lead_activity` and
-  # `crm_lead_record` → `dim_lead`, and acknowledges the swap in its
-  # answer so the user can correct future prompts.
+  # The lead/activity blocks below are the boot-validated standard tier (Tier 1): universal
+  # columns that never vary by tenant. At a Sherlock turn these surfaces are swapped onto the
+  # per-tenant resolved matview (Tier 2, projected from crm_field_map) so the agent sees flat
+  # named columns like `condition` — never a slot or a raw source. The session overlay is the
+  # only place per-tenant slot meaning enters; boot never sees a per-tenant object. The physical
+  # repoint of these blocks onto the resolved matview lands with the Phase-4 mirror cutover.
   dim_lead:
     pg_schema: analytics
     expected_empty_when: "no leads have been synced for this app yet (fresh DB / freshly-onboarded app)"
