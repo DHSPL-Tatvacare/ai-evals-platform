@@ -36,6 +36,7 @@ export function ApiEvalsView({ listing, aiEval }: ApiEvalsViewProps) {
       <div className="flex-1 min-h-full flex items-center justify-center p-8">
         <EmptyState
           icon={FlaskConical}
+          illustration="empty"
           title="No evaluation data yet"
           description="Run AI evaluation first to see results here."
         />

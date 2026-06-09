@@ -326,6 +326,7 @@ export function WorkflowRunHistoryOverlay({ workflow, onClose }: Props) {
           ) : isEmpty ? (
             <EmptyState
               icon={History}
+              illustration="empty"
               title="No runs yet"
               description={
                 workflow.currentPublishedVersionId

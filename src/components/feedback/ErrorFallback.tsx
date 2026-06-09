@@ -1,5 +1,5 @@
 import { AlertCircle, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { Button, Illustration } from '@/components/ui';
 import { cn } from '@/utils';
 
 interface ErrorFallbackProps {
@@ -22,13 +22,7 @@ export function ErrorFallback({ error, onRetry, title = 'This page flatlined', c
           <AlertCircle className="h-5 w-5 text-[var(--color-error)]" />
         </div>
       ) : (
-        <img
-          src="/error-illustration.png"
-          alt=""
-          aria-hidden="true"
-          className="mb-6 h-auto max-h-[48vh] w-auto max-w-[88vw] select-none"
-          draggable={false}
-        />
+        <Illustration name="error" className="mb-6 h-auto max-h-[48vh] w-auto max-w-[88vw]" />
       )}
 
       <h2 className={cn(

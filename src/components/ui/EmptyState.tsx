@@ -2,9 +2,12 @@ import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/utils';
 import { Button } from './Button';
+import { Illustration, type IllustrationKey } from './Illustration';
 
 interface EmptyStateProps {
   icon: LucideIcon;
+  /** Optional mascot illustration shown instead of the icon on full-size (non-compact) states. */
+  illustration?: IllustrationKey;
   title: string;
   description?: string;
   action?: { label: string; onClick: () => void; isLoading?: boolean };
@@ -32,6 +35,7 @@ interface EmptyStateProps {
 
 export function EmptyState({
   icon: Icon,
+  illustration,
   title,
   description,
   action,
@@ -52,14 +56,18 @@ export function EmptyState({
         className,
       )}
     >
-      <div
-        className={cn(
-          'flex items-center justify-center rounded-full bg-[var(--surface-info)]',
-          compact ? 'h-10 w-10' : 'h-14 w-14',
-        )}
-      >
-        <Icon className={cn('text-[var(--text-brand)]', compact ? 'h-4 w-4' : 'h-5.5 w-5.5')} />
-      </div>
+      {illustration && !compact ? (
+        <Illustration name={illustration} className="h-36 w-auto max-w-[80%]" />
+      ) : (
+        <div
+          className={cn(
+            'flex items-center justify-center rounded-full bg-[var(--surface-info)]',
+            compact ? 'h-10 w-10' : 'h-14 w-14',
+          )}
+        >
+          <Icon className={cn('text-[var(--text-brand)]', compact ? 'h-4 w-4' : 'h-5.5 w-5.5')} />
+        </div>
+      )}
       <div className="text-center space-y-1">
         <p className={cn('font-semibold text-[var(--text-primary)]', compact ? 'text-xs' : 'text-sm')}>
           {title}

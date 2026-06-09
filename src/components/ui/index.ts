@@ -24,6 +24,7 @@ export { VariablePickerPopover } from './VariablePickerPopover';
 export { Alert, type AlertVariant } from './Alert';
 export { StatusDot, type StatusDotStatus } from './StatusDot';
 export { EmptyState } from './EmptyState';
+export { Illustration, type IllustrationKey } from './Illustration';
 export { ScrollToBottom } from './ScrollToBottom';
 export { IconButton } from './IconButton';
 export { DebugFab } from './DebugFab';

@@ -1,4 +1,5 @@
-import { BarChart3, FileText, Search, TrendingUp, Wrench } from 'lucide-react';
+import { BarChart3, FileText, TrendingUp, Wrench } from 'lucide-react';
+import { Illustration } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { PromptTemplate } from '../types';
 
@@ -53,9 +54,7 @@ export function EmptyState({ appId, templates, onSelect }: EmptyStateProps) {
 
       {/* Hero — glyph + headline + sub */}
       <div className="flex items-start gap-3.5">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-brand-subtle)] text-[var(--text-brand)]">
-          <Search className="h-[22px] w-[22px]" strokeWidth={1.6} />
-        </div>
+        <Illustration name="welcome" className="h-14 w-14 shrink-0" />
         <div className="min-w-0 flex-1">
           <h3 className="text-[19px] font-normal leading-[1.2] tracking-[-0.01em] text-[var(--text-primary)]">
             Where shall we <em className="font-normal italic text-[var(--text-brand)]">begin?</em>
