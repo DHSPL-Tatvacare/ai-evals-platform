@@ -5,7 +5,12 @@ import { Button } from '@/components/ui/Button';
 import { Stepper, type StepperStep } from '@/components/ui/Stepper';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import type { CrmDatasetSummary } from '@/services/api/crmSource';
-import { draftToPublishBindings, useCrmMappingDraftStore } from '@/stores/crmMappingDraftStore';
+import {
+  boundTargets,
+  draftToPublishBindings,
+  requiredTargets,
+  useCrmMappingDraftStore,
+} from '@/stores/crmMappingDraftStore';
 
 import { CrmValueMapEditor } from '../crmMapping/CrmValueMapEditor';
 import {
@@ -15,9 +20,9 @@ import {
 } from '../queries/crmSourceQueries';
 import type { DatasetStatus } from './DatasetFooter';
 import { FilterSection } from './FilterSection';
+import { GoLiveSection } from './GoLiveSection';
 import { MapSection } from './MapSection';
 import { PreviewSection } from './PreviewSection';
-import { ScheduleSection } from './ScheduleSection';
 import { SETUP_STEPS, useStepGating, type SetupStep } from './useStepGating';
 import { useDraftAutosave } from './useDraftAutosave';
 
@@ -80,6 +85,10 @@ export function DatasetSections({
     [bindings],
   );
   const publishBindings = useMemo(() => draftToPublishBindings(bindings), [bindings]);
+  const canActivate = useMemo(
+    () => (grain ? requiredTargets(grain).every((t) => boundTargets(bindings).has(t)) : false),
+    [grain, bindings],
+  );
 
   const ready = Boolean(grain && discovered);
 
@@ -146,7 +155,13 @@ export function DatasetSections({
             <PreviewSection connectionId={connectionId} recordType={dataset.recordType} />
           ) : null}
           {step === 'golive' ? (
-            <ScheduleSection connectionId={connectionId} sourceObject={discovered.sourceObject} />
+            <GoLiveSection
+              connectionId={connectionId}
+              recordType={dataset.recordType}
+              sourceObject={discovered.sourceObject}
+              status={status}
+              canActivate={canActivate}
+            />
           ) : null}
 
           <StepFooter

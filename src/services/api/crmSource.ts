@@ -131,6 +131,30 @@ export interface CrmDatasetActivateResult {
   resolvedGrains: string[];
 }
 
+export interface CrmChainJob {
+  id: string;
+  jobType: string;
+  status: string;
+  createdAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface CrmDatasetSchedule {
+  id: string;
+  name: string;
+  cron: string;
+  enabled: boolean;
+  nextCheckAt: string | null;
+  lastFireAt: string | null;
+}
+
+export interface CrmDatasetJobs {
+  recordType: string;
+  jobs: CrmChainJob[];
+  schedule: CrmDatasetSchedule | null;
+}
+
 const base = (connectionId: string) => `/api/crm/connections/${connectionId}`;
 const dataset = (connectionId: string, recordType: string) =>
   `${base(connectionId)}/datasets/${encodeURIComponent(recordType)}`;
@@ -232,6 +256,10 @@ export function saveCrmDatasetDraft(
     method: 'PUT',
     body: JSON.stringify(body),
   });
+}
+
+export function getCrmDatasetJobs(connectionId: string, recordType: string): Promise<CrmDatasetJobs> {
+  return apiRequest(`${dataset(connectionId, recordType)}/jobs`);
 }
 
 export function activateCrmDataset(

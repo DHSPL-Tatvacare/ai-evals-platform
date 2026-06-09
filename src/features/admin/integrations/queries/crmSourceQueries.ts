@@ -7,6 +7,7 @@ import {
   getCrmDatasetPreview,
   getCrmFieldMap,
   getCrmFieldValues,
+  getCrmDatasetJobs,
   getCrmFilterCapabilities,
   getCrmGrains,
   getCrmRawSample,
@@ -19,6 +20,7 @@ import {
   triggerCrmSync,
   triggerCrmUnpack,
   type CrmDatasetActivateResult,
+  type CrmDatasetJobs,
   type CrmDatasetDraftBody,
   type CrmDatasetDraftResult,
   type CrmDatasetSummary,
@@ -60,6 +62,8 @@ export const crmSourceKeys = {
     [...crmSourceKeys.all, 'datasetFieldValues', connectionId, recordType, field] as const,
   datasetPreview: (connectionId: string, recordType: string) =>
     [...crmSourceKeys.all, 'datasetPreview', connectionId, recordType] as const,
+  datasetJobs: (connectionId: string, recordType: string) =>
+    [...crmSourceKeys.all, 'datasetJobs', connectionId, recordType] as const,
 };
 
 export function useCrmGrains() {
@@ -211,6 +215,16 @@ export function useDatasetPreview(connectionId: string, recordType: string | nul
     queryFn: () => getCrmDatasetPreview(connectionId, recordType!),
     enabled: Boolean(connectionId && recordType),
     staleTime: 30_000,
+  });
+}
+
+export function useDatasetJobs(connectionId: string, recordType: string | null) {
+  return useQuery<CrmDatasetJobs>({
+    queryKey: crmSourceKeys.datasetJobs(connectionId, recordType ?? ''),
+    queryFn: () => getCrmDatasetJobs(connectionId, recordType!),
+    enabled: Boolean(connectionId && recordType),
+    // The chain is live during a sync — poll while the panel is open.
+    refetchInterval: 8_000,
   });
 }
 

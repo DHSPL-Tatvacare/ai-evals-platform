@@ -42,7 +42,14 @@ export function FilterSection({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-4">
+      <div>
+        <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">Filter records</h3>
+        <p className="text-[12px] text-[var(--text-secondary)]">
+          Optional. Add conditions on the mapped fields to narrow which records land in this dataset. Leave empty
+          to bring in everything.
+        </p>
+      </div>
       {capabilities.isError ? (
         <Alert variant="warning">
           {summarizeApiErrorBody(decodeApiError(capabilities.error), 'Could not load filterable fields.')}
