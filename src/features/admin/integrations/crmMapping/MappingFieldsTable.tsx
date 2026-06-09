@@ -104,6 +104,7 @@ function NameCell({ field }: { field: string }) {
   if (binding.targetKind === 'slot') {
     return (
       <Input
+        size="sm"
         value={binding.semanticKey}
         onChange={(e) => setSemanticKey(field, e.target.value)}
         placeholder="Field name"

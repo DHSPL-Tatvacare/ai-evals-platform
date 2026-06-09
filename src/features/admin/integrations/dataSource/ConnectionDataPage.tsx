@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Database } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { ConnectionProviderLogo } from '@/components/ui/ConnectionProviderLogo';
 import { PageSurface } from '@/components/ui/PageSurface';
 import { routes } from '@/config/routes';
@@ -64,7 +65,10 @@ function DatasetRail({ datasets, selected, loading, onSelect }: DatasetRailProps
         Datasets
       </div>
       {loading ? (
-        <div className="px-2 py-1 text-[12px] text-[var(--text-secondary)]">Loading…</div>
+        <div className="space-y-1.5 px-1 pt-1">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
       ) : datasets.length === 0 ? (
         <div className="px-2 py-1 text-[12px] text-[var(--text-secondary)]">
           This connection exposes no datasets.

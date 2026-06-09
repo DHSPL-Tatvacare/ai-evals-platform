@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Database } from 'lucide-react';
 
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { Stepper, type StepperStep } from '@/components/ui/Stepper';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
 import type { CrmDatasetSummary } from '@/services/api/crmSource';
@@ -47,9 +49,11 @@ export function DatasetSections({
   onStatusChange: (status: DatasetStatus | null) => void;
 }) {
   const [step, setStep] = useState<SetupStep>('map');
+  // CRM field discovery is a live, read-only provider call — only fire it when the user asks.
+  const [discoverEnabled, setDiscoverEnabled] = useState(false);
 
   const grainsQuery = useCrmGrains();
-  const objectsQuery = useCrmDiscoveredObjects(connectionId, true);
+  const objectsQuery = useCrmDiscoveredObjects(connectionId, discoverEnabled);
   const mappingQuery = useCrmFieldMap(connectionId, dataset.recordType);
 
   const grain = useMemo(
@@ -103,12 +107,12 @@ export function DatasetSections({
   });
 
   const status: DatasetStatus =
-    dataset.status === 'active' ? (dirty ? 'active_edited' : 'active') : 'draft';
+    dataset.status === 'active' ? (ready && dirty ? 'active_edited' : 'active') : 'draft';
 
-  // Surface the derived status to the page header (status pill lives at the top).
+  // Surface status to the header pill — always, so it reflects the dataset even before discovery.
   useEffect(() => {
-    onStatusChange(ready ? status : null);
-  }, [ready, status, onStatusChange]);
+    onStatusChange(status);
+  }, [status, onStatusChange]);
 
   const gating = useStepGating();
 
@@ -137,26 +141,35 @@ export function DatasetSections({
         <Stepper steps={steps} onSelect={setStep} aria-label="Dataset setup" />
       </div>
 
-      {objectsError ? (
-        <div className="px-6">
-          <Alert variant="error" title="Couldn&rsquo;t reach the CRM">
-            {summarizeApiErrorBody(decodeApiError(objectsQuery.error), 'Check the connection credentials and try again.')}
-          </Alert>
-        </div>
-      ) : !ready || !grain || !discovered ? (
-        <p className="px-6 text-[13px] text-[var(--text-secondary)]">Loading dataset…</p>
+      {!grain ? (
+        <LoadingState fill={false} />
       ) : (
         <>
           <div className="flex min-h-0 flex-1 flex-col px-6 pb-2">
             {step === 'map' ? (
-              <MapSection
-                connectionId={connectionId}
-                recordType={dataset.recordType}
-                grain={grain}
-                fields={discovered.fields}
-                mappingLoading={mappingQuery.isLoading}
-                footerActions={continueButton}
-              />
+              discovered ? (
+                <MapSection
+                  connectionId={connectionId}
+                  recordType={dataset.recordType}
+                  grain={grain}
+                  fields={discovered.fields}
+                  mappingLoading={mappingQuery.isLoading}
+                  footerActions={continueButton}
+                />
+              ) : (
+                <DatasetFetchPanel
+                  loading={objectsQuery.isFetching}
+                  error={
+                    objectsError
+                      ? summarizeApiErrorBody(
+                          decodeApiError(objectsQuery.error),
+                          'Couldn’t reach the CRM. Check the connection and try again.',
+                        )
+                      : null
+                  }
+                  onGet={() => setDiscoverEnabled(true)}
+                />
+              )
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {step === 'filter' ? (
@@ -173,7 +186,7 @@ export function DatasetSections({
                   <GoLiveSection
                     connectionId={connectionId}
                     recordType={dataset.recordType}
-                    sourceObject={discovered.sourceObject}
+                    sourceObject={dataset.sourceObject}
                     appId={appId}
                     status={status}
                     canActivate={canActivate}
@@ -202,4 +215,40 @@ const NEXT_STEP: Record<SetupStep, { next: SetupStep; label: string } | null> = 
   preview: { next: 'golive', label: 'Continue to Go live →' },
   golive: null,
 };
+
+/** Map-step gate: discovery is a live CRM call, so it only runs when the user clicks Get data. */
+function DatasetFetchPanel({
+  loading,
+  error,
+  onGet,
+}: {
+  loading: boolean;
+  error: string | null;
+  onGet: () => void;
+}) {
+  if (loading) {
+    return <LoadingState fill={false} message="Fetching fields from the CRM…" />;
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--bg-secondary)]">
+        <Database className="h-5 w-5 text-[var(--text-muted)]" />
+      </div>
+      <div className="max-w-sm space-y-1">
+        <p className="text-[14px] font-medium text-[var(--text-primary)]">Get data from the CRM</p>
+        <p className="text-[13px] text-[var(--text-secondary)]">
+          We&rsquo;ll make a read-only call to fetch this object&rsquo;s fields so you can map them.
+        </p>
+      </div>
+      {error ? (
+        <Alert variant="error" className="max-w-sm">
+          {error}
+        </Alert>
+      ) : null}
+      <Button icon={Database} onClick={onGet}>
+        Get data
+      </Button>
+    </div>
+  );
+}
 

@@ -46,6 +46,10 @@ class _FakeAdapter:
             DiscoveredObject(source_object="Activity", record_type="activity", fields=["AId", "Lead"]),
         ]
 
+    @staticmethod
+    def source_object_for(record_type: str) -> str:
+        return {"lead": "Lead", "activity": "Activity"}[record_type]
+
     def filter_capabilities(self, source_object: str) -> FilterCapability:
         if source_object == "Lead":
             return FilterCapability(source_object="Lead", fields=(

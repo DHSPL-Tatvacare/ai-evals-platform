@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 
 import { Alert } from '@/components/ui/Alert';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { RightSlideOverShell } from '@/components/ui/RightSlideOverShell';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { decodeApiError, summarizeApiErrorBody } from '@/features/orchestration/contracts/errorDecoder';
@@ -61,17 +62,19 @@ export function SampleDataOverlay({
           <Alert variant="error">
             {summarizeApiErrorBody(decodeApiError(sample.error), 'Could not load a sample from the CRM.')}
           </Alert>
-        ) : !sample.isLoading && records.length === 0 ? (
+        ) : sample.isLoading ? (
+          <LoadingState fill={false} message="Fetching a sample from the CRM…" />
+        ) : records.length === 0 ? (
           <Alert variant="info">No records returned. Sync this connection to pull a sample.</Alert>
         ) : view === 'raw' ? (
           <pre className="overflow-auto rounded-[var(--radius-default)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 font-mono text-[12px] text-[var(--text-secondary)]">
-            {sample.isLoading ? 'Loading…' : JSON.stringify(records.map((r) => r.rawPayload), null, 2)}
+            {JSON.stringify(records.map((r) => r.rawPayload), null, 2)}
           </pre>
         ) : (
           <SampleColumnsTable
             columns={tabularColumns(records)}
             rows={tabularRows(records)}
-            loading={sample.isLoading}
+            loading={false}
             emptyTitle="Nothing to show"
             emptyDescription="Sync this connection to pull a sample."
           />

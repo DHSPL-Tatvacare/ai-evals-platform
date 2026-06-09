@@ -431,11 +431,10 @@ async def list_datasets(
     db: AsyncSession = Depends(get_db),
 ):
     row = await _load_connection(db, auth, connection_id)
-    adapter, creds = await _resolve_adapter(db, auth, row)
-    try:
-        discovered = await adapter.discover_objects(creds=creds)
-    except Exception as exc:  # noqa: BLE001 — surface the provider error, never 500
-        raise HTTPException(status_code=502, detail=f"discovery failed: {exc}"[:200])
+    # Datasets (the grains this connection can ingest) are static — listing them must NOT hit the
+    # provider. The adapter only maps a record type to its provider source object (no creds, no call);
+    # live field discovery is a separate, user-initiated step.
+    adapter, _creds = await _resolve_adapter(db, auth, row)
     defs = await _definitions_by_record_type(
         db, tenant_id=auth.tenant_id, app_id=row.app_id, connection_id=connection_id
     )
@@ -450,13 +449,15 @@ async def list_datasets(
     )).all()
     last_sync_by_family = {fam: ts for fam, ts in last_sync}
     datasets = []
-    for o in discovered:
-        d = defs.get(o.record_type)
+    for grain in _UNPACK_GRAINS:
+        rt = grain.record_type
+        source_object = adapter.source_object_for(rt)
+        d = defs.get(rt)
         datasets.append(DatasetSummary(
-            record_type=o.record_type, source_object=o.source_object,
+            record_type=rt, source_object=source_object,
             status=d.status if d else "draft", version=d.version if d else 0,
             has_schedule=bool(d and d.schedule_id is not None),
-            last_sync_at=last_sync_by_family.get(o.source_object[:20]),
+            last_sync_at=last_sync_by_family.get(source_object[:20]),
         ))
     return DatasetsResponse(datasets=datasets)
 

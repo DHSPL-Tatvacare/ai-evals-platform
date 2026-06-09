@@ -1,14 +1,17 @@
 import { type InputHTMLAttributes, type ReactNode, forwardRef } from 'react';
 import { cn } from '@/utils';
 
-interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
   icon?: React.ReactNode;
   rightSlot?: ReactNode;
   error?: string;
+  /** Matches Combobox sizing so inline field rows line up. Defaults to md (h-9). */
+  size?: 'sm' | 'md';
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, icon, rightSlot, error, type, ...props }, ref) => {
+  ({ className, icon, rightSlot, error, type, size = 'md', ...props }, ref) => {
+    const sizeStyles = size === 'sm' ? 'h-7 px-2.5 text-[13px]' : 'h-9 px-3 text-[14px]';
     return (
       <div className="relative">
         {icon && (
@@ -20,7 +23,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           type={type}
           ref={ref}
           className={cn(
-            'h-9 w-full rounded-[6px] border bg-[var(--bg-primary)] px-3 text-[14px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-colors',
+            'w-full rounded-[6px] border bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-colors',
+            sizeStyles,
             'border-[var(--border-default)] focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/50',
             'disabled:cursor-not-allowed disabled:opacity-50',
             icon && 'pl-10',
