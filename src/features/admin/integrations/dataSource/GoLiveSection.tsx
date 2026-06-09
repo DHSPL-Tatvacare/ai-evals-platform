@@ -10,12 +10,14 @@ import { useActivateDataset, useDatasetJobs, useTriggerCrmSync } from '../querie
 import type { DatasetStatus } from './DatasetFooter';
 import { ScheduleSection } from './ScheduleSection';
 
-const JOB_LABELS: Record<string, string> = {
-  'sync-crm-source': 'Sync',
-  'unpack-crm-source': 'Unpack',
-  'populate-crm-resolved': 'Resolved rebuild',
-  'populate-analytics': 'Analytics',
-};
+// The canonical ingestion chain — always shown in full so the operator sees every stage,
+// each annotated with the latest run's status (or "pending" before the first sync).
+const PIPELINE_STAGES: { jobType: string; label: string }[] = [
+  { jobType: 'sync-crm-source', label: 'Sync' },
+  { jobType: 'unpack-crm-source', label: 'Unpack' },
+  { jobType: 'populate-crm-resolved', label: 'Resolved rebuild' },
+  { jobType: 'populate-analytics', label: 'Analytics' },
+];
 
 const STATUS_VARIANT: Record<string, 'success' | 'error' | 'info' | 'warning' | 'neutral'> = {
   completed: 'success',
@@ -48,6 +50,9 @@ export function GoLiveSection({
   const isActive = status === 'active';
   const needsActivate = status === 'draft' || status === 'active_edited';
   const jobs = jobsQuery.data?.jobs ?? [];
+  // jobs arrive newest-first; the first occurrence per type is that stage's latest run.
+  const latestByType = new Map<string, CrmChainJob>();
+  for (const j of jobs) if (!latestByType.has(j.jobType)) latestByType.set(j.jobType, j);
 
   function onActivate() {
     activate.mutate(recordType, {
@@ -101,23 +106,26 @@ export function GoLiveSection({
         <p className="text-[12px] text-[var(--text-secondary)]">
           A sync runs the chain: Sync &rarr; Unpack &rarr; Resolved rebuild &rarr; Analytics.
         </p>
-        {jobs.length === 0 ? (
-          <p className="text-[12px] text-[var(--text-muted)]">No runs yet. Activate or sync to populate the data.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {jobs.map((j: CrmChainJob) => (
+        <ul className="space-y-1.5">
+          {PIPELINE_STAGES.map((stage) => {
+            const job = latestByType.get(stage.jobType);
+            return (
               <li
-                key={j.id}
+                key={stage.jobType}
                 className="flex items-center justify-between gap-3 rounded-[var(--radius-default)] border border-[var(--border-subtle)] px-3 py-2"
               >
-                <span className="text-[13px] text-[var(--text-primary)]">{JOB_LABELS[j.jobType] ?? j.jobType}</span>
-                <Badge variant={STATUS_VARIANT[j.status] ?? 'neutral'} size="sm">
-                  {j.status}
-                </Badge>
+                <span className="text-[13px] text-[var(--text-primary)]">{stage.label}</span>
+                {job ? (
+                  <Badge variant={STATUS_VARIANT[job.status] ?? 'neutral'} size="sm">
+                    {job.status}
+                  </Badge>
+                ) : (
+                  <span className="text-[12px] text-[var(--text-muted)]">pending</span>
+                )}
               </li>
-            ))}
-          </ul>
-        )}
+            );
+          })}
+        </ul>
       </section>
 
       <section className="border-t border-[var(--border-default)] pt-4">

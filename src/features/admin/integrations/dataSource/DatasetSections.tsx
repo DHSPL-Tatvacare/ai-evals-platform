@@ -124,52 +124,56 @@ export function DatasetSections({
   const objectsError = objectsQuery.isError;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5">
-      <Stepper steps={steps} onSelect={setStep} aria-label="Dataset setup" />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-6 pt-5 pb-4">
+        <Stepper steps={steps} onSelect={setStep} aria-label="Dataset setup" />
+      </div>
 
       {objectsError ? (
-        <Alert variant="error" title="Couldn&rsquo;t reach the CRM">
-          {summarizeApiErrorBody(decodeApiError(objectsQuery.error), 'Check the connection credentials and try again.')}
-        </Alert>
+        <div className="px-6">
+          <Alert variant="error" title="Couldn&rsquo;t reach the CRM">
+            {summarizeApiErrorBody(decodeApiError(objectsQuery.error), 'Check the connection credentials and try again.')}
+          </Alert>
+        </div>
       ) : !ready || !grain || !discovered ? (
-        <p className="text-[13px] text-[var(--text-secondary)]">Loading dataset…</p>
+        <p className="px-6 text-[13px] text-[var(--text-secondary)]">Loading dataset…</p>
       ) : (
         <>
-          {step === 'map' ? (
-            <MapSection
-              connectionId={connectionId}
-              recordType={dataset.recordType}
-              grain={grain}
-              fields={discovered.fields}
-              mappingLoading={mappingQuery.isLoading}
-            />
-          ) : null}
-          {step === 'filter' ? (
-            <FilterSection
-              connectionId={connectionId}
-              recordType={dataset.recordType}
-              mappedFields={mappedFields}
-            />
-          ) : null}
-          {step === 'preview' ? (
-            <PreviewSection connectionId={connectionId} recordType={dataset.recordType} />
-          ) : null}
-          {step === 'golive' ? (
-            <GoLiveSection
-              connectionId={connectionId}
-              recordType={dataset.recordType}
-              sourceObject={discovered.sourceObject}
-              status={status}
-              canActivate={canActivate}
-            />
-          ) : null}
+          <div className="flex min-h-0 flex-1 flex-col px-6 pb-2">
+            {step === 'map' ? (
+              <MapSection
+                connectionId={connectionId}
+                recordType={dataset.recordType}
+                grain={grain}
+                fields={discovered.fields}
+                mappingLoading={mappingQuery.isLoading}
+              />
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {step === 'filter' ? (
+                  <FilterSection
+                    connectionId={connectionId}
+                    recordType={dataset.recordType}
+                    mappedFields={mappedFields}
+                  />
+                ) : null}
+                {step === 'preview' ? (
+                  <PreviewSection connectionId={connectionId} recordType={dataset.recordType} />
+                ) : null}
+                {step === 'golive' ? (
+                  <GoLiveSection
+                    connectionId={connectionId}
+                    recordType={dataset.recordType}
+                    sourceObject={discovered.sourceObject}
+                    status={status}
+                    canActivate={canActivate}
+                  />
+                ) : null}
+              </div>
+            )}
+          </div>
 
-          <StepFooter
-            step={step}
-            gating={gating}
-            saving={saving}
-            onContinue={(next) => setStep(next)}
-          />
+          <StepFooter step={step} gating={gating} saving={saving} onContinue={(next) => setStep(next)} />
           <CrmValueMapEditor connectionId={connectionId} recordType={dataset.recordType} />
         </>
       )}
@@ -201,8 +205,8 @@ function StepFooter({
   const enabled = gating.unlocked[advance.next];
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] pt-4">
-      <span className="text-[12px] text-[var(--text-muted)]">{saving ? 'Saving draft…' : null}</span>
+    <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-3">
+      <span className="text-[12px] text-[var(--text-muted)]">{saving ? 'Saving draft…' : ''}</span>
       <Button disabled={!enabled} onClick={() => onContinue(advance.next)}>
         {advance.label}
       </Button>

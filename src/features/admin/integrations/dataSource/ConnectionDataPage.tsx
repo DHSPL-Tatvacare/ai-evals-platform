@@ -143,7 +143,7 @@ export function ConnectionDataPage() {
           loading={datasetsQuery.isLoading}
           onSelect={setPicked}
         />
-        <div className="min-w-0 flex-1 overflow-y-auto p-6">
+        <div className="flex min-w-0 flex-1 flex-col">
           {selectedDataset ? (
             <DatasetSections
               key={selectedDataset.recordType}
@@ -152,7 +152,7 @@ export function ConnectionDataPage() {
               onStatusChange={setStatus}
             />
           ) : (
-            <div className="text-[13px] text-[var(--text-secondary)]">
+            <div className="p-6 text-[13px] text-[var(--text-secondary)]">
               Select a dataset to manage its mapping and filter.
             </div>
           )}

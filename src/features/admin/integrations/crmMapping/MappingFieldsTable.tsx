@@ -8,7 +8,7 @@ import { TableToolbar } from '@/components/ui/TableToolbar';
 import { type CrmGrainSchema } from '@/services/api/crmSource';
 import { slotTypeOf, useCrmMappingDraftStore } from '@/stores/crmMappingDraftStore';
 
-const FIELDS_PER_PAGE = 8;
+const FIELDS_PER_PAGE = 25;
 
 const SLOT_TYPE_LABELS: Array<[string, string]> = [
   ['text', 'Custom · Text'],
