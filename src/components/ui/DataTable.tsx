@@ -89,6 +89,8 @@ interface DataTableProps<T> {
   emptyTitle?: string;
   emptyDescription?: string;
   pagination?: DataTablePagination;
+  /** Rendered on the right of the pagination row — lets a page put its primary action inline. */
+  footerActions?: ReactNode;
   sortState?: SortState;
   onSortChange?: (next: SortState) => void;
   /** Minimum horizontal width for the table. Defaults to 980px. */
@@ -147,6 +149,7 @@ export function DataTable<T>({
   emptyTitle = 'No data',
   emptyDescription,
   pagination,
+  footerActions,
   sortState,
   onSortChange,
   minWidth = '980px',
@@ -287,17 +290,24 @@ export function DataTable<T>({
           </table>
         </div>
       </div>
-      {pagination && (
-        <Pagination
-          page={pagination.page}
-          totalPages={pagination.totalPages}
-          onPageChange={pagination.onPageChange}
-          pageSize={pagination.pageSize}
-          pageSizeOptions={pagination.pageSizeOptions}
-          onPageSizeChange={pagination.onPageSizeChange}
-          totalItems={pagination.totalItems}
-          showCount={pagination.showCount}
-        />
+      {(pagination || footerActions) && (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {pagination && (
+              <Pagination
+                page={pagination.page}
+                totalPages={pagination.totalPages}
+                onPageChange={pagination.onPageChange}
+                pageSize={pagination.pageSize}
+                pageSizeOptions={pagination.pageSizeOptions}
+                onPageSizeChange={pagination.onPageSizeChange}
+                totalItems={pagination.totalItems}
+                showCount={pagination.showCount}
+              />
+            )}
+          </div>
+          {footerActions ? <div className="shrink-0">{footerActions}</div> : null}
+        </div>
       )}
     </div>
   );

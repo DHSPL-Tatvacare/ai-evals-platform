@@ -124,6 +124,12 @@ export function DatasetSections({
   }));
 
   const objectsError = objectsQuery.isError;
+  const advance = NEXT_STEP[step];
+  const continueButton = advance ? (
+    <Button disabled={!gating.unlocked[advance.next]} onClick={() => setStep(advance.next)}>
+      {advance.label}
+    </Button>
+  ) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -149,6 +155,7 @@ export function DatasetSections({
                 grain={grain}
                 fields={discovered.fields}
                 mappingLoading={mappingQuery.isLoading}
+                footerActions={continueButton}
               />
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto">
@@ -176,7 +183,12 @@ export function DatasetSections({
             )}
           </div>
 
-          <StepFooter step={step} gating={gating} saving={saving} onContinue={(next) => setStep(next)} />
+          {step !== 'map' && continueButton ? (
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-3">
+              <span className="text-[12px] text-[var(--text-muted)]">{saving ? 'Saving draft…' : ''}</span>
+              {continueButton}
+            </div>
+          ) : null}
           <CrmValueMapEditor connectionId={connectionId} recordType={dataset.recordType} />
         </>
       )}
@@ -191,28 +203,3 @@ const NEXT_STEP: Record<SetupStep, { next: SetupStep; label: string } | null> = 
   golive: null,
 };
 
-/** One consistent primary action per step (bottom-right). Advances to the next step when unlocked. */
-function StepFooter({
-  step,
-  gating,
-  saving,
-  onContinue,
-}: {
-  step: SetupStep;
-  gating: ReturnType<typeof useStepGating>;
-  saving: boolean;
-  onContinue: (next: SetupStep) => void;
-}) {
-  const advance = NEXT_STEP[step];
-  if (!advance) return null;
-  const enabled = gating.unlocked[advance.next];
-
-  return (
-    <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-3">
-      <span className="text-[12px] text-[var(--text-muted)]">{saving ? 'Saving draft…' : ''}</span>
-      <Button disabled={!enabled} onClick={() => onContinue(advance.next)}>
-        {advance.label}
-      </Button>
-    </div>
-  );
-}

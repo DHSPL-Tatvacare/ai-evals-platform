@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Combobox, type ComboboxOption } from '@/components/ui/Combobox';
@@ -134,11 +134,15 @@ export function MappingFieldsTable({
   fields,
   boundCount,
   loading,
+  headerActions,
+  footerActions,
 }: {
   grain: CrmGrainSchema;
   fields: string[];
   boundCount: number;
   loading: boolean;
+  headerActions?: ReactNode;
+  footerActions?: ReactNode;
 }) {
   const { search, setSearch, page, setPage, totalPages, total, pageItems } = useFilteredFields(fields);
   const options = useMemo(() => targetOptionsFor(grain), [grain]);
@@ -159,9 +163,12 @@ export function MappingFieldsTable({
       <TableToolbar
         search={{ value: search, onChange: setSearch, placeholder: 'Search CRM fields…', label: 'Search CRM fields' }}
         actions={
-          <span className="text-[12px] text-[var(--text-secondary)]">
-            {boundCount} mapped · {total} fields
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="whitespace-nowrap text-[12px] text-[var(--text-secondary)]">
+              {boundCount} mapped · {total} fields
+            </span>
+            {headerActions}
+          </div>
         }
       />
       <div className="flex min-h-0 flex-1 flex-col">
@@ -174,6 +181,7 @@ export function MappingFieldsTable({
           emptyTitle={search ? 'No matching fields' : 'No fields'}
           emptyDescription={search ? 'Try a different search term.' : 'This object exposes no fields to map.'}
           pagination={{ page, totalPages, onPageChange: setPage, pageSize: FIELDS_PER_PAGE, totalItems: total, showCount: true }}
+          footerActions={footerActions}
         />
       </div>
     </div>

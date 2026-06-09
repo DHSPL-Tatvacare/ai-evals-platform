@@ -153,7 +153,6 @@ function LeafEditor({
       <InspectorField label="Field" className="gap-1">
         {fieldOptions && fieldOptions.length > 0 ? (
           <Combobox
-            size="sm"
             value={value.field}
             onChange={(next) => onChange({ ...value, field: next })}
             options={fieldOptions.map((f) => ({ value: f, label: f }))}
@@ -170,7 +169,6 @@ function LeafEditor({
       </InspectorField>
       <InspectorField label="Op" className="gap-1">
         <Combobox
-          size="sm"
           value={value.op}
           onChange={(next) => {
             // Phase 14 / Phase D — value normalisation moved to the parse

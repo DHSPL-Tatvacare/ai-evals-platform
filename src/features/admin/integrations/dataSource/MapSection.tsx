@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { FlaskConical } from 'lucide-react';
 
 import { Alert } from '@/components/ui/Alert';
@@ -20,12 +20,14 @@ export function MapSection({
   grain,
   fields,
   mappingLoading,
+  footerActions,
 }: {
   connectionId: string;
   recordType: string;
   grain: CrmGrainSchema;
   fields: string[];
   mappingLoading: boolean;
+  footerActions?: ReactNode;
 }) {
   const bindings = useCrmMappingDraftStore((s) => s.bindings);
   const [sampleOpen, setSampleOpen] = useState(false);
@@ -34,19 +36,25 @@ export function MapSection({
   const missingRequired = requiredTargets(grain).filter((t) => !bound.has(t));
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex items-center justify-end">
-        <Button variant="secondary" size="sm" icon={FlaskConical} onClick={() => setSampleOpen(true)}>
-          Sample data
-        </Button>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {missingRequired.length > 0 ? (
         <Alert variant="warning">
           Map {missingRequired.map((t) => grainLabel(grain, t)).join(', ')} before publishing — without it
           rows can&rsquo;t be linked.
         </Alert>
       ) : null}
-      <MappingFieldsTable grain={grain} fields={fields} boundCount={bound.size} loading={mappingLoading} />
+      <MappingFieldsTable
+        grain={grain}
+        fields={fields}
+        boundCount={bound.size}
+        loading={mappingLoading}
+        headerActions={
+          <Button variant="secondary" size="sm" icon={FlaskConical} onClick={() => setSampleOpen(true)}>
+            Sample data
+          </Button>
+        }
+        footerActions={footerActions}
+      />
       {sampleOpen ? (
         <SampleDataOverlay
           connectionId={connectionId}
